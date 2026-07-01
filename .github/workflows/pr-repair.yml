@@ -40,6 +40,9 @@ jobs:
   emit-and-handoff:
     name: Emit payload, hand off to PR_Repair
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write  # actions/upload-artifact@v4 uploads via the Actions API
     steps:
       - uses: actions/checkout@v6
         with:
@@ -99,9 +102,14 @@ jobs:
             echo "::warning::L9_IMPLEMENTER_BOT_TOKEN absent — skipping cross-repo dispatch. Payload available as the 'agent-review-payload' artifact."
             exit 0
           fi
-          curl -sS -X POST \
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::pr_number is required when dispatch=true — PR_Repair cannot act on an empty pr_number. Re-run and provide the PR number."
+            exit 1
+          fi
+          curl -sS --fail-with-body -X POST \
             -H "Authorization: Bearer ${HANDOFF_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
             https://api.github.com/repos/Quantum-L9/PR_Repair/dispatches \
             -d "$(printf '{"event_type":"l9-implementer-review","client_payload":{"source_repo":"%s","run_id":"%s","pr_number":"%s"}}' \
                   "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$PR_NUMBER")"
