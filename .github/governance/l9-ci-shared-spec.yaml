@@ -1,0 +1,136 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-ci-core
+# layer: [ci, governance, classifier]
+# tags: [L9_TEMPLATE, classifier, routing, policy]
+# owner: platform
+# status: active
+# --- /L9_META ---
+version: 1
+name: l9-ci-shared-spec
+classifier:
+  canonical_classes:
+    - docs_only
+    - ci_workflow
+    - dependency_python
+    - app_code
+    - security
+    - compliance
+    - unknown_diff
+  unknown_class: unknown_diff
+  docs_only_class: docs_only
+  priority:
+    - security
+    - compliance
+    - ci_workflow
+    - dependency_python
+    - app_code
+    - docs_only
+  taxonomy:
+    docs:
+      class: docs_only
+      reasons:
+        suffix: changed documentation extension
+        prefix: changed documentation path
+        exact: changed documentation/control file
+      suffixes:
+        - .md
+        - .rst
+        - .txt
+        - .adoc
+      prefixes:
+        - docs/
+        - readme/
+        - adr/
+        - changelog
+      exact:
+        - readme
+        - license
+        - license.txt
+    ci_workflow:
+      class: ci_workflow
+      reasons:
+        prefix: changed CI workflow/script/action path
+      prefixes:
+        - .github/workflows/
+        - .github/scripts/
+        - .github/actions/
+    governance:
+      class: compliance
+      reasons:
+        prefix: changed GitHub governance policy/baseline path
+        contains: changed governance or audit policy artifact
+      prefixes:
+        - .github/governance/
+      contains:
+        - audit-baseline
+        - audit-policy
+        - governance
+    dependencies:
+      class: dependency_python
+      reasons:
+        exact: changed Python dependency/build metadata
+        pattern: changed Python requirements file
+      exact:
+        - requirements.txt
+        - requirements-ci.txt
+        - requirements-dev.txt
+        - pyproject.toml
+        - poetry.lock
+        - pdm.lock
+        - uv.lock
+        - pipfile
+        - pipfile.lock
+        - setup.py
+        - setup.cfg
+      name_prefix_suffix:
+        - prefix: requirements-
+          suffix: .txt
+    security:
+      class: security
+      reasons:
+        exact: changed security-sensitive file
+        part: changed security-sensitive path segment
+      exact:
+        - .gitleaks.toml
+        - codeql.yml
+        - codeql.yaml
+        - security.md
+        - security.txt
+      parts:
+        - security
+        - secrets
+        - gitleaks
+        - codeql
+        - trufflehog
+        - bandit
+        - semgrep
+    compliance:
+      class: compliance
+      reasons:
+        prefix: changed contract/schema/policy path
+        contains: changed contract, schema, transport, or compliance artifact
+      prefixes:
+        - contracts/
+        - contract/
+        - schemas/
+        - schema/
+        - policies/
+      contains:
+        - transport-packet
+        - transport_packet
+    app_code:
+      class: app_code
+      reasons:
+        suffix: changed application/source code file
+      suffixes:
+        - .py
+        - .pyi
+        - .js
+        - .ts
+        - .tsx
+        - .jsx
+        - .go
+        - .rs
+        - .java
+        - .cs

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "baseline_name": "l9-ci-governance-baseline",
+  "semantics": {
+    "in_baseline_and_not_touched": "advisory",
+    "in_baseline_and_touched_dangerous": "blocking",
+    "not_in_baseline_and_high_or_critical": "blocking",
+    "not_in_baseline_and_low_medium": "advisory"
+  },
+  "entries": []
+}

@@ -1,0 +1,42 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-ci-core
+# layer: [ci, governance, labels]
+# tags: [L9_TEMPLATE, labels, taxonomy]
+# owner: platform
+# status: active
+# --- /L9_META ---
+version: 1
+labels:
+  automation:
+    - automation:dependabot
+    - automation:github-actions
+    - automation:l9-agent
+  type:
+    - type:ci
+    - type:security
+    - type:docs
+    - type:test
+    - type:deps
+    - type:refactor
+    - type:governance
+    - type:bug
+    - type:feature
+    - type:release
+  area:
+    - area:workflows
+    - area:l9
+    - area:contracts
+    - area:python
+    - area:typing
+    - area:infra
+    - area:runtime
+    - area:transport
+  risk:
+    - risk:blocking
+    - risk:advisory
+    - risk:secret
+    - risk:deploy
+    - risk:contract
+    - risk:runtime
+    - risk:security

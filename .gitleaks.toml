@@ -1,0 +1,93 @@
+title = "L9 Universal Gitleaks Configuration"
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API Key"
+regex = '''sk-[a-zA-Z0-9]{20,}'''
+tags = ["api", "openai"]
+
+[[rules]]
+id = "openai-project-key"
+description = "OpenAI Project API Key"
+regex = '''sk-proj-[a-zA-Z0-9_-]{80,}'''
+tags = ["api", "openai"]
+
+[[rules]]
+id = "perplexity-api-key"
+description = "Perplexity API Key"
+regex = '''pplx-[a-zA-Z0-9]{40,}'''
+tags = ["api", "perplexity"]
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(api[_-]?key|apikey|api[_-]?secret|secret[_-]?key)\s*[=:]\s*['"]?[a-zA-Z0-9_\-]{20,}['"]?'''
+tags = ["api", "generic"]
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS Access Key ID"
+regex = '''AKIA[0-9A-Z]{16}'''
+tags = ["aws"]
+
+[[rules]]
+id = "slack-bot-token"
+description = "Slack Bot Token"
+regex = '''xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9_-]{20,}'''
+tags = ["slack"]
+
+[[rules]]
+id = "postgres-connection-string"
+description = "PostgreSQL Connection String with Password"
+regex = '''postgres(?:ql)?://[^:]+:[^@]+@[^/]+/[^\s'"]+'''
+tags = ["database", "postgres"]
+
+[[rules]]
+id = "redis-connection-string"
+description = "Redis Connection String with Password"
+regex = '''redis://:[^@\s]+@[a-zA-Z0-9._-]+'''
+tags = ["database", "redis"]
+
+[[rules]]
+id = "neo4j-connection"
+description = "Neo4j Connection String with credentials"
+regex = '''(?:neo4j|bolt)(?:\+s(?:sc)?)?://[a-zA-Z0-9]+:[^@\s]+@[a-zA-Z0-9._-]+'''
+tags = ["database", "neo4j"]
+
+[[rules]]
+id = "neo4j-password-assignment"
+description = "Neo4j Password Assignment"
+regex = '''(?i)neo4j[_-]?password\s*[=:]\s*['"]?[a-zA-Z0-9!@#$%^&*()_+=-]{8,}['"]?'''
+tags = ["database", "neo4j"]
+
+[[rules]]
+id = "private-key"
+description = "Private Key"
+regex = '''-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'''
+tags = ["key"]
+
+[[rules]]
+id = "jwt-token"
+description = "JWT Token"
+regex = '''eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}'''
+tags = ["jwt"]
+
+[[rules]]
+id = "sendgrid-api-key"
+description = "SendGrid API Key"
+regex = '''SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}'''
+tags = ["api", "sendgrid"]
+
+[allowlist]
+description = "Universal allowlist. Extend per repo when needed."
+paths = [
+  '''tests/''',
+  '''docs/''',
+  '''\.env\.example''',
+  '''\.env\.template''',
+  '''docker-compose\..*\.yml''',
+  '''.*\.md$''',
+  '''.*\.sarif$''',
+]
+regexTarget = "match"
+regexes = ['''(?i)example|placeholder|dummy|test|fake|mock|sample''']

@@ -1,0 +1,49 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+  "E", "W", "F", "I", "N", "UP", "B", "SIM", "A", "C4", "TCH", "ARG", "PTH", "PL", "TRY", "RUF",
+  "S", "ASYNC", "TID"
+]
+ignore = [
+  "E501", "TRY003", "TRY400", "EM101", "EM102", "PLR0913", "PLR2004",
+  "TC001", "TC002", "TC003", "ARG001", "ARG002", "ARG003", "SIM105"
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "ARG001", "ARG002", "PLR2004"]
+"tools/**" = ["S603", "S607", "PTH123", "PLC0415"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"engine.config.loader.DomainSpecLoader" = {msg = "DomainSpecLoader was renamed to DomainPackLoader. Use DomainPackLoader(config_path=str(SPEC_PATH)). Auto-fix: l9-ci fix-deprecated-api ."}
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+warn_unreachable = true
+check_untyped_defs = true
+ignore_missing_imports = true
+
+# Optional for repos that use Pydantic. Enable only when pydantic is an actual repo dependency.
+# plugins = ["pydantic.mypy"]
+#
+# [tool.pydantic-mypy]
+# init_forbid_extra = true
+# init_typed = true
+# warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "unit: Unit tests with no external dependencies",
+  "integration: Integration tests requiring services",
+  "contract: Contract verification tests",
+]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true

@@ -1,0 +1,68 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-ci-core
+# layer: [ci, governance, routing]
+# tags: [L9_TEMPLATE, routing, policy]
+# owner: platform
+# status: active
+# --- /L9_META ---
+version: 1
+routing_policy:
+  docs_only:
+    blocking:
+      - markdown_lint
+      - syntax_if_code_blocks_changed
+    advisory:
+      - docs_consistency
+    skip:
+      - deep_attestation
+      - broad_audit
+      - heavy_tests
+  ci_workflow:
+    blocking:
+      - workflow_yaml_parse
+      - classifier_integrity
+      - action_permission_check
+      - checkout_version_check
+    advisory:
+      - governance_review
+  dependency_python:
+    blocking:
+      - dependency_install
+      - dependency_review
+      - lockfile_consistency
+    advisory:
+      - sbom
+      - license_report
+  app_code:
+    blocking:
+      - lint
+      - type_check
+      - tests
+      - touched_file_audit
+    conditional:
+      - contract_gate_if_surface_changed
+  security:
+    blocking:
+      - secrets_scan
+      - semgrep
+      - dependency_review
+      - touched_security_audit
+      - fail_closed_high_critical
+    advisory:
+      - scorecard
+  compliance:
+    blocking:
+      - contract_control
+      - architecture_compliance
+      - runtime_attestation
+      - schema_validation
+  unknown_diff:
+    blocking:
+      - validate
+      - lint
+      - tests
+      - semgrep
+      - secrets_scan
+      - contract_control
+    behavior: fail_closed

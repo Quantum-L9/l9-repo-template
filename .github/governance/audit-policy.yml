@@ -1,0 +1,95 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-ci-core
+# layer: [ci, governance, policy]
+# tags: [L9_TEMPLATE, governance, fail-closed, baseline]
+# owner: platform
+# status: active
+# --- /L9_META ---
+version: 1
+policy_name: l9-ci-governance-policy
+scope: repository_ci_governance
+canonical_pr_classes:
+  - docs_only
+  - ci_workflow
+  - dependency_python
+  - app_code
+  - security
+  - compliance
+  - unknown_diff
+forbidden_pr_classes:
+  - security_sensitive
+  - app_or_contract
+  - dependency_only
+classifier:
+  source: .github/scripts/classify_pr.py
+  unknown_diff: fail_closed
+changed_file_scoping:
+  enabled: true
+  inherited_untouched_debt: advisory
+  touched_dangerous_baseline_debt: blocking
+baseline:
+  source: .github/governance/audit-baseline.json
+  malformed_baseline: fail_closed
+  missing_baseline: fail_closed
+thresholds:
+  source: .github/governance/quality-thresholds.yaml
+  malformed_thresholds: fail_closed
+  missing_thresholds: fail_closed
+advisory_findings:
+  - style_only
+  - flatcase_single_english_word
+  - inherited_non_dangerous_debt
+  - docs_only_low_risk
+blocking_findings:
+  - SQL_injection
+  - auth_violations
+  - secrets_exposure
+  - chassis_engine_boundary_violations
+  - runtime_contract_breakage
+  - unknown_HIGH_CRITICAL
+  - DEPR-001
+  - TP-MUTATION-001
+  - ARCH-001
+  - ARCH-002
+  - ARCH-003
+  - HANDLER-SIG-001
+fail_closed:
+  - malformed_policy
+  - malformed_baseline
+  - malformed_audit_json
+  - unknown_HIGH_CRITICAL
+  - private_dependency_auth_failure
+  - missing_l9_contract_scanner
+  - missing_classify_pr_script
+comments:
+  marker: "<!-- l9-ci-audit-marker: v1 -->"
+  bot_identity: github-actions[bot]
+  pattern: find_or_update
+  bounded_length: true
+  stale_comment_cleanup: true
+  must_not_collide_with:
+    - "<!-- l9-audit-marker: v1 -->"
+    - "<!-- l9-implementer-marker: v1 -->"
+    - "<!-- l9-validator-marker: v1 -->"
+dependency_model:
+  ci_ssot_required: true
+  install_from:
+    - requirements-ci.txt
+    - pyproject.lock_equivalent
+  no_silent_install_failures: true
+  token_redaction: true
+trio_wiring:
+  audit_bot: l9-audit-bot
+  implementer_bot: l9-implementer-bot
+  validator_bot: l9-validator-bot
+  ci_audit_bot: l9-ci-audit-bot
+  implementer_validator_tokens_must_differ: true
+  validator_approval_required_label: l9-validated:approve
+required_contract_controls:
+  DEPR-001: fail_closed
+  TP-MUTATION-001: fail_closed
+  ARCH-001: fail_closed
+  ARCH-002: fail_closed
+  ARCH-003: fail_closed
+  HANDLER-SIG-001: fail_closed

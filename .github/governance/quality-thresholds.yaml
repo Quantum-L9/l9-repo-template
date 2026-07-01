@@ -1,0 +1,26 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-ci-core
+# layer: [ci, governance, thresholds]
+# tags: [L9_TEMPLATE, thresholds, fail-closed]
+# owner: platform
+# status: active
+# --- /L9_META ---
+version: 1
+coverage:
+  default: 80
+  l9_ci_sdk: 85
+  l9_ci_core: 80
+  minimum_floor: 80
+  allow_repo_override: true
+  override_requires:
+    - l9-validated:approve
+    - platform_owner_review
+security:
+  max_critical_findings: 0
+  max_high_findings: 0
+rule_modes:
+  transport_packet_contract: blocking
+  direct_node_dispatch: advisory
+  handler_signature: advisory
+  pii_logging: advisory
