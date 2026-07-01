@@ -1,0 +1,100 @@
+# --- L9_META ---
+# origin: l9-ci-enablement (adapted for l9-repo-template)
+# layer: [ci, quality, security]
+# tags: [pr-gate, template-validation, gitguardian]
+# owner: platform
+# status: active
+# --- /L9_META ---
+#
+# PR gate for l9-repo-template.
+#
+# This repo is a THIN template (caller workflow + default config, no package or
+# tests), so the quality gate validates the template's own config instead of
+# running pytest — the real quality pipeline runs in repos created from this
+# template via `ci.yml` (which calls l9-ci-core/pr-pipeline.yml). GitGuardian is
+# added here (a paid tool not covered by the core pipeline). Sonar is a scaffold
+# (`sonar-project.properties`) for downstream repos, not a scan job here — there
+# is no first-party source to analyze.
+
+name: PR Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  template-validation:
+    name: Validate template config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install validators
+        run: python -m pip install --upgrade pip pyyaml
+      - name: Validate caller workflow and default config (blocking)
+        run: |
+          python - <<'PY'
+          import tomllib
+          import yaml
+          from pathlib import Path
+
+          ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+          assert "Quantum-L9/l9-ci-core" in ci, "ci.yml must reference Quantum-L9/l9-ci-core"
+          assert "pr-pipeline.yml" in ci, "ci.yml must call pr-pipeline.yml"
+          assert "secrets: inherit" in ci, "ci.yml must pass 'secrets: inherit'"
+
+          # Tokens are assembled from fragments so this guard file itself does
+          # not contain the literal strings it forbids (which would trip the scan
+          # and violate the repo's zero-legacy-reference invariant).
+          legacy_tokens = ("crypto" + "xdog", "check-packet" + "-envelope")
+          for legacy in legacy_tokens:
+              for p in Path(".").rglob("*"):
+                  if p.is_file() and ".git/" not in str(p) and legacy in p.read_text(encoding="utf-8", errors="ignore"):
+                      raise AssertionError(f"legacy reference {legacy!r} found in {p}")
+
+          for y in (".github/workflows/ci.yml", ".pre-commit-config.yaml"):
+              yaml.safe_load(Path(y).read_text(encoding="utf-8"))
+          tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          tomllib.loads(Path(".gitleaks.toml").read_text(encoding="utf-8"))
+          print("template config OK")
+          PY
+
+  gitguardian:
+    name: GitGuardian secret scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - name: Detect secret availability
+        id: gg
+        env:
+          GG: ${{ secrets.GITGUARDIAN_API_KEY }}
+        run: |
+          if [ -n "$GG" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GITGUARDIAN_API_KEY not visible to this repo — secret scan skipped (see docs/ci-enablement/RUNBOOK.md)."
+          fi
+      - uses: actions/checkout@v6
+        if: steps.gg.outputs.present == 'true'
+        with:
+          fetch-depth: 0
+      - name: ggshield secret scan (blocking when secret is present)
+        if: steps.gg.outputs.present == 'true'
+        uses: GitGuardian/ggshield-action@v1
+        env:
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_PULL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}

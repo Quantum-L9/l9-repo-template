@@ -1,0 +1,107 @@
+# --- L9_META ---
+# origin: l9-ci-enablement (adapted for l9-repo-template)
+# layer: [ci, implementer, handoff, scaffold]
+# tags: [pr-repair, implementer-bot, payload-source, proposal-only, scaffold]
+# owner: platform
+# status: active
+# --- /L9_META ---
+#
+# L9 Implementer handoff — SCAFFOLD for repos created from this template.
+#
+# The Implementer Bot lives in Quantum-L9/PR_Repair and is NOT vendored. This
+# workflow emits agent_review_payload.json (installing the l9-ci SDK via
+# L9_CI_INSTALL_SPEC) and optionally notifies PR_Repair. It never applies fixes,
+# never pushes, never merges. Manual only. In the bare template it fails its
+# preflight until you set L9_CI_INSTALL_SPEC in the new repo — that is intended.
+
+name: PR Repair (handoff to PR_Repair)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number the payload describes (for the handoff event)."
+        required: false
+        type: string
+      dispatch:
+        description: "Notify Quantum-L9/PR_Repair that a payload is ready (requires L9_IMPLEMENTER_BOT_TOKEN)."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-repair-${{ github.event.inputs.pr_number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  emit-and-handoff:
+    name: Emit payload, hand off to PR_Repair
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Preflight — governance doc and install spec
+        env:
+          SPEC: ${{ vars.L9_CI_INSTALL_SPEC }}
+        run: |
+          if [ ! -f AGENT.md ]; then
+            echo "::error::AGENT.md is required by the L9 Implementer contract but is missing."
+            exit 1
+          fi
+          if [ -z "$SPEC" ]; then
+            echo "::error::L9_CI_INSTALL_SPEC is not set. Set the pip spec for l9-ci in this repo (e.g. git+https://github.com/Quantum-L9/l9-ci-sdk.git@v0.1.0)."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install l9-ci (via install spec)
+        env:
+          SDK_TOKEN: ${{ secrets.SDK_TOKEN }}
+          L9_CI_INSTALL_SPEC: ${{ vars.L9_CI_INSTALL_SPEC }}
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "${L9_CI_INSTALL_SPEC}"
+
+      - name: Emit agent_review_payload.json
+        run: |
+          mkdir -p artifacts/ci
+          for stage in validate lint test security; do
+            l9-ci run-pipeline --stage "$stage" --ci github --emit-dir artifacts/ci || true
+          done
+          l9-ci gate \
+            --input-dir artifacts/ci \
+            --required validate,lint,test,security \
+            --emit-agent-payload artifacts/agent_review_payload.json || true
+          test -f artifacts/agent_review_payload.json
+
+      - name: Upload payload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-review-payload
+          path: artifacts/agent_review_payload.json
+          if-no-files-found: error
+
+      - name: Notify PR_Repair (guarded)
+        if: ${{ github.event.inputs.dispatch == 'true' }}
+        env:
+          HANDOFF_TOKEN: ${{ secrets.L9_IMPLEMENTER_BOT_TOKEN }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
+        run: |
+          if [ -z "$HANDOFF_TOKEN" ]; then
+            echo "::warning::L9_IMPLEMENTER_BOT_TOKEN absent — skipping cross-repo dispatch. Payload available as the 'agent-review-payload' artifact."
+            exit 0
+          fi
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${HANDOFF_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Quantum-L9/PR_Repair/dispatches \
+            -d "$(printf '{"event_type":"l9-implementer-review","client_payload":{"source_repo":"%s","run_id":"%s","pr_number":"%s"}}' \
+                  "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$PR_NUMBER")"
