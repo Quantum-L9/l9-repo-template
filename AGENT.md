@@ -14,9 +14,9 @@ workflow internals, or policy engines.
 ## Wire contract
 
 TransportPacket is the only supported wire contract. `PacketEnvelope` is
-superseded and must not be reintroduced. No `cryptoxdog` references, no public
-`check-packet-envelope` command. (The `pr-checks.yml` template-validation gate
-enforces zero legacy references.)
+superseded and must not be reintroduced. Retired legacy tooling has no
+references here, and there is no public packet-envelope command. (The
+`pr-checks.yml` template-validation gate enforces zero legacy references.)
 
 ## Implementer invariants (non-negotiable)
 
