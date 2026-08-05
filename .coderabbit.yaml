@@ -1,0 +1,34 @@
+# CodeRabbit configuration for l9-repo-template (and repos created from it).
+# Schema: https://docs.coderabbit.ai/reference/configuration
+#
+# Install the app from https://github.com/apps/coderabbitai. CODERABBIT_TOKEN is
+# only needed for the API/self-hosted plan, not the SaaS app. Repos created from
+# this template inherit this file — adjust path_instructions to your code.
+
+language: en-US
+early_access: false
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  path_filters:
+    - "!**/__pycache__/**"
+    - "!**/*.pyc"
+  path_instructions:
+    - path: ".github/workflows/**"
+      instructions: >
+        This template stays thin: the caller workflow (ci.yml) must delegate to
+        Quantum-L9/l9-ci-core reusable workflows and never inline SDK logic or
+        workflow internals. Flag any copied policy engine or scanner code, and
+        any pin below checkout@v6 / setup-python@v6.
+
+chat:
+  auto_reply: true
