@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.debugpy",
+    "charliermarsh.ruff",
+    "ms-python.mypy-type-checker",
+    "ms-vscode.makefile-tools",
+    "tamasfe.even-better-toml",
+    "redhat.vscode-yaml"
+  ]
+}

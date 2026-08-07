@@ -14,5 +14,5 @@ build/
 *.egg-info/
 .DS_Store
 .idea/
-.vscode/
+# .vscode/ tracked (thin museum defaults); keep personal overrides local if needed
 *.swp
