@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Gate-routed worker shell via constellation-node-sdk (`app.py` / `handlers.py` / `spec.yaml`)
+- uv Dockerfile + thin docker-compose; `make run` / `dev` / `wait-http` / `preflight`
+- Optional file-inv observability compose (`make obs-up`)
+- `.semgrep/semgrep-rules.yaml` wired into l9-analysis
+- docs/examples (CodeRabbit, SLO alerts) + secret-rotation checklist
 - Parametric Cursor rules renderer (`make render-rules` / `check-rules`) from file-inv DX
 - Thin `.vscode` / `.devcontainer` surfaces
 - Thin L9 Python GitHub Template skeleton (`l9_example_pkg`)

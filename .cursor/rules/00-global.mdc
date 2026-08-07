@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/00-global.mdc.template
 template_sha256: d2d7516dc8afaacc58264108e72221f74ebc6139e948c55a8eaf7b49097c9eb8
 config: plugin-config.yaml
-config_sha256: a61f7a6be623f52e01ed62dfe96c68e013b5e0e87f5fd347a92fa8edd0ae3070
-render_id: 0227efeba701258826a9a8715eec98ae9595c2c9d95ebca97b5e477be0c0b317
+config_sha256: 36a441b8092a18db2bd87eb3aff0905a140a37dcc4f6b13d8d5e61d7d9598580
+render_id: 4c810911f8247e4ea2c556548d8c0247a47c58c103835b0d0501052a99da67ea
 /L9_RENDERED -->
 ---
 description: "l9-repo-template global conventions — generated from domain cartridge"
 globs: ["**/*"]
 alwaysApply: true
 ---
-<!-- L9_META role: cursor_rule tags: [global, generated, l9-python-repo-template] version: 1.0.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [global, generated, l9-gate-worker-template] version: 1.1.0 /L9_META -->
 
 # l9-repo-template Global Agent Conventions
 
@@ -32,6 +32,7 @@ alwaysApply: true
 - `.l9/ci-pin`
 - `scripts/sync_ci_from_pack.py`
 - `scripts/bootstrap_rename.py`
+- `spec.yaml`
 
 ## High-Risk Commands
 
@@ -49,8 +50,8 @@ Run in this order:
 ## Repo Cartridge
 
 - Repo: `l9-repo-template`
-- Domain: `l9-python-repo-template`
+- Domain: `l9-gate-worker-template`
 - Package: `l9_example_pkg`
-- App entrypoint: `n/a`
+- App entrypoint: `l9_example_pkg.app:app`
 - Python: `3.12`
 - Venv: `.venv/bin/python`

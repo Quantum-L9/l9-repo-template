@@ -15,7 +15,6 @@ DENY_DIRS = (
     "client",
     "database",
     "deploy",
-    "observability",
     "example_service",
     "tools",
 )
@@ -32,12 +31,22 @@ REQUIRED = (
     "AGENTS.md",
     "ARCHITECTURE.md",
     "TEMPLATE_INVENTORY.md",
+    "spec.yaml",
+    "Dockerfile",
+    "docker-compose.yml",
+    ".env.example",
     "src/l9_example_pkg/__init__.py",
+    "src/l9_example_pkg/app.py",
+    "src/l9_example_pkg/handlers.py",
     "scripts/sync_ci_from_pack.py",
     "scripts/bootstrap_rename.py",
     "scripts/inventory_check.py",
-    "plugin-config.yaml",
     "scripts/render_cursor_rules.py",
+    "scripts/wait_for_http.py",
+    "scripts/preflight_local_env.py",
+    "plugin-config.yaml",
+    ".semgrep/semgrep-rules.yaml",
+    "observability/docker-compose.observability.yml",
 )
 
 

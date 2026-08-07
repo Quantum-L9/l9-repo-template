@@ -101,6 +101,25 @@ def patch_lint_test(text: str) -> str:
     return text.replace(marker, addition)
 
 
+def patch_analysis_semgrep(text: str) -> str:
+    """Ensure local .semgrep/semgrep-rules.yaml is included in semgrep scan."""
+    marker = "--config .semgrep/semgrep-rules.yaml"
+    if marker in text:
+        return text
+    needle = "semgrep scan \
+"
+    if needle not in text:
+        print("warning: analysis semgrep needle not found", file=sys.stderr)
+        return text
+    return text.replace(
+        needle,
+        "semgrep scan \
+            --config .semgrep/semgrep-rules.yaml \
+",
+        1,
+    )
+
+
 def validate_workflow(path: Path, text: str) -> None:
     for line in text.splitlines():
         for pattern in FORBIDDEN_USES_LINE:
@@ -147,6 +166,8 @@ def main() -> int:
         workflow_path = Path(".github/workflows") / dest_name
         if dest_name == "l9-lint-test.yml":
             text = patch_lint_test(text)
+        if dest_name == "l9-analysis.yml":
+            text = patch_analysis_semgrep(text)
         validate_workflow(workflow_path, text)
         write_bytes(workflow_path, text.encode("utf-8"))
 

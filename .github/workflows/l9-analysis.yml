@@ -98,6 +98,7 @@ jobs:
           # Polyglot / either: keep all three (semgrep skips rules that do not
           # match any files) or use --config auto.
           semgrep scan \
+            --config .semgrep/semgrep-rules.yaml \
             --config p/python \
             --config p/javascript \
             --config p/typescript \
