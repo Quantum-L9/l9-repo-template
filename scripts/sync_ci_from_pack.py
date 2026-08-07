@@ -9,6 +9,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import cast
 
 ROOT = Path(__file__).resolve().parents[1]
 PIN_PATH = ROOT / ".l9" / "ci-pin"
@@ -54,7 +55,7 @@ def load_pins() -> dict[str, str]:
 def fetch(url: str) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "l9-repo-template-sync-ci"})
     with urllib.request.urlopen(req, timeout=60) as resp:
-        return resp.read()
+        return cast(bytes, resp.read())
 
 
 def raw_org(sha: str, rel: str) -> str:
@@ -143,15 +144,15 @@ def main() -> int:
         data = fetch(raw_org(sha, rel))
         text = data.decode("utf-8")
         dest_name = Path(rel).name
-        dest = Path(".github/workflows") / dest_name
+        workflow_path = Path(".github/workflows") / dest_name
         if dest_name == "l9-lint-test.yml":
             text = patch_lint_test(text)
-        validate_workflow(dest, text)
-        write_bytes(dest, text.encode("utf-8"))
+        validate_workflow(workflow_path, text)
+        write_bytes(workflow_path, text.encode("utf-8"))
 
-    for src, dest in TEMPLATES:
-        data = fetch(raw_org(sha, src))
-        write_bytes(Path(dest), data)
+    for src_rel, dest_rel in TEMPLATES:
+        data = fetch(raw_org(sha, src_rel))
+        write_bytes(Path(dest_rel), data)
 
     # Core file only — pack does not ship requirements-consumer-ci.txt
     write_bytes(Path("requirements-consumer-ci.txt"), fetch_consumer_requirements(pins))
