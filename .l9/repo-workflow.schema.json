@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.dev/schemas/repo-workflow/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "metadata",
+    "authority",
+    "repository",
+    "commands",
+    "push",
+    "pull_request",
+    "clean_paths",
+    "workspace",
+    "automation",
+    "change_policy",
+    "agent_contracts",
+    "reporting",
+    "status"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "./repo-workflow.schema.json"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protected_branches",
+        "require_pull_request"
+      ],
+      "properties": {
+        "protected_branches": {
+          "$ref": "#/$defs/nonEmptyUniqueStrings"
+        },
+        "require_pull_request": {
+          "const": true
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "setup",
+        "validate",
+        "check",
+        "test"
+      ],
+      "properties": {
+        "setup": {
+          "$ref": "#/$defs/argvMatrix"
+        },
+        "validate": {
+          "$ref": "#/$defs/argvMatrix"
+        },
+        "check": {
+          "$ref": "#/$defs/argvMatrix"
+        },
+        "test": {
+          "$ref": "#/$defs/argvMatrix"
+        }
+      }
+    },
+    "push": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_check",
+        "require_clean_worktree",
+        "reject_force_push",
+        "reject_protected_branch",
+        "set_upstream",
+        "lockfile_command",
+        "rebase_before_push"
+      ],
+      "properties": {
+        "run_check": {
+          "const": true
+        },
+        "require_clean_worktree": {
+          "const": true
+        },
+        "reject_force_push": {
+          "const": true
+        },
+        "reject_protected_branch": {
+          "const": true
+        },
+        "set_upstream": {
+          "type": "boolean"
+        },
+        "lockfile_command": {
+          "$ref": "#/$defs/argv"
+        },
+        "rebase_before_push": {
+          "type": "boolean"
+        }
+      }
+    },
+    "pull_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base",
+        "draft_by_default"
+      ],
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "draft_by_default": {
+          "type": "boolean"
+        }
+      }
+    },
+    "clean_paths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "allow_override"
+      ],
+      "properties": {
+        "default": {
+          "const": "."
+        },
+        "allow_override": {
+          "const": true
+        }
+      }
+    },
+    "automation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lock"
+      ],
+      "properties": {
+        "lock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "stale_after_seconds"
+          ],
+          "properties": {
+            "name": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "stale_after_seconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "change_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gate_order",
+        "gates",
+        "companion_rules"
+      ],
+      "properties": {
+        "gate_order": {
+          "$ref": "#/$defs/nonEmptyUniqueStrings"
+        },
+        "gates": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/gate"
+          }
+        },
+        "companion_rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/companionRule"
+          }
+        }
+      }
+    },
+    "agent_contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_files",
+        "reference_requirements"
+      ],
+      "properties": {
+        "required_files": {
+          "$ref": "#/$defs/nonEmptyUniqueStrings"
+        },
+        "reference_requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/referenceRequirement"
+          }
+        }
+      }
+    },
+    "reporting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_check_json",
+        "agent_check_markdown",
+        "capture_limit_chars"
+      ],
+      "properties": {
+        "agent_check_json": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "agent_check_markdown": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "capture_limit_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 1000000
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fetch_remote"
+      ],
+      "properties": {
+        "fetch_remote": {
+          "type": "boolean"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "artifact_version",
+        "contract_status",
+        "beneficiary",
+        "authority_scope"
+      ],
+      "properties": {
+        "artifact_id": {
+          "const": "l9-ci-core-repository-execution-runtime"
+        },
+        "artifact_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "contract_status": {
+          "const": "authoritative"
+        },
+        "beneficiary": {
+          "const": "Quantum-L9/l9-ci-core"
+        },
+        "authority_scope": {
+          "const": "repository-execution"
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_authorities",
+        "component_authority",
+        "component_schema",
+        "generated_artifacts",
+        "derived_documents",
+        "dependency_manifests"
+      ],
+      "properties": {
+        "target_authorities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safeRelativePath"
+          }
+        },
+        "component_authority": {
+          "const": ".l9/repo-workflow.json"
+        },
+        "component_schema": {
+          "const": ".l9/repo-workflow.schema.json"
+        },
+        "generated_artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safeRelativePath"
+          }
+        },
+        "derived_documents": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safeRelativePath"
+          }
+        },
+        "dependency_manifests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target_required",
+            "component_bundled"
+          ],
+          "properties": {
+            "target_required": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/safeRelativePath"
+              }
+            },
+            "component_bundled": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/safeRelativePath"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nonEmptyUniqueStrings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "argv": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "argvNonEmpty": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "argvMatrix": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/argvNonEmpty"
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "match_any_prefix",
+        "blocking",
+        "commands"
+      ],
+      "properties": {
+        "match_any_prefix": {
+          "$ref": "#/$defs/prefixes"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "commands": {
+          "$ref": "#/$defs/argvMatrix"
+        }
+      }
+    },
+    "companionRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "match_any_prefix",
+        "message"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "match_any_prefix": {
+          "$ref": "#/$defs/prefixes"
+        },
+        "require_any_prefix": {
+          "$ref": "#/$defs/prefixes"
+        },
+        "require_all_paths": {
+          "$ref": "#/$defs/nonEmptyUniqueStrings"
+        },
+        "message": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "require_any_prefix"
+          ]
+        },
+        {
+          "required": [
+            "require_all_paths"
+          ]
+        }
+      ]
+    },
+    "referenceRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "instruction_files"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "instruction_files": {
+          "$ref": "#/$defs/nonEmptyUniqueStrings"
+        }
+      }
+    },
+    "prefixes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!\\.$).+$"
+    }
+  }
+}

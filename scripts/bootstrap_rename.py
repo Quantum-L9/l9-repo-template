@@ -25,6 +25,8 @@ SKIP_REL_PATHS = {
     "tests/test_bootstrap_rename.py",
     "scripts/bootstrap_rename.py",
     "scripts/render_cursor_rules.py",
+    "MANIFEST.sha256",
+    "docs/repository-execution-runtime.md",
 }
 
 
@@ -49,6 +51,8 @@ def iter_files(root: Path) -> list[Path]:
             continue
         rel = path.relative_to(root).as_posix()
         if rel in SKIP_REL_PATHS:
+            continue
+        if rel.startswith("tools/"):
             continue
         # Regenerated via make render-rules after rename.
         if rel.startswith(".cursor/rules/") and rel.endswith(".mdc") and "/templates/" not in rel:

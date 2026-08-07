@@ -1,0 +1,211 @@
+{
+  "$schema": "./repo-workflow.schema.json",
+  "schema_version": 1,
+  "metadata": {
+    "artifact_id": "l9-ci-core-repository-execution-runtime",
+    "artifact_version": "4.3.1",
+    "contract_status": "authoritative",
+    "beneficiary": "Quantum-L9/l9-ci-core",
+    "authority_scope": "repository-execution"
+  },
+  "authority": {
+    "target_authorities": [
+      "AGENTS.md",
+      ".l9/architecture.yaml",
+      ".l9/ownership.yaml",
+      ".l9/sdk-compatibility.yaml"
+    ],
+    "component_authority": ".l9/repo-workflow.json",
+    "component_schema": ".l9/repo-workflow.schema.json",
+    "generated_artifacts": [
+      "Makefile"
+    ],
+    "derived_documents": [
+      "docs/repository-execution-runtime.md"
+    ],
+    "dependency_manifests": {
+      "target_required": [
+        "pyproject.toml"
+      ],
+      "component_bundled": [
+        "requirements-repo-runtime.txt"
+      ]
+    }
+  },
+  "repository": {
+    "protected_branches": [
+      "main"
+    ],
+    "require_pull_request": true
+  },
+  "commands": {
+    "setup": [
+      [
+        "@python",
+        "-m",
+        "pip",
+        "install",
+        "-e",
+        ".[dev]"
+      ],
+      [
+        "@python",
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "requirements-repo-runtime.txt"
+      ]
+    ],
+    "validate": [
+      [
+        "@python",
+        "scripts/inventory_check.py"
+      ],
+      [
+        "@python",
+        "tools/check_workflow_integrity.py"
+      ]
+    ],
+    "check": [
+      [
+        "@python",
+        "-m",
+        "ruff",
+        "check",
+        "."
+      ],
+      [
+        "@python",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "."
+      ],
+      [
+        "@python",
+        "-m",
+        "mypy",
+        "src"
+      ]
+    ],
+    "test": [
+      [
+        "@python",
+        "-m",
+        "pytest",
+        "-q"
+      ]
+    ]
+  },
+  "push": {
+    "run_check": true,
+    "require_clean_worktree": true,
+    "reject_force_push": true,
+    "reject_protected_branch": true,
+    "set_upstream": true,
+    "lockfile_command": [
+      "uv",
+      "lock",
+      "--check"
+    ],
+    "rebase_before_push": false
+  },
+  "pull_request": {
+    "base": "main",
+    "draft_by_default": false
+  },
+  "clean_paths": [
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache"
+  ],
+  "workspace": {
+    "default": ".",
+    "allow_override": true
+  },
+  "automation": {
+    "lock": {
+      "name": "l9-repo.lock",
+      "stale_after_seconds": 1800
+    }
+  },
+  "change_policy": {
+    "gate_order": [
+      "command-facade"
+    ],
+    "gates": {
+      "command-facade": {
+        "match_any_prefix": [
+          "tools/l9_repo/",
+          ".l9/repo-workflow",
+          "Makefile",
+          "Repo.mk"
+        ],
+        "blocking": true,
+        "commands": [
+          [
+            "@python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/test_makefile_targets.py"
+          ]
+        ]
+      }
+    },
+    "companion_rules": [
+      {
+        "id": "facade-tests",
+        "match_any_prefix": [
+          "tools/l9_repo/",
+          ".l9/repo-workflow",
+          "Makefile",
+          "Repo.mk"
+        ],
+        "require_any_prefix": [
+          "tests/"
+        ],
+        "message": "command-facade changes require tests under tests/"
+      }
+    ]
+  },
+  "agent_contracts": {
+    "required_files": [
+      "AGENTS.md",
+      ".l9/architecture.yaml",
+      ".l9/ownership.yaml",
+      ".l9/sdk-compatibility.yaml",
+      "tools/check_workflow_integrity.py"
+    ],
+    "reference_requirements": [
+      {
+        "target": ".l9/architecture.yaml",
+        "instruction_files": [
+          "AGENTS.md"
+        ]
+      },
+      {
+        "target": ".l9/ownership.yaml",
+        "instruction_files": [
+          "AGENTS.md"
+        ]
+      },
+      {
+        "target": ".l9/sdk-compatibility.yaml",
+        "instruction_files": [
+          "AGENTS.md"
+        ]
+      }
+    ]
+  },
+  "reporting": {
+    "agent_check_json": "artifacts/agent-check-evidence.json",
+    "agent_check_markdown": "artifacts/agent-check-evidence.md",
+    "capture_limit_chars": 20000
+  },
+  "status": {
+    "fetch_remote": true
+  }
+}

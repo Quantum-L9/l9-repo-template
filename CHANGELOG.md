@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Core thin Makefile facade + `Repo.mk` product targets + `gov-*` WS= wrappers
+- Vendored `tools/l9_repo` repository-execution runtime (`L9_REPO_RUNTIME_PIN`)
+- In-repo `make pr-check` (`OPEN_PR=0`) and `make agent-check` via Core runtime
+
 - Gate-routed worker shell via constellation-node-sdk (`app.py` / `handlers.py` / `spec.yaml`)
 - uv Dockerfile + thin docker-compose; `make run` / `dev` / `wait-http` / `preflight`
 - Optional file-inv observability compose (`make obs-up`)

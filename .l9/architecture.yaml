@@ -1,0 +1,20 @@
+schema: l9.architecture-spec/v1
+metadata:
+  repository: Quantum-L9/l9-repo-template
+  status: authoritative
+  role: museum-template
+identity:
+  role: gate-worker-template
+  description: >
+    Thin Python Gate-worker GitHub Template. Product targets live in Repo.mk;
+    repository-execution runtime is vendored from l9-ci-core; governance stays
+    in Cursor-Governance via WS= wrappers.
+boundaries:
+  owns:
+    - worker package under src/
+    - Repo.mk product force-multipliers
+    - org CI sync via make sync-ci
+  does_not_own:
+    - Gate action resolution
+    - Cursor-Governance control plane
+    - peer node routing

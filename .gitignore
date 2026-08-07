@@ -16,3 +16,5 @@ build/
 .idea/
 # .vscode/ tracked (thin museum defaults); keep personal overrides local if needed
 *.swp
+artifacts/
+l9-repo.lock

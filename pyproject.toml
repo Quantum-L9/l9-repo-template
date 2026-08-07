@@ -23,6 +23,7 @@ dev = [
   "pytest-asyncio>=0.24.0",
   "ruff==0.16.1",
   "pyyaml>=6.0.2",
+  "jsonschema==4.26.0",
 ]
 
 [tool.setuptools]
@@ -34,6 +35,7 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+exclude = ["tools/l9_repo"]
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "I", "UP"]

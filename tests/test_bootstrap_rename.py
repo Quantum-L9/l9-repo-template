@@ -33,7 +33,7 @@ def _seed_tree(tmp: Path) -> None:
         'CMD ["uvicorn", "l9_example_pkg.app:app"]\n',
         encoding="utf-8",
     )
-    (tmp / "Makefile").write_text("PKG_APP ?= l9_example_pkg.app:app\n", encoding="utf-8")
+    (tmp / "Repo.mk").write_text("PKG_APP ?= l9_example_pkg.app:app\n", encoding="utf-8")
     (tmp / "README.md").write_text("l9-example-pkg / l9_example_pkg\n", encoding="utf-8")
 
 
@@ -74,8 +74,8 @@ def test_rename_rewrites_and_moves(tmp_path: Path) -> None:
     dockerfile = (tmp_path / "Dockerfile").read_text(encoding="utf-8")
     assert "smoke_pkg.app:app" in dockerfile
     assert "l9_example_pkg" not in dockerfile
-    makefile = (tmp_path / "Makefile").read_text(encoding="utf-8")
-    assert "smoke_pkg.app:app" in makefile
+    repo_mk = (tmp_path / "Repo.mk").read_text(encoding="utf-8")
+    assert "smoke_pkg.app:app" in repo_mk
 
 
 def test_refuse_existing_target(tmp_path: Path) -> None:

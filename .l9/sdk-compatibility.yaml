@@ -1,0 +1,11 @@
+schema: l9.sdk-compatibility/v1
+metadata:
+  status: authoritative
+  consumer: Quantum-L9/l9-repo-template
+  note: >
+    Museum pins Gate_SDK / org pack / Core workflow SHAs in .l9/ci-pin.
+    Repository-execution runtime pin is L9_REPO_RUNTIME_PIN (vendored tools/l9_repo).
+pins_file: .l9/ci-pin
+runtime:
+  artifact_id: l9-ci-core-repository-execution-runtime
+  artifact_version: "4.3.1"
