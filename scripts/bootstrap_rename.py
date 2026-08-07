@@ -24,6 +24,7 @@ SKIP_SUFFIXES = (".egg-info",)
 SKIP_REL_PATHS = {
     "tests/test_bootstrap_rename.py",
     "scripts/bootstrap_rename.py",
+    "scripts/render_cursor_rules.py",
 }
 
 
@@ -48,6 +49,11 @@ def iter_files(root: Path) -> list[Path]:
             continue
         rel = path.relative_to(root).as_posix()
         if rel in SKIP_REL_PATHS:
+            continue
+        # Regenerated via make render-rules after rename.
+        if rel.startswith(".cursor/rules/") and rel.endswith(".mdc") and "/templates/" not in rel:
+            continue
+        if rel == ".cursor/rules/.render-manifest.json":
             continue
         files.append(path)
     return files

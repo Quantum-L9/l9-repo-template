@@ -2,7 +2,8 @@
 
 Thin **Python** GitHub Template for Quantum-L9.
 
-Use this repository instead of `cryptoxdog/golden-repo`.
+Use this repository instead of `cryptoxdog/golden-repo` or the mislabeled
+`cryptoxdog/constellation-file-inventory` FastAPI/OTel body.
 
 ## Quick start (derived repo)
 
@@ -25,6 +26,13 @@ Use this repository instead of `cryptoxdog/golden-repo`.
    make sync-ci
    ```
 
+5. Cursor rules (after editing `plugin-config.yaml` or templates):
+
+   ```bash
+   make render-rules
+   make check-rules
+   ```
+
 ## Org source vs inherit
 
 CI pack, Dependabot, CODEOWNERS, and LICENSE are pulled from
@@ -37,3 +45,4 @@ Community health files (`CONTRIBUTING`, `SECURITY`, `SUPPORT`, `CODE_OF_CONDUCT`
 ## Layout
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) and [TEMPLATE_INVENTORY.md](TEMPLATE_INVENTORY.md).
+Parametric Cursor rules: [docs/PARAMETRIC_CURSOR_RULES.md](docs/PARAMETRIC_CURSOR_RULES.md).

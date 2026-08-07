@@ -1,0 +1,35 @@
+---
+description: "Domain cartridge rule — generated from plugin-config.yaml"
+globs: [".cursor/rules/**", "plugin-config.yaml", "scripts/render_cursor_rules.py"]
+alwaysApply: false
+---
+<!-- L9_META role: cursor_rule tags: [domain-cartridge, generated, ${domain}] version: ${plugin_version} /L9_META -->
+
+# Domain Cartridge Convention
+
+> ${rendered_notice}
+
+## Core Law
+
+Rules must be reusable across repos. Repo-specific values belong in `plugin-config.yaml`, not hardcoded inside `.mdc` files.
+
+## Current Cartridge
+
+- Repo: `${repo_name}`
+- Domain: `${domain}`
+- Plugin version: `${plugin_version}`
+- Config SHA: `${config_sha256_short}`
+
+## Template Variables
+
+The renderer exposes scalar config keys directly and list keys as bullet/list/json variants:
+
+- `${protected_paths}` / `${protected_paths_bullets}` / `${protected_paths_csv}` / `${protected_paths_json}`
+- `${high_risk_commands}` / `${high_risk_commands_bullets}` / `${high_risk_commands_csv}` / `${high_risk_commands_json}`
+- `${ci_gates}` / `${ci_gates_bullets}` / `${ci_gates_csv}` / `${ci_gates_json}`
+
+## Graph Record
+
+```json
+${graph_record_json}
+```

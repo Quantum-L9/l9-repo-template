@@ -1,0 +1,40 @@
+# Domain cartridge for Quantum-L9/l9-repo-template (thin museum).
+# Values instantiate .cursor/rules/templates/*.mdc.template via make render-rules.
+# MUST NOT contain secrets, tokens, or absolute machine paths.
+
+plugin_version: "1.0.0"
+repo_name: "l9-repo-template"
+domain: "l9-python-repo-template"
+
+protected_paths:
+  - "uv.lock"
+  - "pyproject.toml"
+  - ".github/workflows/*.yml"
+  - ".github/governance/*.yaml"
+  - ".l9/ci-pin"
+  - "scripts/sync_ci_from_pack.py"
+  - "scripts/bootstrap_rename.py"
+
+high_risk_commands:
+  - "git push --force"
+  - "rm -rf .venv"
+  - "make sync-ci"
+
+external_endpoint_policy: "STDIO_MCP_ONLY"
+
+ci_gates:
+  - "make verify"
+  - "make check-rules"
+
+test_isolation_pattern: "none"
+package_name: "l9_example_pkg"
+app_entrypoint: "n/a"
+src_layout: true
+python_version: "3.12"
+venv_path: ".venv/bin/python"
+
+graph_record:
+  node_type: "plugin_install"
+  capabilities: ["verify", "sync-ci", "rename", "render-rules"]
+  data_governance_class: "internal"
+  maintenance_owner: "Quantum-L9/platform"

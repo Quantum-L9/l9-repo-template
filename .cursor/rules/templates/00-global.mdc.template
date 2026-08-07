@@ -1,0 +1,40 @@
+---
+description: "${repo_name} global conventions — generated from domain cartridge"
+globs: ["**/*"]
+alwaysApply: true
+---
+<!-- L9_META role: cursor_rule tags: [global, generated, ${domain}] version: ${plugin_version} /L9_META -->
+
+# ${repo_name} Global Agent Conventions
+
+> ${rendered_notice}
+
+## Execution Discipline
+
+- Read every target file completely before modifying.
+- Produce complete files — no stubs, no TODO placeholders.
+- Do not silently alter behavior. State the change and why.
+- If scope touches protected paths, stop and ask for approval.
+
+## Protected Paths
+
+${protected_paths_bullets}
+
+## High-Risk Commands
+
+${high_risk_commands_bullets}
+
+## CI Gates
+
+Run in this order:
+
+${ci_gates_bullets}
+
+## Repo Cartridge
+
+- Repo: `${repo_name}`
+- Domain: `${domain}`
+- Package: `${package_name}`
+- App entrypoint: `${app_entrypoint}`
+- Python: `${python_version}`
+- Venv: `${venv_path}`

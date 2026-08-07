@@ -1,0 +1,35 @@
+---
+description: "${repo_name} autonomous agent guardrails — generated from domain cartridge"
+globs: ["AGENTS.md", "scripts/**", "Makefile"]
+alwaysApply: false
+---
+<!-- L9_META role: cursor_rule tags: [agents, generated, ${domain}] version: ${plugin_version} /L9_META -->
+
+# Agent Guardrails — ${repo_name}
+
+> ${rendered_notice}
+
+## Before Multi-File Tasks
+
+1. State the TODO plan with exact file paths.
+2. Mark every planned change as PENDING, APPLIED, then VERIFIED.
+3. Run the CI gates before declaring completion.
+
+## Stop-and-Ask Conditions
+
+- Any protected path:
+${protected_paths_bullets}
+
+- Any high-risk command:
+${high_risk_commands_bullets}
+
+## CI Gates
+
+${ci_gates_bullets}
+
+## Thin Template Laws
+
+- Package: `${package_name}`
+- Do not introduce FastAPI/OTel/observability kitchen-sink defaults.
+- Do not hand-edit `.github/workflows/*` — run `make sync-ci`.
+- Test isolation pattern: `${test_isolation_pattern}`

@@ -1,0 +1,56 @@
+<!-- L9_RENDERED
+template: .cursor/rules/templates/00-global.mdc.template
+template_sha256: d2d7516dc8afaacc58264108e72221f74ebc6139e948c55a8eaf7b49097c9eb8
+config: plugin-config.yaml
+config_sha256: a61f7a6be623f52e01ed62dfe96c68e013b5e0e87f5fd347a92fa8edd0ae3070
+render_id: 0227efeba701258826a9a8715eec98ae9595c2c9d95ebca97b5e477be0c0b317
+/L9_RENDERED -->
+---
+description: "l9-repo-template global conventions — generated from domain cartridge"
+globs: ["**/*"]
+alwaysApply: true
+---
+<!-- L9_META role: cursor_rule tags: [global, generated, l9-python-repo-template] version: 1.0.0 /L9_META -->
+
+# l9-repo-template Global Agent Conventions
+
+> This file is generated from .cursor/rules/templates/*.mdc.template. Do not edit directly; edit the template or plugin-config.yaml.
+
+## Execution Discipline
+
+- Read every target file completely before modifying.
+- Produce complete files — no stubs, no TODO placeholders.
+- Do not silently alter behavior. State the change and why.
+- If scope touches protected paths, stop and ask for approval.
+
+## Protected Paths
+
+- `uv.lock`
+- `pyproject.toml`
+- `.github/workflows/*.yml`
+- `.github/governance/*.yaml`
+- `.l9/ci-pin`
+- `scripts/sync_ci_from_pack.py`
+- `scripts/bootstrap_rename.py`
+
+## High-Risk Commands
+
+- `git push --force`
+- `rm -rf .venv`
+- `make sync-ci`
+
+## CI Gates
+
+Run in this order:
+
+- `make verify`
+- `make check-rules`
+
+## Repo Cartridge
+
+- Repo: `l9-repo-template`
+- Domain: `l9-python-repo-template`
+- Package: `l9_example_pkg`
+- App entrypoint: `n/a`
+- Python: `3.12`
+- Venv: `.venv/bin/python`

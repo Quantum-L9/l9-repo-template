@@ -36,6 +36,8 @@ REQUIRED = (
     "scripts/sync_ci_from_pack.py",
     "scripts/bootstrap_rename.py",
     "scripts/inventory_check.py",
+    "plugin-config.yaml",
+    "scripts/render_cursor_rules.py",
 )
 
 
