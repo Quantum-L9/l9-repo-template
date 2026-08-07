@@ -27,3 +27,4 @@ sync-ci:
 rename:
 	@test -n "$(PKG)" || (echo "usage: make rename PKG=foo_bar" >&2; exit 2)
 	$(PYTHON) scripts/bootstrap_rename.py --pkg $(PKG)
+	@command -v uv >/dev/null 2>&1 && uv sync --extra dev || $(PYTHON) -m pip install -e ".[dev]"

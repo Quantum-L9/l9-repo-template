@@ -14,8 +14,10 @@ def _seed_tree(tmp: Path) -> None:
     pkg = tmp / "src" / "l9_example_pkg"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(
-        '"""pkg"""\n\n__version__ = "0.1.0"\n\n\ndef hello() -> str:\n'
-        '    return "l9-example-pkg"\n',
+        (
+            '"""pkg"""\n\n__version__ = "0.1.0"\n\n\n'
+            'def hello() -> str:\n    return "l9-example-pkg"\n'
+        ),
         encoding="utf-8",
     )
     (tmp / "pyproject.toml").write_text(

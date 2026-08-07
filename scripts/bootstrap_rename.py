@@ -9,7 +9,22 @@ import sys
 from pathlib import Path
 
 SNAKE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
+SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".eggs",
+}
+SKIP_SUFFIXES = (".egg-info",)
+# Keep the rename self-test fixture on the template identity strings.
+SKIP_REL_PATHS = {
+    "tests/test_bootstrap_rename.py",
+    "scripts/bootstrap_rename.py",
+}
 
 
 def snake_to_kebab(name: str) -> str:
@@ -28,6 +43,11 @@ def iter_files(root: Path) -> list[Path]:
         if not path.is_file():
             continue
         if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if any(part.endswith(SKIP_SUFFIXES) for part in path.parts):
+            continue
+        rel = path.relative_to(root).as_posix()
+        if rel in SKIP_REL_PATHS:
             continue
         files.append(path)
     return files
