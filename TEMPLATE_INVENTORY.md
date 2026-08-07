@@ -1,37 +1,39 @@
 # Template inventory
 
-| Path | Role | Source |
-|------|------|--------|
-| `.l9/ci-pin` | Org / Core workflow / Gate_SDK / runtime pins | local |
-| `Makefile` | Core thin facade (byte-identical to template) | l9-ci-core `L9_REPO_RUNTIME_PIN` |
-| `Repo.mk` | Product targets + `gov-*` WS= wrappers | museum |
-| `tools/l9_repo/` | Repository-execution runtime | l9-ci-core vendored |
-| `.l9/repo-workflow.json` + schema | agent-check matrices | museum (Core schema) |
-| `MANIFEST.sha256` | Runtime surface checksums | regenerated locally |
-| `src/<pkg>/app.py` + `handlers.py` | Worker shell | Gate_SDK example adapted |
-| `spec.yaml` | Gate registration | Gate_SDK example adapted |
-| `Dockerfile` / `docker-compose.yml` | uv api runtime | golden shape, uv rewrite |
-| `scripts/wait_for_http.py` | readiness poll | golden idea |
-| `scripts/preflight_local_env.py` | local env check | golden preflight idea (local only) |
-| `observability/` | Optional local obs stack | constellation-file-inventory |
-| `.semgrep/semgrep-rules.yaml` | Semgrep policy | golden adapted |
-| `docs/examples/` | CodeRabbit + SLO extras | golden surgical |
-| `plugin-config.yaml` + `.cursor/` | Parametric rules | file-inv DX |
-| `.github/` | CI pack | Quantum-L9/.github via sync-ci |
+Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own nodes and deps.
 
-## Inherit
+## Source pins (harvest)
 
-CONTRIBUTING / SECURITY / issue+PR templates from org `.github`.
+| Source | SHA | Role |
+|--------|-----|------|
+| Quantum-L9/L9-Node-Template | `8999fd1` (tree at mine) | DX gold only — REJECT_WRONG_PRODUCT for node/codegen surfaces |
+| Quantum-L9/Constellation.PackageTemplate | `dcb5d24` (tree at mine) | DX gold only — REJECT_WRONG_PRODUCT for constellation_* birth plays |
+| Quantum-L9/l9-ci-core | `L9_REPO_RUNTIME_PIN` in `.l9/ci-pin` | `tools/l9_repo` vendored |
+| Quantum-L9/.github | `ORG_GITHUB_SHA` | CI via sync-ci |
+
+## Surfaces
+
+| Path | Role | Classification | Source |
+|------|------|----------------|--------|
+| `Makefile` / `Repo.mk` / `tools/l9_repo/` | Core facade + product/gov wrappers | ALREADY_HAVE | l9-ci-core |
+| `scripts/inventory_check.py` | Layout + mention drift | PORT_SURGICAL | Node-Template verify_contracts idea |
+| `scripts/repo_hygiene_audit.py` | eval/exec/print + scaffold bans | PORT_SURGICAL | Node-Template audit_engine (generic) |
+| `scripts/birth-runner/` | Use-template → rename → verify | PORT_SURGICAL | PackageTemplate dep-build-runner mechanics |
+| `src/*/settings|errors|health|retry.py` | Optional package helpers | PORT_SURGICAL | PackageTemplate concepts |
+| `.cursor/rules/templates/l9-python-repo.mdc.template` | Generic agent rule | PORT_SURGICAL | Node-Template contract rule rewrite |
+| `.cursor/rules/templates/fastapi.mdc.template` | FastAPI conventions | PORT_SURGICAL | Node-Template fastapi rule |
+| `observability/` | Opt-in local obs compose | ALREADY_HAVE | file-inv |
+| `plugin-config.yaml` + render | Parametric Cursor rules | ALREADY_HAVE | file-inv DX |
+| `create_node_app` / Gate handlers / `spec.yaml` Gate registration | — | REJECT_WRONG_PRODUCT | belongs in L9-Node-Template |
+| `enginehandlers` / `nodespec` / `contracts/` | — | REJECT_WRONG_PRODUCT | Node-Template legacy |
+| PacketEnvelope / Gate peer-HTTP museum gates | — | REJECT_WRONG_PRODUCT | node/SDK law |
+| Justfile | — | REJECT | dual runner |
+| Fix-B OTel Python package | — | REJECT | compose-only obs |
+| PackageTemplate plays / PyPI release | — | REJECT_WRONG_PRODUCT | dep factory |
+| Museum-owned parallel CI | — | REJECT | sync-ci only |
 
 ## Deny at repo root
 
-`engine/`, `chassis/`, `domains/`, `client/`, `database/`, `deploy/`, `example_service/`
+`engine/`, `chassis/`, `domains/`, `client/`, `database/`, `deploy/`, `example_service/`, `contracts/`, `Justfile`
 
-`tools/` is **allowed only** for `tools/l9_repo/` + `tools/check_workflow_integrity.py`.
-
-`observability/` is **allowed** as opt-in local pack (not required for verify).
-
-## Rejected
-
-PacketEnvelope, Poetry, Sonar, golden parallel CI/SBOM/SLSA, golden Loki/Alloy stacks,
-file-inv Fix-B OTel Python, Justfile dual runner, copying Cursor-Governance Makefile/ops.
+`tools/` allowed only for `tools/l9_repo/` + `tools/check_workflow_integrity.py`.

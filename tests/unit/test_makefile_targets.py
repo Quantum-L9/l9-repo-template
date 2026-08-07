@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
 
 def _make(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -33,6 +33,7 @@ def test_help_lists_product_and_facade() -> None:
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
     assert "verify" in out
+    assert "hygiene-check" in out
     assert "pr-check" in out
     assert "gov-pr-check" in out
     assert "agent-check" in out or "Common targets" in out

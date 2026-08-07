@@ -64,6 +64,10 @@
       ],
       [
         "@python",
+        "scripts/repo_hygiene_audit.py"
+      ],
+      [
+        "@python",
         "tools/check_workflow_integrity.py"
       ]
     ],
@@ -150,7 +154,7 @@
             "-m",
             "pytest",
             "-q",
-            "tests/test_makefile_targets.py"
+            "tests/unit/test_makefile_targets.py"
           ]
         ]
       }

@@ -2,19 +2,23 @@ schema: l9.architecture-spec/v1
 metadata:
   repository: Quantum-L9/l9-repo-template
   status: authoritative
-  role: museum-template
+  role: non-constellation-python-template
 identity:
-  role: gate-worker-template
+  role: quantum-l9-python-museum
   description: >
-    Thin Python Gate-worker GitHub Template. Product targets live in Repo.mk;
-    repository-execution runtime is vendored from l9-ci-core; governance stays
-    in Cursor-Governance via WS= wrappers.
+    Thin Quantum-L9 Python GitHub Template for runtimes, side projects, and
+    experiments outside Constellation. Does not own Constellation nodes or
+    constellation_* dependency birth.
+sibling_templates:
+  nodes: Quantum-L9/L9-Node-Template
+  constellation_deps: Quantum-L9/Constellation.PackageTemplate
 boundaries:
   owns:
-    - worker package under src/
+    - generic Python package scaffold under src/
     - Repo.mk product force-multipliers
     - org CI sync via make sync-ci
+    - optional local observability compose
   does_not_own:
-    - Gate action resolution
-    - Cursor-Governance control plane
-    - peer node routing
+    - Constellation node birth / Gate routing / TransportPacket handlers
+    - constellation_* dependency package factory
+    - Cursor-Governance control plane implementation

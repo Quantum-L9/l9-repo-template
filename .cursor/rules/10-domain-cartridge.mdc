@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/10-domain-cartridge.mdc.template
 template_sha256: 9eb1c85dbfa2d44905e1b0cc73c5ab54bb2e0df2b2f4dd386a7e491944406a52
 config: plugin-config.yaml
-config_sha256: 36a441b8092a18db2bd87eb3aff0905a140a37dcc4f6b13d8d5e61d7d9598580
-render_id: 86eb4a8c5864fc181b78f4717a7bef5eefea03efa74b6f44cd123da1755b3c2e
+config_sha256: 8c5d18391bd536b6f70b2bfcaf83f5d2e31fc58ec98934054211fd40bee9f2e1
+render_id: 5799a566943825970d276914cc2a7b6d86e739d634e03532df36b5c912cbc981
 /L9_RENDERED -->
 ---
 description: "Domain cartridge rule — generated from plugin-config.yaml"
 globs: [".cursor/rules/**", "plugin-config.yaml", "scripts/render_cursor_rules.py"]
 alwaysApply: false
 ---
-<!-- L9_META role: cursor_rule tags: [domain-cartridge, generated, l9-gate-worker-template] version: 1.1.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [domain-cartridge, generated, l9-python-museum] version: 1.2.0 /L9_META -->
 
 # Domain Cartridge Convention
 
@@ -23,9 +23,9 @@ Rules must be reusable across repos. Repo-specific values belong in `plugin-conf
 ## Current Cartridge
 
 - Repo: `l9-repo-template`
-- Domain: `l9-gate-worker-template`
-- Plugin version: `1.1.0`
-- Config SHA: `36a441b8092a`
+- Domain: `l9-python-museum`
+- Plugin version: `1.2.0`
+- Config SHA: `8c5d18391bd5`
 
 ## Template Variables
 
@@ -38,14 +38,20 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
 - `.l9/ci-pin`
 - `scripts/sync_ci_from_pack.py`
 - `scripts/bootstrap_rename.py`
-- `spec.yaml`` / `- `uv.lock`
+- `scripts/inventory_check.py`
+- `scripts/repo_hygiene_audit.py`
+- `Makefile`
+- `tools/l9_repo/**`` / `- `uv.lock`
 - `pyproject.toml`
 - `.github/workflows/*.yml`
 - `.github/governance/*.yaml`
 - `.l9/ci-pin`
 - `scripts/sync_ci_from_pack.py`
 - `scripts/bootstrap_rename.py`
-- `spec.yaml`` / ``uv.lock`, `pyproject.toml`, `.github/workflows/*.yml`, `.github/governance/*.yaml`, `.l9/ci-pin`, `scripts/sync_ci_from_pack.py`, `scripts/bootstrap_rename.py`, `spec.yaml`` / `[
+- `scripts/inventory_check.py`
+- `scripts/repo_hygiene_audit.py`
+- `Makefile`
+- `tools/l9_repo/**`` / ``uv.lock`, `pyproject.toml`, `.github/workflows/*.yml`, `.github/governance/*.yaml`, `.l9/ci-pin`, `scripts/sync_ci_from_pack.py`, `scripts/bootstrap_rename.py`, `scripts/inventory_check.py`, `scripts/repo_hygiene_audit.py`, `Makefile`, `tools/l9_repo/**`` / `[
   "uv.lock",
   "pyproject.toml",
   ".github/workflows/*.yml",
@@ -53,7 +59,10 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
   ".l9/ci-pin",
   "scripts/sync_ci_from_pack.py",
   "scripts/bootstrap_rename.py",
-  "spec.yaml"
+  "scripts/inventory_check.py",
+  "scripts/repo_hygiene_audit.py",
+  "Makefile",
+  "tools/l9_repo/**"
 ]`
 - `- `git push --force`
 - `rm -rf .venv`
@@ -65,10 +74,13 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
   "make sync-ci"
 ]`
 - `- `make verify`
-- `make check-rules`` / `- `make verify`
-- `make check-rules`` / ``make verify`, `make check-rules`` / `[
+- `make check-rules`
+- `make hygiene-check`` / `- `make verify`
+- `make check-rules`
+- `make hygiene-check`` / ``make verify`, `make check-rules`, `make hygiene-check`` / `[
   "make verify",
-  "make check-rules"
+  "make check-rules",
+  "make hygiene-check"
 ]`
 
 ## Graph Record
@@ -80,7 +92,8 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
     "sync-ci",
     "rename",
     "render-rules",
-    "worker-shell",
+    "hygiene-check",
+    "birth-runner",
     "obs-optional"
   ],
   "data_governance_class": "internal",

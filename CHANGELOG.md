@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Identity correction: museum is non-Constellation Quantum-L9 Python template (side-by-side with L9-Node-Template and Constellation.PackageTemplate)
+- Default example is thin FastAPI hello + optional PackageTemplate-style helpers (no constellation-node-sdk / create_node_app / handlers / spec.yaml)
+
+### Added
+
+- `scripts/repo_hygiene_audit.py` + Semgrep museum hygiene rules
+- `scripts/birth-runner/` generic Use-template → rename → verify (`OPEN_PR=0`)
+- Parametric Cursor rules `l9-python-repo` + `fastapi` for generic repos
+- Docs: WHEN_TO_USE, VALIDATION, LIFECYCLE, ops/REPO_BIRTH
+- Tests reorganized under `tests/unit` + `tests/integration`
+
 ### Added
 
 - Core thin Makefile facade + `Repo.mk` product targets + `gov-*` WS= wrappers

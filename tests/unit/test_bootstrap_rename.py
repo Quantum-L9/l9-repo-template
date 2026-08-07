@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 RENAME = REPO / "scripts" / "bootstrap_rename.py"
 
 
@@ -21,8 +21,8 @@ def _seed_tree(tmp: Path) -> None:
         'app = "l9_example_pkg.app:app"\n',
         encoding="utf-8",
     )
-    (pkg / "handlers.py").write_text(
-        'ACTION = "example"  # l9_example_pkg\n',
+    (pkg / "settings.py").write_text(
+        'SERVICE = "l9_example_pkg"\n',
         encoding="utf-8",
     )
     (tmp / "pyproject.toml").write_text(
@@ -65,9 +65,9 @@ def test_rename_rewrites_and_moves(tmp_path: Path) -> None:
     app = (tmp_path / "src" / "smoke_pkg" / "app.py").read_text(encoding="utf-8")
     assert "smoke_pkg.app:app" in app
     assert "l9_example_pkg" not in app
-    handlers = (tmp_path / "src" / "smoke_pkg" / "handlers.py").read_text(encoding="utf-8")
-    assert "smoke_pkg" in handlers
-    assert "l9_example_pkg" not in handlers
+    settings = (tmp_path / "src" / "smoke_pkg" / "settings.py").read_text(encoding="utf-8")
+    assert "smoke_pkg" in settings
+    assert "l9_example_pkg" not in settings
     readme = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert "smoke-pkg" in readme
     assert "l9-example-pkg" not in readme

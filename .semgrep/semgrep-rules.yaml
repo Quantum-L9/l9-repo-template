@@ -235,3 +235,24 @@ rules:
     exclude:
       - "tests/**"
       - "venv/**"
+
+
+# ---------------------------------------------------------------------------
+# Museum hygiene (non-Constellation template)
+# ---------------------------------------------------------------------------
+- id: museum-no-eval
+  pattern: eval(...)
+  message: eval() is forbidden in museum src — use explicit parsing.
+  languages: [python]
+  severity: ERROR
+  paths:
+    include:
+      - "src/**/*.py"
+- id: museum-no-exec
+  pattern: exec(...)
+  message: exec() is forbidden in museum src.
+  languages: [python]
+  severity: ERROR
+  paths:
+    include:
+      - "src/**/*.py"

@@ -22,7 +22,7 @@ SKIP_DIRS = {
 SKIP_SUFFIXES = (".egg-info",)
 # Keep the rename self-test fixture on the template identity strings.
 SKIP_REL_PATHS = {
-    "tests/test_bootstrap_rename.py",
+    "tests/unit/test_bootstrap_rename.py",
     "scripts/bootstrap_rename.py",
     "scripts/render_cursor_rules.py",
     "MANIFEST.sha256",

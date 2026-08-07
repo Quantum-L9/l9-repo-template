@@ -1,0 +1,34 @@
+<!-- L9_RENDERED
+template: .cursor/rules/templates/fastapi.mdc.template
+template_sha256: 55e0846e00084def52a6a164bfedf48dc050580f52a07ab12321ca42e96eac6f
+config: plugin-config.yaml
+config_sha256: 8c5d18391bd536b6f70b2bfcaf83f5d2e31fc58ec98934054211fd40bee9f2e1
+render_id: 618de7744204452c6567b252b645ed2a7178a979b0727b5d591632a55e6093a7
+/L9_RENDERED -->
+---
+description: "l9-repo-template FastAPI conventions — generated from museum cartridge"
+globs: ["src/**/*.py"]
+alwaysApply: false
+---
+<!-- L9_META role: cursor_rule tags: [fastapi, generated, l9-python-museum] version: 1.2.0 /L9_META -->
+
+# FastAPI Conventions — l9-repo-template
+
+> This file is generated from .cursor/rules/templates/*.mdc.template. Do not edit directly; edit the template or plugin-config.yaml.
+
+## Route layer
+
+- Prefer `APIRouter` with explicit `prefix` and `tags` as the app grows.
+- Keep business logic out of route handlers; delegate to modules.
+- Keep `GET /v1/health` (or `/healthz`) cheap and unauthenticated.
+- This is **not** a Gate worker — do not require `GATE_URL` or constellation-node-sdk.
+
+## Hygiene
+
+- Do not use `print()` in `src/`; use logging if needed.
+- Do not add OpenTelemetry Python packages by default; optional obs is compose-only.
+
+## Runtime
+
+- App entrypoint: `l9_example_pkg.app:app`
+- Package name: `l9_example_pkg`

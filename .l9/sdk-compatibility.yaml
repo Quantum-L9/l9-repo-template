@@ -1,11 +1,11 @@
 schema: l9.sdk-compatibility/v1
-metadata:
-  status: authoritative
-  consumer: Quantum-L9/l9-repo-template
-  note: >
-    Museum pins Gate_SDK / org pack / Core workflow SHAs in .l9/ci-pin.
-    Repository-execution runtime pin is L9_REPO_RUNTIME_PIN (vendored tools/l9_repo).
-pins_file: .l9/ci-pin
-runtime:
-  artifact_id: l9-ci-core-repository-execution-runtime
-  artifact_version: "4.3.1"
+repository: Quantum-L9/l9-repo-template
+role: non-constellation-python-museum
+notes: >
+  This template does not require constellation-node-sdk. Node and dep
+  compatibility belongs to sibling templates.
+deferred:
+  constellation_nodes: Quantum-L9/L9-Node-Template
+  constellation_deps: Quantum-L9/Constellation.PackageTemplate
+python: ">=3.12"
+package_manager: uv

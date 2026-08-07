@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 RENDER = REPO / "scripts" / "render_cursor_rules.py"
 
 

@@ -1,6 +1,14 @@
 # Architecture — l9-repo-template
 
-Gate-routed worker head-start for Quantum-L9.
+Quantum-L9 Python GitHub Template for **non-Constellation** repos.
+
+## Three-template matrix
+
+| Template | Product role |
+|----------|--------------|
+| L9-Node-Template | Constellation nodes |
+| Constellation.PackageTemplate | `constellation_*` birth dependencies |
+| **l9-repo-template** | Runtimes / side projects / experiments outside Constellation |
 
 ## Layout
 
@@ -8,32 +16,27 @@ Gate-routed worker head-start for Quantum-L9.
 Makefile                 # Core thin facade (identical to Makefile.template)
 Repo.mk                  # Product targets + gov-* WS= wrappers
 tools/l9_repo/           # Vendored repository-execution runtime (Core pin)
-.l9/repo-workflow.json   # setup/check/test matrices for make agent-check
-src/<pkg>/app.py         # create_node_app wiring
-src/<pkg>/handlers.py    # @register_handler domain drop-in
-spec.yaml                # Gate registration spec
-tests/                   # smoke + worker + rename/render + makefile tests
-scripts/                 # verify / sync-ci / rename / render / wait / preflight
-observability/           # optional local Grafana/Prom/Tempo/OTelCol (make obs-up)
-.semgrep/                # local Semgrep policy wired into l9-analysis
+scripts/birth-runner/    # Generic Use-template → rename → verify
+src/<pkg>/               # Thin FastAPI hello + optional helpers
+tests/unit|integration/  # package + template compliance tests
+observability/           # optional local Grafana/Prom/Tempo/OTelCol
 .github/                 # org pack via make sync-ci
-.l9/ci-pin               # org + Core workflow + Gate_SDK + runtime pins
+.l9/ci-pin               # org + Core workflow + runtime pins
 ```
 
-## Ownership split (never dual SSOT)
+## Ownership split
 
 | Surface | Authority |
 |---------|-----------|
-| TransportPacket / Gate egress | constellation-node-sdk (Gate_SDK pin) |
-| CI pack | Quantum-L9/.github via sync-ci |
+| Constellation nodes | L9-Node-Template (sibling) |
+| constellation_* deps | PackageTemplate (sibling) |
 | Product Make targets | `Repo.mk` |
-| Repository-execution facade | vendored `tools/l9_repo` (Core) |
-| Governance pr-check / wiring / secrets | Cursor-Governance via `gov-*` / `WS=` |
-| Local obs compose | file-inv pack (opt-in) |
-| Domain handlers | derived repo |
+| Repository-execution facade | vendored `tools/l9_repo` |
+| Governance pr-check / wiring | Cursor-Governance via `gov-*` / `WS=` |
+| CI pack | Quantum-L9/.github via sync-ci |
 
 ## Force multipliers
 
 `make rename` · `make verify` · `make pr-check` · `make sync-ci` ·
 `make render-rules` · `make run` · `make obs-up` · `make gov-pr-check` ·
-`make agent-check`
+`make agent-check` · `make hygiene-check`

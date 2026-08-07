@@ -13,12 +13,8 @@ services:
       HOST: "0.0.0.0"
       PORT: "8000"
       L9_ENVIRONMENT: ${L9_ENVIRONMENT:-local}
-      L9_NODE_NAME: ${L9_NODE_NAME:-l9-example-pkg}
-      L9_SERVICE_NAME: ${L9_SERVICE_NAME:-l9-example-pkg}
-      L9_SERVICE_VERSION: ${L9_SERVICE_VERSION:-0.1.0}
-      L9_ALLOWED_ACTIONS: ${L9_ALLOWED_ACTIONS:-example}
-      L9_ALLOWED_PACKET_TYPES: ${L9_ALLOWED_PACKET_TYPES:-request}
-      GATE_URL: ${GATE_URL:-}
+      L9_EXAMPLE_ENABLED: ${L9_EXAMPLE_ENABLED:-true}
+      L9_EXAMPLE_SERVICE_NAME: ${L9_EXAMPLE_SERVICE_NAME:-l9-example-pkg}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/v1/health"]

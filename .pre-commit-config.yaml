@@ -24,3 +24,16 @@ repos:
       - id: mypy
         files: ^src/
         additional_dependencies: []
+
+  - repo: local
+    hooks:
+      - id: inventory-check
+        name: museum inventory-check
+        entry: python scripts/inventory_check.py
+        language: system
+        pass_filenames: false
+      - id: hygiene-check
+        name: museum hygiene-check
+        entry: python scripts/repo_hygiene_audit.py
+        language: system
+        pass_filenames: false

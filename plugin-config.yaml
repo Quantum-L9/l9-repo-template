@@ -1,6 +1,6 @@
-plugin_version: "1.1.0"
+plugin_version: "1.2.0"
 repo_name: "l9-repo-template"
-domain: "l9-gate-worker-template"
+domain: "l9-python-museum"
 
 protected_paths:
   - "uv.lock"
@@ -10,7 +10,10 @@ protected_paths:
   - ".l9/ci-pin"
   - "scripts/sync_ci_from_pack.py"
   - "scripts/bootstrap_rename.py"
-  - "spec.yaml"
+  - "scripts/inventory_check.py"
+  - "scripts/repo_hygiene_audit.py"
+  - "Makefile"
+  - "tools/l9_repo/**"
 
 high_risk_commands:
   - "git push --force"
@@ -22,8 +25,9 @@ external_endpoint_policy: "STDIO_MCP_ONLY"
 ci_gates:
   - "make verify"
   - "make check-rules"
+  - "make hygiene-check"
 
-test_isolation_pattern: "clear_handlers"
+test_isolation_pattern: "none"
 package_name: "l9_example_pkg"
 app_entrypoint: "l9_example_pkg.app:app"
 src_layout: true
@@ -32,6 +36,13 @@ venv_path: ".venv/bin/python"
 
 graph_record:
   node_type: "plugin_install"
-  capabilities: ["verify", "sync-ci", "rename", "render-rules", "worker-shell", "obs-optional"]
+  capabilities:
+    - "verify"
+    - "sync-ci"
+    - "rename"
+    - "render-rules"
+    - "hygiene-check"
+    - "birth-runner"
+    - "obs-optional"
   data_governance_class: "internal"
   maintenance_owner: "Quantum-L9/platform"

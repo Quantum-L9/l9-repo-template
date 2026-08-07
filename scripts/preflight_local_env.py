@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
-"""Validate local worker env keys (not deploy/terraform secrets)."""
+"""Validate local env keys for the generic museum example."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-REQUIRED = (
-    "L9_ENVIRONMENT",
-    "L9_NODE_NAME",
-    "L9_SERVICE_NAME",
-    "L9_ALLOWED_ACTIONS",
-)
+REQUIRED = ("L9_ENVIRONMENT",)
 
 
 def parse_env(path: Path) -> dict[str, str]:
@@ -38,8 +33,6 @@ def main(argv: list[str]) -> int:
     if env.get("L9_ENVIRONMENT") not in {"local", "dev", "test", "staging", "prod"}:
         print("L9_ENVIRONMENT must be local|dev|test|staging|prod", file=sys.stderr)
         return 1
-    if not env.get("GATE_URL"):
-        print("warning: GATE_URL empty — Gate registration disabled until set")
     print(f"preflight OK: {path}")
     return 0
 

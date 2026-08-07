@@ -1,9 +1,10 @@
 # l9-repo-template
 
-Thin **Python Gate-worker** GitHub Template for Quantum-L9.
+Thin **Quantum-L9 Python** GitHub Template for repos that live **outside** Constellation
+(runtimes, side projects, experiments, misc services).
 
-Use this instead of `cryptoxdog/golden-repo` or the FastAPI/OTel body in
-`cryptoxdog/constellation-file-inventory`.
+This template is **not** for Constellation nodes or `constellation_*` dependency packages.
+Those already have sibling templates — [L9-Node-Template](https://github.com/Quantum-L9/L9-Node-Template) for nodes, [Constellation.PackageTemplate](https://github.com/Quantum-L9/Constellation.PackageTemplate) for deps — see [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md).
 
 ## Quick start
 
@@ -14,8 +15,8 @@ Use this instead of `cryptoxdog/golden-repo` or the FastAPI/OTel body in
    make rename PKG=your_pkg
    ```
 
-3. Implement domain logic in `src/your_pkg/handlers.py` (`@register_handler`).
-4. Set `.env` from `.env.example` (`GATE_URL`, `L9_ALLOWED_ACTIONS`, …).
+3. Implement package logic under `src/your_pkg/`.
+4. Copy `.env.example` → `.env` as needed.
 5. Validate and run:
 
    ```bash
@@ -35,8 +36,6 @@ Use this instead of `cryptoxdog/golden-repo` or the FastAPI/OTel body in
 | Core facade | `make agent-check` / `make validate` | Vendored `tools.l9_repo` completion proof |
 | Governance | `make gov-pr-check` | Cursor-Governance via `WS=$(pwd)` |
 
-Governance is **not** copied into this repo. Wire `~/.cursor-governance`, then:
-
 ```bash
 make gov-pr-check
 # equivalent:
@@ -45,11 +44,10 @@ make -C "$HOME/.cursor-governance" pr-check WS="$(pwd)"
 
 ## Architecture
 
-- Runtime: `constellation-node-sdk` (`create_node_app` + TransportPacket)
+- Default example: minimal FastAPI hello (non-Gate)
 - Makefile: Core thin facade + `Repo.mk` product targets + `gov-*` wrappers
-- CI: Quantum-L9/.github via `make sync-ci` (plus local `.semgrep/` policy)
+- CI: Quantum-L9/.github via `make sync-ci`
 - Obs stack: optional (`make obs-up`) — not required for `make verify`
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [TEMPLATE_INVENTORY.md](TEMPLATE_INVENTORY.md),
-[docs/repository-execution-runtime.md](docs/repository-execution-runtime.md),
-and [docs/agent-tasks/add-domain-handler.md](docs/agent-tasks/add-domain-handler.md).
+and [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md).

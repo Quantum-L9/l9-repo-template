@@ -9,9 +9,10 @@ PYTHON := $(CURDIR)/.venv/bin/python
 endif
 PYTHON ?= python3
 
-.PHONY: help install-dev setup-hooks lint typecheck inventory-check \
+.PHONY: help install-dev setup-hooks lint typecheck inventory-check hygiene-check \
 	check-rules render-rules verify sync-ci rename ci run dev wait-http \
-	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check \
+	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
+	birth-preflight birth-bootstrap birth-verify \
 	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
 
 # Override thin-facade help to list product + governance wrappers.
@@ -39,16 +40,22 @@ typecheck: ## mypy on src/
 inventory-check: ## Fail closed on deny dirs / missing required files
 	$(PYTHON) scripts/inventory_check.py
 
+hygiene-check: ## Generic hygiene (eval/exec/print + scaffold bans)
+	$(PYTHON) scripts/repo_hygiene_audit.py
+
 render-rules: ## Render .cursor/rules/*.mdc from templates + plugin-config.yaml
 	$(PYTHON) scripts/render_cursor_rules.py
 
 check-rules: ## Fail if rendered Cursor rules drift
 	$(PYTHON) scripts/render_cursor_rules.py --check
 
-preflight: ## Validate .env.example (or ENV_FILE=...) worker keys
+preflight: ## Validate .env.example (or ENV_FILE=...) museum keys
 	$(PYTHON) scripts/preflight_local_env.py $${ENV_FILE:-.env.example}
 
-verify: inventory-check check-rules lint typecheck ## Full local product validation ladder
+test-cov: ## Pytest with coverage (no hard library threshold)
+	$(PYTHON) -m pytest -q --cov=l9_example_pkg --cov-report=term-missing
+
+verify: inventory-check hygiene-check check-rules lint typecheck ## Full local product validation ladder
 	$(PYTHON) -m pytest -q
 
 ci: verify ## Alias for verify
@@ -56,7 +63,7 @@ ci: verify ## Alias for verify
 sync-ci: ## Refresh .github from pinned Quantum-L9/.github
 	$(PYTHON) scripts/sync_ci_from_pack.py
 
-run: ## Run worker with uvicorn (PKG_APP=package.app:app)
+run: ## Run FastAPI hello with uvicorn (PKG_APP=package.app:app)
 	$(PYTHON) -m uvicorn $(PKG_APP) --host $${HOST:-127.0.0.1} --port $${PORT:-8000}
 
 dev: ## Build/run api via docker compose
@@ -73,6 +80,18 @@ obs-down: ## Stop optional local obs stack
 
 obs-ps: ## Show optional local obs stack status
 	docker compose -f observability/docker-compose.observability.yml ps
+
+birth-preflight: ## Birth-runner preflight (PLAY_DIR=...)
+	@test -n "$(PLAY_DIR)" || (echo "usage: make birth-preflight PLAY_DIR=/tmp/birth" >&2; exit 2)
+	PLAY_DIR="$(PLAY_DIR)" bash scripts/birth-runner/01_preflight.sh
+
+birth-bootstrap: ## Birth-runner bootstrap (PLAY_DIR=...)
+	@test -n "$(PLAY_DIR)" || (echo "usage: make birth-bootstrap PLAY_DIR=/tmp/birth" >&2; exit 2)
+	PLAY_DIR="$(PLAY_DIR)" bash scripts/birth-runner/02_bootstrap.sh
+
+birth-verify: ## Birth-runner verify (PLAY_DIR=...)
+	@test -n "$(PLAY_DIR)" || (echo "usage: make birth-verify PLAY_DIR=/tmp/birth" >&2; exit 2)
+	PLAY_DIR="$(PLAY_DIR)" bash scripts/birth-runner/03_verify.sh
 
 # usage: make rename PKG=foo_bar
 rename: ## Rewrite l9_example_pkg identity; reinstall; re-render rules

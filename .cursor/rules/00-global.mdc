@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/00-global.mdc.template
 template_sha256: d2d7516dc8afaacc58264108e72221f74ebc6139e948c55a8eaf7b49097c9eb8
 config: plugin-config.yaml
-config_sha256: 36a441b8092a18db2bd87eb3aff0905a140a37dcc4f6b13d8d5e61d7d9598580
-render_id: 4c810911f8247e4ea2c556548d8c0247a47c58c103835b0d0501052a99da67ea
+config_sha256: 8c5d18391bd536b6f70b2bfcaf83f5d2e31fc58ec98934054211fd40bee9f2e1
+render_id: a7585ece81cc287a963b261edf2fc58d218898ec2ced068d0edac44955d57f0e
 /L9_RENDERED -->
 ---
 description: "l9-repo-template global conventions — generated from domain cartridge"
 globs: ["**/*"]
 alwaysApply: true
 ---
-<!-- L9_META role: cursor_rule tags: [global, generated, l9-gate-worker-template] version: 1.1.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [global, generated, l9-python-museum] version: 1.2.0 /L9_META -->
 
 # l9-repo-template Global Agent Conventions
 
@@ -32,7 +32,10 @@ alwaysApply: true
 - `.l9/ci-pin`
 - `scripts/sync_ci_from_pack.py`
 - `scripts/bootstrap_rename.py`
-- `spec.yaml`
+- `scripts/inventory_check.py`
+- `scripts/repo_hygiene_audit.py`
+- `Makefile`
+- `tools/l9_repo/**`
 
 ## High-Risk Commands
 
@@ -46,11 +49,12 @@ Run in this order:
 
 - `make verify`
 - `make check-rules`
+- `make hygiene-check`
 
 ## Repo Cartridge
 
 - Repo: `l9-repo-template`
-- Domain: `l9-gate-worker-template`
+- Domain: `l9-python-museum`
 - Package: `l9_example_pkg`
 - App entrypoint: `l9_example_pkg.app:app`
 - Python: `3.12`

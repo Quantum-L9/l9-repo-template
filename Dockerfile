@@ -1,4 +1,4 @@
-# L9 worker template — uv + Python 3.12 (not Poetry)
+# Quantum-L9 museum template — uv + Python 3.12
 FROM python:3.12-slim AS base
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -16,7 +16,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PORT=8000 \
     PYTHONUNBUFFERED=1
 COPY --from=deps /app/.venv /app/.venv
-COPY pyproject.toml uv.lock README.md spec.yaml ./
+COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
