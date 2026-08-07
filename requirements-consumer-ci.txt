@@ -1,0 +1,24 @@
+# Consumer CI toolchain pins (bot-visible).
+#
+# These are the pinned lint / type-check / test tools the L9 consumer CI
+# surfaces install: the reusable `pr-pipeline.yml` compatibility workflow, the
+# `presets/python` / `starter-workflows/python` lint-test workflows, and the
+# `docs/templates/l9-lint-test.yml` template. Keeping the pins here — rather
+# than inline in workflow `run:` blocks — makes them a single machine-readable
+# manifest Dependabot can open update PRs against (see `.github/dependabot.yml`,
+# the `pip` ecosystem entry). Inline `pip install "mypy==X"` strings are
+# invisible to Dependabot and drift silently.
+#
+# Exact pins (==), not ranges: a range lets a fresh runner resolve a different
+# mypy/ruff/pytest than the one a change was validated against, which is real
+# version drift. Dependabot proposes bumps here as reviewable PRs instead.
+#
+# Type checking is a required, blocking gate (mypy-required defaults to true in
+# pr-pipeline.yml). Repository-owned mypy configuration (pyproject.toml /
+# mypy.ini / setup.cfg in the consumer repo) is authoritative for strictness and
+# per-module import handling; the workflows do NOT pass a global
+# --ignore-missing-imports. Stub packages a repo needs go in the consumer's own
+# dependency manifest, not here.
+ruff==0.16.1
+mypy==2.3.0
+pytest==9.1.1
