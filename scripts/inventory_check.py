@@ -38,6 +38,20 @@ REQUIRED = (
     "scripts/inventory_check.py",
     "plugin-config.yaml",
     "scripts/render_cursor_rules.py",
+    # Org-synced files (seeded by make sync-ci)
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    ".github/CODEOWNERS",
+    ".github/dependabot.yml",
+    ".github/labels.yml",
+    ".github/pull_request_template.md",
+    ".github/workflows/governance.yml",
+    ".github/governance/execution-profiles.yaml",
+    ".github/workflows/l9-analysis.yml",
+    ".github/workflows/l9-lint-test.yml",
+    "requirements-consumer-ci.txt",
 )
 
 

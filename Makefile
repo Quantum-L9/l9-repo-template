@@ -38,7 +38,7 @@ verify: inventory-check check-rules lint typecheck test ## Full local validation
 
 ci: verify ## Alias for verify
 
-sync-ci: ## Refresh .github from pinned Quantum-L9/.github
+sync-ci: ## Refresh .github + org files from pinned Quantum-L9/.github
 	$(PYTHON) scripts/sync_ci_from_pack.py
 
 # usage: make rename PKG=foo_bar
