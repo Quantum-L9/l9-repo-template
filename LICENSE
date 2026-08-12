@@ -96,7 +96,7 @@ these terms.
    United States of America, without regard to conflict-of-law principles.
 
 ---
-REPOSITORY NOTICE: This LICENSE applies to the Quantum-L9/l9-repo-template
-repository (org Python GitHub Template). GitHub does not propagate LICENSE
-files via org community-health fallbacks. Derived repos should keep a LICENSE
-(this text is the org template sourced from Quantum-L9/.github).
+REPOSITORY NOTICE: This LICENSE applies only to the Quantum-L9/.github
+repository. GitHub does not propagate LICENSE files via org community-health
+fallbacks. Other Quantum-L9 repositories should include their own LICENSE
+file (this text may be used as the org template).
