@@ -30,9 +30,9 @@ def with_retry(
 
         return no_op_decorator
 
-    decorator = retry(
+    decorator: Callable[[_F], _F] = retry(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(min=wait_min, max=wait_max),
         reraise=reraise,
     )
-    return cast(Callable[[_F], _F], decorator)
+    return decorator

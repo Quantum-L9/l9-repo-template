@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
 
 def test_birth_preflight_with_template_src() -> None:
+    if shutil.which("uv") is None:
+        pytest.skip("uv not installed on runner PATH")
     with tempfile.TemporaryDirectory() as tmp:
         play = Path(tmp)
         work = play / "work"

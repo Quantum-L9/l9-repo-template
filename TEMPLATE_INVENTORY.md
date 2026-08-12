@@ -37,3 +37,9 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 `engine/`, `chassis/`, `domains/`, `client/`, `database/`, `deploy/`, `example_service/`, `contracts/`, `Justfile`
 
 `tools/` allowed only for `tools/l9_repo/` + `tools/check_workflow_integrity.py`.
+
+## Org-synced community / governance (via `make sync-ci`)
+
+Community health (`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`),
+`.github/CODEOWNERS`, `dependabot.yml`, labels, issue/PR templates, and `governance.yml`
+come from `Quantum-L9/.github` at `ORG_GITHUB_SHA` (see `.l9/ci-pin`).
