@@ -1,0 +1,27 @@
+---
+description: "${repo_name} FastAPI conventions — generated from museum cartridge"
+globs: ["src/**/*.py"]
+alwaysApply: false
+---
+<!-- L9_META role: cursor_rule tags: [fastapi, generated, ${domain}] version: ${plugin_version} /L9_META -->
+
+# FastAPI Conventions — ${repo_name}
+
+> ${rendered_notice}
+
+## Route layer
+
+- Prefer `APIRouter` with explicit `prefix` and `tags` as the app grows.
+- Keep business logic out of route handlers; delegate to modules.
+- Keep `GET /v1/health` (or `/healthz`) cheap and unauthenticated.
+- This is **not** a Gate worker — do not require `GATE_URL` or constellation-node-sdk.
+
+## Hygiene
+
+- Do not use `print()` in `src/`; use logging if needed.
+- Do not add OpenTelemetry Python packages by default; optional obs is compose-only.
+
+## Runtime
+
+- App entrypoint: `${app_entrypoint}`
+- Package name: `${package_name}`

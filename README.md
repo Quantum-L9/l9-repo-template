@@ -1,48 +1,53 @@
 # l9-repo-template
 
-Thin **Python** GitHub Template for Quantum-L9.
+Thin **Quantum-L9 Python** GitHub Template for repos that live **outside** Constellation
+(runtimes, side projects, experiments, misc services).
 
-Use this repository instead of `cryptoxdog/golden-repo` or the mislabeled
-`cryptoxdog/constellation-file-inventory` FastAPI/OTel body.
+This template is **not** for Constellation nodes or `constellation_*` dependency packages.
+Those already have sibling templates — [L9-Node-Template](https://github.com/Quantum-L9/L9-Node-Template) for nodes, [Constellation.PackageTemplate](https://github.com/Quantum-L9/Constellation.PackageTemplate) for deps — see [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md).
 
-## Quick start (derived repo)
+## Quick start
 
-1. **Use this template** on GitHub (or clone).
-2. Rename the example package:
+1. **Use this template** on GitHub.
+2. Rename:
 
    ```bash
    make rename PKG=your_pkg
    ```
 
-3. Verify locally:
+3. Implement package logic under `src/your_pkg/`.
+4. Copy `.env.example` → `.env` as needed.
+5. Validate and run:
 
    ```bash
    make verify
+   make run
+   # optional local Grafana/Prom/Tempo/OTelCol:
+   make obs-up
    ```
 
-4. Refresh CI from the org pack (after pin bumps):
+6. Refresh CI after pin bumps: `make sync-ci`
 
-   ```bash
-   make sync-ci
-   ```
+## Make surfaces (dual ladder)
 
-5. Cursor rules (after editing `plugin-config.yaml` or templates):
+| Ladder | Command | Role |
+|--------|---------|------|
+| Product | `make verify` / `make pr-check` | In-repo museum gate (`OPEN_PR=0`) |
+| Core facade | `make agent-check` / `make validate` | Vendored `tools.l9_repo` completion proof |
+| Governance | `make gov-pr-check` | Cursor-Governance via `WS=$(pwd)` |
 
-   ```bash
-   make render-rules
-   make check-rules
-   ```
+```bash
+make gov-pr-check
+# equivalent:
+make -C "$HOME/.cursor-governance" pr-check WS="$(pwd)"
+```
 
-## Org source vs inherit
+## Architecture
 
-CI pack, Dependabot, CODEOWNERS, and LICENSE are pulled from
-[Quantum-L9/.github](https://github.com/Quantum-L9/.github) via `make sync-ci`
-(see `.l9/ci-pin`).
+- Default example: minimal FastAPI hello (non-Gate)
+- Makefile: Core thin facade + `Repo.mk` product targets + `gov-*` wrappers
+- CI: Quantum-L9/.github via `make sync-ci`
+- Obs stack: optional (`make obs-up`) — not required for `make verify`
 
-Community health files (`CONTRIBUTING`, `SECURITY`, `SUPPORT`, `CODE_OF_CONDUCT`,
-`FUNDING`, issue/PR templates) **inherit** from the org — do not fork copies here.
-
-## Layout
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) and [TEMPLATE_INVENTORY.md](TEMPLATE_INVENTORY.md).
-Parametric Cursor rules: [docs/PARAMETRIC_CURSOR_RULES.md](docs/PARAMETRIC_CURSOR_RULES.md).
+See [ARCHITECTURE.md](ARCHITECTURE.md), [TEMPLATE_INVENTORY.md](TEMPLATE_INVENTORY.md),
+and [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md).

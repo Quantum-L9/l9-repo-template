@@ -1,76 +1,45 @@
 # Template inventory
 
-Allowed roots for this museum template. **Deny** directories must not appear at repo root.
+Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own nodes and deps.
 
-| Path | Role | Source |
-|------|------|--------|
-| `.l9/ci-pin` | Org `.github` + Core SHA pins | local (museum) |
-| `.l9-template-version` | Template semver | local |
-| `.python-version` | Python 3.12 | local |
-| `pyproject.toml` | setuptools package metadata | local (Gate_SDK shape) |
-| `uv.lock` | Locked deps | local (`uv lock`) |
-| `plugin-config.yaml` | Domain cartridge for Cursor rules | adapted from constellation-file-inventory |
-| `src/l9_example_pkg/` | Example package | local |
-| `tests/` | Smoke + automation tests | local |
-| `scripts/` | inventory / sync-ci / rename / render-rules | local + file-inv renderer |
-| `Makefile` | verify / sync-ci / rename / render-rules | local + file-inv DX |
-| `.pre-commit-config.yaml` | Local hooks (mypy, not pyright) | local + file-inv hooks |
-| `.cursor/rules/templates/` | Parametric `.mdc.template` | adapted from file-inv (no fastapi) |
-| `.cursor/rules/*.mdc` | Rendered rules | `make render-rules` |
-| `.vscode/` | Editor settings | adapted from file-inv (ruff + mypy) |
-| `.devcontainer/` | Thin Python 3.12 + uv | adapted from file-inv (no obs ports) |
-| `.github/governance/` | CI governance pack | `Quantum-L9/.github` via sync-ci |
-| `.github/workflows/` | l9-analysis + l9-lint-test + governance | `Quantum-L9/.github` via sync-ci |
-| `.github/dependabot.yml` | Dependabot (not inheritable) | org `templates/` via sync-ci |
-| `.github/CODEOWNERS` | CODEOWNERS (not inheritable) | org `templates/CODEOWNERS.repo` via sync-ci |
-| `.github/labels.yml` | Org-standard label definitions | org `templates/` via sync-ci |
-| `.github/ISSUE_TEMPLATE/` | Issue forms (bug, feature, task, incident, ci-failure, gov-violation) | org `templates/issue-templates/` via sync-ci |
-| `.github/pull_request_template.md` | PR template with gates checklist | org `templates/pr-templates/` via sync-ci |
-| `.github/FUNDING.yml` | Org funding config | org `templates/community-health/` via sync-ci |
-| `CODE_OF_CONDUCT.md` | Org code of conduct | org `templates/community-health/` via sync-ci |
-| `CONTRIBUTING.md` | Org contributing guide | org `templates/community-health/` via sync-ci |
-| `SECURITY.md` | Org security policy | org `templates/community-health/` via sync-ci |
-| `SUPPORT.md` | Org support channels | org `templates/community-health/` via sync-ci |
-| `LICENSE` | Proprietary license | org `templates/community-health/` via sync-ci |
-| `README.md` / `AGENTS.md` / `ARCHITECTURE.md` | Docs | local |
-| `docs/PARAMETRIC_CURSOR_RULES.md` | Renderer usage | adapted from file-inv |
-| `requirements-consumer-ci.txt` | Consumer CI tool pins | `l9-ci-core` via sync-ci |
+## Source pins (harvest)
 
-## Seeded by `make sync-ci` (full list)
+| Source | SHA | Role |
+|--------|-----|------|
+| Quantum-L9/L9-Node-Template | `8999fd1` (tree at mine) | DX gold only — REJECT_WRONG_PRODUCT for node/codegen surfaces |
+| Quantum-L9/Constellation.PackageTemplate | `dcb5d24` (tree at mine) | DX gold only — REJECT_WRONG_PRODUCT for constellation_* birth plays |
+| Quantum-L9/l9-ci-core | `L9_REPO_RUNTIME_PIN` in `.l9/ci-pin` | `tools/l9_repo` vendored |
+| Quantum-L9/.github | `ORG_GITHUB_SHA` | CI via sync-ci |
 
-All of the following are pulled from `Quantum-L9/.github` at the SHA pinned in
-`.l9/ci-pin` (`ORG_GITHUB_SHA`). Consumer CI requirements come from
-`Quantum-L9/l9-ci-core` at `L9_CI_CORE_PIN`.
+## Surfaces
 
-| Category | Org source path | Consumer destination |
-|----------|-----------------|---------------------|
-| Governance | `l9-ci-pack/governance/*.yaml` | `.github/governance/` |
-| CI workflows | `l9-ci-pack/workflows/l9-*.yml` | `.github/workflows/` |
-| CODEOWNERS | `templates/CODEOWNERS.repo` | `.github/CODEOWNERS` |
-| Dependabot | `templates/dependabot.yml` | `.github/dependabot.yml` |
-| Governance caller | `templates/governance-caller.yml` | `.github/workflows/governance.yml` |
-| Labels | `templates/labels.yml` | `.github/labels.yml` |
-| Community health | `templates/community-health/*` | repo root + `.github/FUNDING.yml` |
-| Issue templates | `templates/issue-templates/*` | `.github/ISSUE_TEMPLATE/` |
-| PR template | `templates/pr-templates/pull_request_template.md` | `.github/pull_request_template.md` |
-| CI tool pins | (from l9-ci-core) `requirements-consumer-ci.txt` | `requirements-consumer-ci.txt` |
+| Path | Role | Classification | Source |
+|------|------|----------------|--------|
+| `Makefile` / `Repo.mk` / `tools/l9_repo/` | Core facade + product/gov wrappers | ALREADY_HAVE | l9-ci-core |
+| `scripts/inventory_check.py` | Layout + mention drift | PORT_SURGICAL | Node-Template verify_contracts idea |
+| `scripts/repo_hygiene_audit.py` | eval/exec/print + scaffold bans | PORT_SURGICAL | Node-Template audit_engine (generic) |
+| `scripts/birth-runner/` | Use-template → rename → verify | PORT_SURGICAL | PackageTemplate dep-build-runner mechanics |
+| `src/*/settings|errors|health|retry.py` | Optional package helpers | PORT_SURGICAL | PackageTemplate concepts |
+| `.cursor/rules/templates/l9-python-repo.mdc.template` | Generic agent rule | PORT_SURGICAL | Node-Template contract rule rewrite |
+| `.cursor/rules/templates/fastapi.mdc.template` | FastAPI conventions | PORT_SURGICAL | Node-Template fastapi rule |
+| `observability/` | Opt-in local obs compose | ALREADY_HAVE | file-inv |
+| `plugin-config.yaml` + render | Parametric Cursor rules | ALREADY_HAVE | file-inv DX |
+| `create_node_app` / Gate handlers / `spec.yaml` Gate registration | — | REJECT_WRONG_PRODUCT | belongs in L9-Node-Template |
+| `enginehandlers` / `nodespec` / `contracts/` | — | REJECT_WRONG_PRODUCT | Node-Template legacy |
+| PacketEnvelope / Gate peer-HTTP museum gates | — | REJECT_WRONG_PRODUCT | node/SDK law |
+| Justfile | — | REJECT | dual runner |
+| Fix-B OTel Python package | — | REJECT | compose-only obs |
+| PackageTemplate plays / PyPI release | — | REJECT_WRONG_PRODUCT | dep factory |
+| Museum-owned parallel CI | — | REJECT | sync-ci only |
 
 ## Deny at repo root
 
-`engine/`, `chassis/`, `domains/`, `client/`, `database/`, `deploy/`, `observability/`, `example_service/`, `tools/`
+`engine/`, `chassis/`, `domains/`, `client/`, `database/`, `deploy/`, `example_service/`, `contracts/`, `Justfile`
 
-## Rejected ports from constellation-file-inventory
+`tools/` allowed only for `tools/l9_repo/` + `tools/check_workflow_integrity.py`.
 
-| Surface | Why rejected |
-|---------|----------------|
-| FastAPI `src/l9_service` + OTel Fix-B | Kitchen-sink; museum stays thin |
-| `observability/` compose stack | Deny-class fat DX |
-| `ci.yml` / `pr-pipeline.yml` / gitleaks / dependency-review / auto-merge | Org pack + `make sync-ci` only |
-| hatchling / pyright / cov-fail 70 | Museum: setuptools + mypy + org `COVERAGE_THRESHOLD=0` |
-| `fastapi.mdc.template` / Justfile / MANIFEST checksum table | Not default museum; inventory covers sources |
+## Org-synced community / governance (via `make sync-ci`)
 
-## Forbidden
-
-- Org `workflow-templates/*` (v1 starters)
-- Org `rulesets/`, `ops/`, `profile/`, org-only workflows
-- Golden-repo kitchen-sink CI / Poetry / Sonar / PacketEnvelope
+Community health (`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`),
+`.github/CODEOWNERS`, `dependabot.yml`, labels, issue/PR templates, and `governance.yml`
+come from `Quantum-L9/.github` at `ORG_GITHUB_SHA` (see `.l9/ci-pin`).

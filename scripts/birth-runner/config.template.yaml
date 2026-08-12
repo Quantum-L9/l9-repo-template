@@ -1,0 +1,9 @@
+# Museum birth config — copy to $PLAY_DIR/config.yaml
+org: "Quantum-L9"
+repo_name: "CHANGE_ME"
+package_name: "change_me"
+description: "CHANGE ME — one-line description"
+work_dir: "/tmp/l9-museum-births"
+template_repo: "Quantum-L9/l9-repo-template"
+# Optional: absolute path to an existing template checkout (skips gh clone)
+template_src: ""

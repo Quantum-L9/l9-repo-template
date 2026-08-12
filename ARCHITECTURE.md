@@ -1,40 +1,42 @@
 # Architecture — l9-repo-template
 
-Thin Python museum template for Quantum-L9.
+Quantum-L9 Python GitHub Template for **non-Constellation** repos.
+
+## Three-template matrix
+
+| Template | Product role |
+|----------|--------------|
+| L9-Node-Template | Constellation nodes |
+| Constellation.PackageTemplate | `constellation_*` birth dependencies |
+| **l9-repo-template** | Runtimes / side projects / experiments outside Constellation |
 
 ## Layout
 
 ```
-src/<pkg>/          # installable package (default: l9_example_pkg)
-tests/              # smoke + automation tests
-scripts/            # inventory_check, sync_ci_from_pack, bootstrap_rename, render_cursor_rules
-plugin-config.yaml  # domain cartridge for Cursor rule rendering
-.cursor/rules/      # templates + rendered .mdc (make render-rules)
-.vscode/            # editor defaults (ruff + mypy)
-.devcontainer/      # thin Python 3.12 + uv (no obs stack)
-.github/            # seeded from Quantum-L9/.github (not hand-authored)
-.l9/ci-pin          # ORG_GITHUB_SHA + L9_CI_CORE_PIN
+Makefile                 # Core thin facade (identical to Makefile.template)
+Repo.mk                  # Product targets + gov-* WS= wrappers
+tools/l9_repo/           # Vendored repository-execution runtime (Core pin)
+scripts/birth-runner/    # Generic Use-template → rename → verify
+src/<pkg>/               # Thin FastAPI hello + optional helpers
+tests/unit|integration/  # package + template compliance tests
+observability/           # optional local Grafana/Prom/Tempo/OTelCol
+.github/                 # org pack via make sync-ci
+.l9/ci-pin               # org + Core workflow + runtime pins
 ```
 
-## Org boundary
+## Ownership split
 
 | Surface | Authority |
 |---------|-----------|
-| Community health (CONTRIBUTING, SECURITY, issue/PR templates) | Inherit from org `.github` |
-| `l9-ci-pack` workflows + governance | Copy via `make sync-ci` |
-| `templates/dependabot.yml`, `CODEOWNERS.repo` | Copy via `make sync-ci` (not inheritable) |
-| LICENSE | Copy from org LICENSE SSOT |
-| Product code / package rename | Local (`make rename`) |
-| Cursor rule cartridge | Local (`plugin-config.yaml` + templates) |
+| Constellation nodes | L9-Node-Template (sibling) |
+| constellation_* deps | PackageTemplate (sibling) |
+| Product Make targets | `Repo.mk` |
+| Repository-execution facade | vendored `tools/l9_repo` |
+| Governance pr-check / wiring | Cursor-Governance via `gov-*` / `WS=` |
+| CI pack | Quantum-L9/.github via sync-ci |
 
 ## Force multipliers
 
-1. `make rename PKG=foo_bar` — rewrite example identity + re-render rules
-2. `make verify` — inventory + check-rules + lint + typecheck + test
-3. `make sync-ci` — refresh CI from pinned org `.github` SHA
-4. `make render-rules` / `make check-rules` — parametric Cursor rules
-
-## Explicit non-goals
-
-No FastAPI app, OTel Fix-B package, or `observability/` docker stack in this museum.
-Those lived in an earlier service-template body and are rejected here to keep the template thin.
+`make rename` · `make verify` · `make pr-check` · `make sync-ci` ·
+`make render-rules` · `make run` · `make obs-up` · `make gov-pr-check` ·
+`make agent-check` · `make hygiene-check`

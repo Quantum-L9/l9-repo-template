@@ -1,0 +1,11 @@
+schema: l9.sdk-compatibility/v1
+repository: Quantum-L9/l9-repo-template
+role: non-constellation-python-museum
+notes: >
+  This template does not require constellation-node-sdk. Node and dep
+  compatibility belongs to sibling templates.
+deferred:
+  constellation_nodes: Quantum-L9/L9-Node-Template
+  constellation_deps: Quantum-L9/Constellation.PackageTemplate
+python: ">=3.12"
+package_manager: uv

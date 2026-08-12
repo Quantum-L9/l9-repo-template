@@ -103,6 +103,7 @@ jobs:
           # Polyglot / either: keep all three (semgrep skips rules that do not
           # match any files) or use --config auto.
           semgrep scan \
+            --config .semgrep/semgrep-rules.yaml \
             --config p/python \
             --config p/javascript \
             --config p/typescript \
@@ -129,6 +130,7 @@ jobs:
           snapshot-id: ${{ github.sha }}
           revision: ${{ github.sha }}
           provider-version: ${{ steps.semgrep.outputs.version }}
+          identity-map: .l9/semgrep-identity-map.yaml
           strict: ${{ steps.gov.outputs.strict }}
           required: ${{ steps.gov.outputs.required-provider }}
           policy: ${{ steps.gov.outputs.sdk-policy }}

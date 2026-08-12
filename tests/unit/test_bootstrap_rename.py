@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 RENAME = REPO / "scripts" / "bootstrap_rename.py"
 
 
@@ -14,16 +14,26 @@ def _seed_tree(tmp: Path) -> None:
     pkg = tmp / "src" / "l9_example_pkg"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(
-        (
-            '"""pkg"""\n\n__version__ = "0.1.0"\n\n\n'
-            'def hello() -> str:\n    return "l9-example-pkg"\n'
-        ),
+        '"""pkg"""\n\n__version__ = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    (pkg / "app.py").write_text(
+        'app = "l9_example_pkg.app:app"\n',
+        encoding="utf-8",
+    )
+    (pkg / "settings.py").write_text(
+        'SERVICE = "l9_example_pkg"\n',
         encoding="utf-8",
     )
     (tmp / "pyproject.toml").write_text(
         'name = "l9-example-pkg"\npackages = ["l9_example_pkg"]\n',
         encoding="utf-8",
     )
+    (tmp / "Dockerfile").write_text(
+        'CMD ["uvicorn", "l9_example_pkg.app:app"]\n',
+        encoding="utf-8",
+    )
+    (tmp / "Repo.mk").write_text("PKG_APP ?= l9_example_pkg.app:app\n", encoding="utf-8")
     (tmp / "README.md").write_text("l9-example-pkg / l9_example_pkg\n", encoding="utf-8")
 
 
@@ -51,13 +61,21 @@ def test_rename_rewrites_and_moves(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert not (tmp_path / "src" / "l9_example_pkg").exists()
-    init = (tmp_path / "src" / "smoke_pkg" / "__init__.py").read_text(encoding="utf-8")
-    assert "smoke_pkg" in init or "smoke-pkg" in init
-    assert "l9_example_pkg" not in init
-    assert "l9-example-pkg" not in init
+    assert (tmp_path / "src" / "smoke_pkg" / "app.py").is_file()
+    app = (tmp_path / "src" / "smoke_pkg" / "app.py").read_text(encoding="utf-8")
+    assert "smoke_pkg.app:app" in app
+    assert "l9_example_pkg" not in app
+    settings = (tmp_path / "src" / "smoke_pkg" / "settings.py").read_text(encoding="utf-8")
+    assert "smoke_pkg" in settings
+    assert "l9_example_pkg" not in settings
     readme = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert "smoke-pkg" in readme
     assert "l9-example-pkg" not in readme
+    dockerfile = (tmp_path / "Dockerfile").read_text(encoding="utf-8")
+    assert "smoke_pkg.app:app" in dockerfile
+    assert "l9_example_pkg" not in dockerfile
+    repo_mk = (tmp_path / "Repo.mk").read_text(encoding="utf-8")
+    assert "smoke_pkg.app:app" in repo_mk
 
 
 def test_refuse_existing_target(tmp_path: Path) -> None:

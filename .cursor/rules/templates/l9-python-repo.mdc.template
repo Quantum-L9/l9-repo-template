@@ -1,0 +1,31 @@
+---
+description: "${repo_name} Quantum-L9 Python museum invariants — generated"
+globs: ["src/**/*.py", "scripts/**", "AGENTS.md", "docs/**"]
+alwaysApply: true
+---
+<!-- L9_META role: cursor_rule tags: [l9, python, museum, ${domain}] version: ${plugin_version} /L9_META -->
+
+# Quantum-L9 Python Museum — ${repo_name}
+
+> ${rendered_notice}
+
+## Identity
+
+- This repo is a **non-Constellation** Quantum-L9 Python package/service.
+- Constellation **nodes** → use [L9-Node-Template](https://github.com/Quantum-L9/L9-Node-Template).
+- `constellation_*` **deps** → use [Constellation.PackageTemplate](https://github.com/Quantum-L9/Constellation.PackageTemplate).
+
+## Forbidden (wrong product)
+
+- `create_node_app`, Gate handlers, `register_handler`, TransportPacket routing as product law
+- `enginehandlers.py`, `nodespec.yaml`, `contracts/`, Justfile
+- Peer-node HTTP dispatch patterns that belong only in node/SDK repos
+- Expanding `tools/` beyond `l9_repo` + `check_workflow_integrity.py`
+
+## Required habits
+
+- Package: `${package_name}`
+- No `eval()` / `exec()` / `print()` in `src/`
+- Prefer `settings.validate_safe()`, structured errors, immutable health snapshots
+- Run `make verify` (or `make pr-check`) before claiming done
+- Hand-edit templates under `.cursor/rules/templates/`, not generated `.mdc`

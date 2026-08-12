@@ -1,0 +1,16 @@
+schema: l9.ownership-spec/v1
+repository: Quantum-L9/l9-repo-template
+museum_owns:
+  - src/ example package and optional helpers
+  - Repo.mk product targets
+  - scripts/ verify / birth-runner / hygiene
+  - observability/ optional local compose
+deferred_to_siblings:
+  constellation_nodes: Quantum-L9/L9-Node-Template
+  constellation_birth_deps: Quantum-L9/Constellation.PackageTemplate
+core_runtime_owns:
+  - tools/l9_repo/ (vendored)
+  - .l9/repo-workflow.json contract shape
+cursor_governance_owns:
+  - pr-check gate shape when invoked via gov-*
+  - wiring / ide-profile / autonomy-validate / secrets

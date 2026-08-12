@@ -1,0 +1,24 @@
+schema: l9.architecture-spec/v1
+metadata:
+  repository: Quantum-L9/l9-repo-template
+  status: authoritative
+  role: non-constellation-python-template
+identity:
+  role: quantum-l9-python-museum
+  description: >
+    Thin Quantum-L9 Python GitHub Template for runtimes, side projects, and
+    experiments outside Constellation. Does not own Constellation nodes or
+    constellation_* dependency birth.
+sibling_templates:
+  nodes: Quantum-L9/L9-Node-Template
+  constellation_deps: Quantum-L9/Constellation.PackageTemplate
+boundaries:
+  owns:
+    - generic Python package scaffold under src/
+    - Repo.mk product force-multipliers
+    - org CI sync via make sync-ci
+    - optional local observability compose
+  does_not_own:
+    - Constellation node birth / Gate routing / TransportPacket handlers
+    - constellation_* dependency package factory
+    - Cursor-Governance control plane implementation

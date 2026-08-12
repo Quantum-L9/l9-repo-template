@@ -1,0 +1,14 @@
+.venv
+.git
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.cursor
+.htmlcov
+coverage.xml
+**/__pycache__
+*.pyc
+.DS_Store
+observability
+docs
+tests
