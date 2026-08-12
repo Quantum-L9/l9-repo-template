@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 from constellation_node_sdk.runtime.config import NodeRuntimeConfig
 from constellation_node_sdk.runtime.handlers import clear_handlers
 
 
 @pytest.fixture(autouse=True)
-def _clear_handler_registry() -> None:
+def _clear_handler_registry() -> Iterator[None]:
     clear_handlers()
     yield
     clear_handlers()
