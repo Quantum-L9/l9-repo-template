@@ -14,7 +14,11 @@ def main(argv: list[str]) -> int:
         print("usage: wait_for_http.py <url> <timeout_seconds>", file=sys.stderr)
         return 2
     url = argv[1]
-    timeout = float(argv[2])
+    try:
+        timeout = float(argv[2])
+    except ValueError:
+        print("timeout_seconds must be a number", file=sys.stderr)
+        return 2
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:

@@ -43,7 +43,6 @@ select = ["E", "F", "B", "I", "UP"]
 ignore = ["E501"]
 
 [tool.mypy]
-plugins = ["pydantic.mypy"]
 python_version = "3.12"
 strict = true
 warn_return_any = true
@@ -62,3 +61,8 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["pydantic_settings", "pydantic_settings.*", "fastapi", "fastapi.*", "starlette.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "l9_example_pkg.settings"
+disable_error_code = ["misc"]
+
