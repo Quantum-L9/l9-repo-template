@@ -92,9 +92,7 @@ def load_pins() -> dict[str, str]:
 
 
 def fetch(url: str) -> bytes:
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "l9-repo-template-sync-ci"}
-    )
+    req = urllib.request.Request(url, headers={"User-Agent": "l9-repo-template-sync-ci"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return cast(bytes, resp.read())
 
@@ -125,16 +123,11 @@ def list_directory(sha: str, rel: str) -> list[str]:
 
 
 def list_governance(sha: str) -> list[str]:
-    api = (
-        f"https://api.github.com/repos/{ORG_REPO}/contents/"
-        f"l9-ci-pack/governance?ref={sha}"
-    )
+    api = f"https://api.github.com/repos/{ORG_REPO}/contents/l9-ci-pack/governance?ref={sha}"
     data = json.loads(fetch(api).decode("utf-8"))
     names: list[str] = []
     for item in data:
-        if item.get("type") == "file" and str(item.get("name", "")).endswith(
-            (".yaml", ".yml")
-        ):
+        if item.get("type") == "file" and str(item.get("name", "")).endswith((".yaml", ".yml")):
             names.append(str(item["name"]))
     if not names:
         raise SystemExit("no governance YAML files found in org pack")
@@ -172,14 +165,10 @@ def validate_workflow(path: Path, text: str) -> None:
     for line in text.splitlines():
         for pattern in FORBIDDEN_USES_LINE:
             if pattern.search(line):
-                raise SystemExit(
-                    f"refusing forbidden uses: in {path}: {line.strip()}"
-                )
+                raise SystemExit(f"refusing forbidden uses: in {path}: {line.strip()}")
     for pattern in FORBIDDEN_ANY:
         if pattern.search(text):
-            raise SystemExit(
-                f"refusing forbidden pattern in {path}: {pattern.pattern}"
-            )
+            raise SystemExit(f"refusing forbidden pattern in {path}: {pattern.pattern}")
 
 
 def fetch_consumer_requirements(pins: dict[str, str]) -> bytes:
@@ -187,12 +176,10 @@ def fetch_consumer_requirements(pins: dict[str, str]) -> bytes:
     candidates: list[str] = []
     if core_pin and HEX40.match(core_pin.lower()):
         candidates.append(
-            f"https://raw.githubusercontent.com/{CORE_REPO}/{core_pin}"
-            f"/requirements-consumer-ci.txt"
+            f"https://raw.githubusercontent.com/{CORE_REPO}/{core_pin}/requirements-consumer-ci.txt"
         )
     candidates.append(
-        f"https://raw.githubusercontent.com/{CORE_REPO}/main"
-        f"/requirements-consumer-ci.txt"
+        f"https://raw.githubusercontent.com/{CORE_REPO}/main/requirements-consumer-ci.txt"
     )
     last_err: Exception | None = None
     for url in candidates:
@@ -272,9 +259,7 @@ def main() -> int:
 
     # ── 7. Consumer CI requirements (from l9-ci-core) ────────────────────────
     print("── consumer CI requirements ──")
-    write_bytes(
-        Path("requirements-consumer-ci.txt"), fetch_consumer_requirements(pins)
-    )
+    write_bytes(Path("requirements-consumer-ci.txt"), fetch_consumer_requirements(pins))
 
     print("")
     print(f"✅ sync-ci OK from {ORG_REPO}@{sha}")
