@@ -220,18 +220,18 @@ def main() -> int:
     # ── 3. Org templates (CODEOWNERS, dependabot, governance-caller, labels) ─
     print("── org templates ──")
     for src_rel, dest_rel in TEMPLATES:
-        data = fetch_optional(raw_org(sha, src_rel))
-        if data is not None:
-            write_bytes(Path(dest_rel), data)
+        payload = fetch_optional(raw_org(sha, src_rel))
+        if payload is not None:
+            write_bytes(Path(dest_rel), payload)
         else:
             print(f"  ⊘ {src_rel} (not found at this pin, skipping)")
 
     # ── 4. Community health files ────────────────────────────────────────────
     print("── community health ──")
     for src_rel, dest_rel in COMMUNITY_HEALTH:
-        data = fetch_optional(raw_org(sha, src_rel))
-        if data is not None:
-            write_bytes(Path(dest_rel), data)
+        payload = fetch_optional(raw_org(sha, src_rel))
+        if payload is not None:
+            write_bytes(Path(dest_rel), payload)
         else:
             print(f"  ⊘ {src_rel} (not found at this pin, skipping)")
 
@@ -251,9 +251,9 @@ def main() -> int:
     # ── 6. PR template ───────────────────────────────────────────────────────
     print("── PR template ──")
     src_rel, dest_rel = PR_TEMPLATE
-    data = fetch_optional(raw_org(sha, src_rel))
-    if data is not None:
-        write_bytes(Path(dest_rel), data)
+    payload = fetch_optional(raw_org(sha, src_rel))
+    if payload is not None:
+        write_bytes(Path(dest_rel), payload)
     else:
         print(f"  ⊘ {src_rel} (not found at this pin, skipping)")
 
