@@ -39,8 +39,19 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 
 ## Inherited organization defaults
 
-Community health (`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`),
-`.github/CODEOWNERS`, `dependabot.yml`, labels, and issue/PR templates are inherited
-from `Quantum-L9/.github` organization defaults — not synchronized by this
-repository. CI targeting and governance invocation belong to the future
-organization CI control plane (l9-ci-core / l9-ci-control-plane).
+GitHub inherits these surfaces from `Quantum-L9/.github` organization
+defaults automatically — this repository does not carry copies:
+
+- `CODE_OF_CONDUCT.md` (root)
+- `.github/FUNDING.yml`
+- `.github/ISSUE_TEMPLATE/*` (9 issue forms)
+- `.github/pull_request_template.md`
+
+Repository-local copies of these names remain a supported explicit override:
+a repo that needs different content adds its own file and GitHub prefers it.
+
+`CONTRIBUTING.md`, `SECURITY.md`, and `SUPPORT.md` are kept repository-local
+because this template customizes them for the museum. `.github/CODEOWNERS`,
+`dependabot.yml`, and `labels.yml` are not inheritable and stay repo-local.
+CI targeting and governance invocation belong to the future organization CI
+control plane (l9-ci-core / l9-ci-control-plane).

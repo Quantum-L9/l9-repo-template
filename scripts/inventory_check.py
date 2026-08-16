@@ -91,14 +91,12 @@ REQUIRED = (
     ".cursor/rules/templates/l9-python-repo.mdc.template",
     ".cursor/rules/templates/fastapi.mdc.template",
     # Inherited organization defaults
-    "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
     "SUPPORT.md",
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".github/labels.yml",
-    ".github/pull_request_template.md",
 )
 
 MENTION_CHECKS = (
