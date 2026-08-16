@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# Env override exists so tests can run the checker against a fixture tree.
+ROOT = Path(os.environ.get("L9_INVENTORY_ROOT") or Path(__file__).resolve().parents[1])
 
 DENY_DIRS = (
     "engine",
@@ -20,6 +23,19 @@ DENY_DIRS = (
 )
 
 DENY_FILES = ("Justfile", "justfile", "nodespec.yaml", "spec.yaml")
+
+# Legacy org CI distribution surfaces must not reappear: CI orchestration
+# belongs to l9-ci-core and organization CI control to l9-ci-control-plane.
+DENY_CI_DISTRIBUTION = (
+    ".l9/ci-pin",
+    "scripts/sync_ci_from_pack.py",
+    "requirements-consumer-ci.txt",
+    ".github/workflows/l9-analysis.yml",
+    ".github/workflows/l9-lint-test.yml",
+    ".github/workflows/on-org-update.yml",
+    ".github/workflows/governance.yml",
+    ".github/governance",
+)
 
 TOOLS_ALLOW = frozenset({"l9_repo", "check_workflow_integrity.py"})
 
@@ -100,6 +116,12 @@ def main() -> int:
     for name in DENY_FILES:
         if (ROOT / name).exists():
             errors.append(f"deny file present: {name}")
+    for name in DENY_CI_DISTRIBUTION:
+        if (ROOT / name).exists():
+            errors.append(
+                f"legacy CI distribution surface present: {name} — "
+                "CI orchestration belongs to l9-ci-core / l9-ci-control-plane"
+            )
     tools = ROOT / "tools"
     if tools.exists():
         if not tools.is_dir():
@@ -115,7 +137,12 @@ def main() -> int:
             errors.append(f"missing required file: {rel}")
     if (ROOT / "src" / "l9_example_pkg" / "handlers.py").exists():
         errors.append("handlers.py must not exist (use L9-Node-Template for nodes)")
-    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    pyproject_path = ROOT / "pyproject.toml"
+    if not pyproject_path.is_file():
+        # Already reported by the REQUIRED check; avoid an unguarded read crash.
+        pyproject = ""
+    else:
+        pyproject = pyproject_path.read_text(encoding="utf-8")
     if "constellation-node-sdk" in pyproject:
         errors.append("pyproject.toml must not require constellation-node-sdk")
     for path in (ROOT / "src").rglob("*.py"):
@@ -129,6 +156,13 @@ def main() -> int:
         text = provenance.read_text(encoding="utf-8")
         if "l9_ci_core_harvest_revision" not in text:
             errors.append(".l9/runtime-provenance.yaml missing l9_ci_core_harvest_revision")
+    repo_mk = ROOT / "Repo.mk"
+    if repo_mk.is_file():
+        content = repo_mk.read_text(encoding="utf-8")
+        if not re.search(r"^ci:", content, re.M):
+            errors.append(
+                "Repo.mk must define a ci target (make ci repository-local execution facade)"
+            )
     makefile = ROOT / "Makefile"
     template = ROOT / "tools" / "l9_repo" / "Makefile.template"
     if makefile.is_file() and template.is_file():

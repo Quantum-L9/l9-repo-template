@@ -11,6 +11,12 @@ deferred_to_siblings:
 core_runtime_owns:
   - tools/l9_repo/ (vendored)
   - .l9/repo-workflow.json contract shape
+ci_ownership:
+  repository: local execution contract (.l9/repo-workflow.json + make ci)
+  execution_semantics: Quantum-L9/l9-ci-core
+  organization_control: Quantum-L9/l9-ci-control-plane
+  organization_defaults: Quantum-L9/.github
+  distribution_model: repository_must_not_distribute_org_ci
 cursor_governance_owns:
   - pr-check gate shape when invoked via gov-*
   - wiring / ide-profile / autonomy-validate / secrets
