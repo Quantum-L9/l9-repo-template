@@ -101,7 +101,7 @@ birth-verify: ## Birth-runner verify (PLAY_DIR=...)
 # usage: make rename PKG=foo_bar
 rename: ## Rewrite l9_example_pkg identity; reinstall; re-render rules
 	@test -n "$(PKG)" || (echo "usage: make rename PKG=foo_bar" >&2; exit 2)
-	$(PYTHON) scripts/bootstrap_rename.py --pkg $(PKG)
+	$(PYTHON) scripts/bootstrap_rename.py --pkg $(PKG) $(if $(and $(ORG),$(REPO)),--org $(ORG) --repo $(REPO),)
 	@if command -v uv >/dev/null 2>&1; then \
 		uv sync --extra dev || (echo "uv sync failed — not falling back to pip" >&2; exit 1); \
 	else \

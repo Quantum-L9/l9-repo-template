@@ -78,6 +78,79 @@ def test_rename_rewrites_and_moves(tmp_path: Path) -> None:
     assert "smoke_pkg.app:app" in repo_mk
 
 
+def _seed_identity(tmp: Path) -> None:
+    (tmp / ".l9").mkdir(parents=True)
+    (tmp / ".l9" / "architecture.yaml").write_text(
+        "schema: l9.architecture-spec/v1\n"
+        "metadata:\n"
+        "  repository: Quantum-L9/l9-repo-template\n"
+        "  status: authoritative\n",
+        encoding="utf-8",
+    )
+    (tmp / ".l9" / "ownership.yaml").write_text(
+        "schema: l9.ownership-spec/v1\nrepository: Quantum-L9/l9-repo-template\n",
+        encoding="utf-8",
+    )
+    (tmp / ".l9" / "sdk-compatibility.yaml").write_text(
+        "schema: l9.sdk-compatibility/v1\nrepository: Quantum-L9/l9-repo-template\n",
+        encoding="utf-8",
+    )
+    (tmp / "scripts").mkdir(parents=True)
+    (tmp / "scripts" / "birth-runner").mkdir(parents=True)
+    (tmp / "scripts" / "birth-runner" / "config.template.yaml").write_text(
+        'template_repo: "Quantum-L9/l9-repo-template"  # provenance\n',
+        encoding="utf-8",
+    )
+
+
+def _rename(tmp: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(RENAME), "--pkg", "smoke_pkg", "--root", str(tmp), *extra],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_repository_identity_rewrite(tmp_path: Path) -> None:
+    """--org/--repo stamp authoritative metadata; provenance refs stay."""
+    _seed_tree(tmp_path)
+    _seed_identity(tmp_path)
+    proc = _rename(tmp_path, "--org", "Example", "--repo", "born-svc")
+    assert proc.returncode == 0, proc.stderr
+    for rel in (".l9/architecture.yaml", ".l9/ownership.yaml", ".l9/sdk-compatibility.yaml"):
+        text = (tmp_path / rel).read_text(encoding="utf-8")
+        assert "repository: Example/born-svc" in text, rel
+        assert "Quantum-L9/l9-repo-template" not in text, rel
+    provenance = (tmp_path / "scripts" / "birth-runner" / "config.template.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "Quantum-L9/l9-repo-template" in provenance  # provenance preserved
+
+
+def test_identity_requires_both_org_and_repo(tmp_path: Path) -> None:
+    _seed_tree(tmp_path)
+    proc = _rename(tmp_path, "--org", "Example")
+    assert proc.returncode == 2
+    assert "--org and --repo must be provided together" in proc.stderr
+
+
+def test_identity_rewrite_leaves_custom_identity_untouched(tmp_path: Path) -> None:
+    """A repo whose identity was already stamped is never clobbered."""
+    _seed_tree(tmp_path)
+    _seed_identity(tmp_path)
+    arch = tmp_path / ".l9" / "architecture.yaml"
+    text = arch.read_text(encoding="utf-8")
+    arch.write_text(
+        text.replace("Quantum-L9/l9-repo-template", "Acme/other-svc"),
+        encoding="utf-8",
+    )
+    proc = _rename(tmp_path, "--org", "Example", "--repo", "born-svc")
+    assert proc.returncode == 0, proc.stderr
+    assert "Acme/other-svc" in arch.read_text(encoding="utf-8")
+    assert "Example/born-svc" not in arch.read_text(encoding="utf-8")
+
+
 def test_refuse_existing_target(tmp_path: Path) -> None:
     _seed_tree(tmp_path)
     (tmp_path / "src" / "smoke_pkg").mkdir()
