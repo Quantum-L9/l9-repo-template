@@ -1,5 +1,7 @@
 # Adapted for Quantum-L9/l9-repo-template from cryptoxdog/golden-repo
-# Paths target src/. Consumed by l9-analysis semgrep step.
+# Repo-local semgrep rules. Invoked by the organization CI control plane
+# analysis step (l9-ci-core execution / l9-ci-control-plane targeting), not
+# by a repository-local workflow.
 # =============================================================================
 # Python CI Policy Rules — Regression Prevention (Repo-Agnostic)
 #

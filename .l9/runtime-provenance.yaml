@@ -1,0 +1,8 @@
+schema: l9.runtime-provenance/v1
+# Repository-local runtime provenance only. The vendored execution runtime
+# (tools/l9_repo) version is authoritative in .l9/repo-workflow.json metadata;
+# this records the l9-ci-core revision the vendored tree was harvested from.
+# Organization CI selection/version state is owned by the future
+# l9-ci-control-plane — this repository owns no organization CI pins.
+runtime:
+  l9_ci_core_harvest_revision: "373bb6d26084e67ef76aaab95021364182a34ee7"

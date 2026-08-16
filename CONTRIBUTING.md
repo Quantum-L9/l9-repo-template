@@ -36,21 +36,21 @@ the workspace root must have `.cursor/` symlinks resolving to `Cursor-Governance
 
 ## CI Gate Requirements
 
-All pull requests must pass:
+All pull requests must pass the repository-local validation ladder before
+merge:
 
-| Gate | Tool | Kernel |
+| Gate | Tool | Surface |
 |---|---|---|
-| Lint + type-check | ruff, mypy (Python) / tsc (TypeScript) | `pr-pipeline.yml@v1` |
-| Unit tests | pytest (Python) / Jest (TypeScript) | `pr-pipeline.yml@v1` |
-| Secret scan | gitleaks | `security.yml@v1` |
-| SAST | Bandit + Semgrep (Python) | `security.yml@v1` |
-| Dependency audit | pip-audit / npm audit | `security.yml@v1` |
-| Pre-commit hooks | pre-commit framework | `pre-commit-ci.yml@v1` |
-| Governance trio | Three-tier separation | `trio-governance.yml@v1` |
+| Inventory + hygiene | `scripts/inventory_check.py`, `repo_hygiene_audit.py` | `make verify` / `make ci` |
+| Cursor-rule drift | `render_cursor_rules.py --check` | `make verify` / `make ci` |
+| Lint + format | ruff check / format --check | `make verify` / `make ci` |
+| Type-check | mypy src | `make verify` / `make ci` |
+| Unit + integration tests | pytest | `make verify` / `make ci` |
+| Lock consistency | `uv lock --check` | `make pr-check` |
 
-> **Anti-patterns** ([§7](https://github.com/Quantum-L9/Cursor-Governance/blob/main/CANONICAL_LAW.md#7-anti-patterns)):
-> Never duplicate logic across kernels. Never add business logic to thin callers.
-> Never reference `@main` from thin callers — always use `@v1`.
+CI execution semantics are owned by l9-ci-core and organization CI
+targeting by l9-ci-control-plane; this repository does not ship
+organization workflow files (see `.l9/architecture.yaml` `ci_ownership`).
 
 ---
 

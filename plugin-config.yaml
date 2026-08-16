@@ -5,10 +5,7 @@ domain: "l9-python-museum"
 protected_paths:
   - "uv.lock"
   - "pyproject.toml"
-  - ".github/workflows/*.yml"
-  - ".github/governance/*.yaml"
-  - ".l9/ci-pin"
-  - "scripts/sync_ci_from_pack.py"
+  - ".l9/runtime-provenance.yaml"
   - "scripts/bootstrap_rename.py"
   - "scripts/inventory_check.py"
   - "scripts/repo_hygiene_audit.py"
@@ -18,7 +15,6 @@ protected_paths:
 high_risk_commands:
   - "git push --force"
   - "rm -rf .venv"
-  - "make sync-ci"
 
 external_endpoint_policy: "STDIO_MCP_ONLY"
 
@@ -38,7 +34,6 @@ graph_record:
   node_type: "plugin_install"
   capabilities:
     - "verify"
-    - "sync-ci"
     - "rename"
     - "render-rules"
     - "hygiene-check"

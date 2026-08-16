@@ -2,8 +2,8 @@
 template: .cursor/rules/templates/l9-python-repo.mdc.template
 template_sha256: a7cf6dc2973684b1f718e9926bd38c895a91e552be4ece627f12fde1f5262a82
 config: plugin-config.yaml
-config_sha256: 8c5d18391bd536b6f70b2bfcaf83f5d2e31fc58ec98934054211fd40bee9f2e1
-render_id: 08eef25f806d925ed381f3c7a1012a05e545aeb792b0582f48bf4d6203a8711c
+config_sha256: 5cdec002775f484fe40289b4af6f1f8d676128cd45efa05563f9fdda02f0f13a
+render_id: 3789d8407cf5fd9732dcb592421580632425dcd1a5b5bd029017fe643e26c34f
 /L9_RENDERED -->
 ---
 description: "l9-repo-template Quantum-L9 Python museum invariants — generated"

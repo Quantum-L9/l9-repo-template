@@ -45,11 +45,11 @@ else
     git remote add origin "https://github.com/${ORG}/${REPO_NAME}.git"
   fi
 
-  # Rename example package identity
+  # Rename example package identity and stamp repository identity
   if [[ -f Makefile ]]; then
-    make rename PKG="${PACKAGE_NAME}"
+    make rename PKG="${PACKAGE_NAME}" ORG="${ORG}" REPO="${REPO_NAME}"
   else
-    python3 scripts/bootstrap_rename.py --pkg "${PACKAGE_NAME}"
+    python3 scripts/bootstrap_rename.py --pkg "${PACKAGE_NAME}" --org "${ORG}" --repo "${REPO_NAME}"
   fi
 fi
 

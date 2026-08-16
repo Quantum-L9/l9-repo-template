@@ -10,7 +10,7 @@ endif
 PYTHON ?= python3
 
 .PHONY: help install-dev setup-hooks lint typecheck inventory-check hygiene-check \
-	check-rules render-rules verify sync-ci rename ci run dev wait-http \
+	check-rules render-rules verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
 	birth-preflight birth-bootstrap birth-verify \
 	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
@@ -25,10 +25,18 @@ help:
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 install-dev: ## Sync locked deps (uv) or pip editable+dev
-	@command -v uv >/dev/null 2>&1 && uv sync --extra dev || $(PYTHON) -m pip install -e ".[dev]"
+	@if command -v uv >/dev/null 2>&1; then \
+		uv sync --extra dev || (echo "uv sync failed — not falling back to pip" >&2; exit 1); \
+	else \
+		$(PYTHON) -m pip install -e ".[dev]"; \
+	fi
 
 setup-hooks: ## Install pre-commit hooks when available
-	@command -v pre-commit >/dev/null 2>&1 && pre-commit install || true
+	@if command -v pre-commit >/dev/null 2>&1; then \
+		pre-commit install; \
+	else \
+		echo "pre-commit not installed — skipping hook install"; \
+	fi
 
 lint: ## Ruff check + format check
 	$(PYTHON) -m ruff check .
@@ -59,9 +67,6 @@ verify: inventory-check hygiene-check check-rules lint typecheck ## Full local p
 	$(PYTHON) -m pytest -q
 
 ci: verify ## Alias for verify
-
-sync-ci: ## Refresh .github from pinned Quantum-L9/.github
-	$(PYTHON) scripts/sync_ci_from_pack.py
 
 run: ## Run FastAPI hello with uvicorn (PKG_APP=package.app:app)
 	$(PYTHON) -m uvicorn $(PKG_APP) --host $${HOST:-127.0.0.1} --port $${PORT:-8000}
@@ -96,15 +101,23 @@ birth-verify: ## Birth-runner verify (PLAY_DIR=...)
 # usage: make rename PKG=foo_bar
 rename: ## Rewrite l9_example_pkg identity; reinstall; re-render rules
 	@test -n "$(PKG)" || (echo "usage: make rename PKG=foo_bar" >&2; exit 2)
-	$(PYTHON) scripts/bootstrap_rename.py --pkg $(PKG)
-	@command -v uv >/dev/null 2>&1 && uv sync --extra dev || $(PYTHON) -m pip install -e ".[dev]"
+	$(PYTHON) scripts/bootstrap_rename.py --pkg $(PKG) $(if $(and $(ORG),$(REPO)),--org $(ORG) --repo $(REPO),)
+	@if command -v uv >/dev/null 2>&1; then \
+		uv sync --extra dev || (echo "uv sync failed — not falling back to pip" >&2; exit 1); \
+	else \
+		$(PYTHON) -m pip install -e ".[dev]"; \
+	fi
 	$(PYTHON) scripts/render_cursor_rules.py --force
 
 regenerate-manifest: ## Refresh MANIFEST.sha256 for runtime-critical paths
 	$(PYTHON) scripts/regenerate_runtime_manifest.py
 
 pr-check: verify ## In-repo product gate (OPEN_PR stays 0; use gov-pr to open)
-	@command -v uv >/dev/null 2>&1 && uv lock --check || true
+	@if command -v uv >/dev/null 2>&1; then \
+		uv lock --check || (echo "uv lock --check failed — lock state is stale" >&2; exit 1); \
+	else \
+		echo "uv not installed — skipping lock validation"; \
+	fi
 	@if [ "$(OPEN_PR)" != "0" ]; then \
 		echo "OPEN_PR=$(OPEN_PR): in-repo pr-check never opens a PR; use make gov-pr" >&2; \
 	fi
