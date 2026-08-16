@@ -24,7 +24,7 @@ DENY_FILES = ("Justfile", "justfile", "nodespec.yaml", "spec.yaml")
 TOOLS_ALLOW = frozenset({"l9_repo", "check_workflow_integrity.py"})
 
 REQUIRED = (
-    ".l9/ci-pin",
+    ".l9/runtime-provenance.yaml",
     ".l9/repo-workflow.json",
     ".l9/repo-workflow.schema.json",
     ".l9/architecture.yaml",
@@ -55,7 +55,6 @@ REQUIRED = (
     "src/l9_example_pkg/app.py",
     "src/l9_example_pkg/settings.py",
     "src/l9_example_pkg/health.py",
-    "scripts/sync_ci_from_pack.py",
     "scripts/bootstrap_rename.py",
     "scripts/inventory_check.py",
     "scripts/repo_hygiene_audit.py",
@@ -75,7 +74,7 @@ REQUIRED = (
     "observability/docker-compose.observability.yml",
     ".cursor/rules/templates/l9-python-repo.mdc.template",
     ".cursor/rules/templates/fastapi.mdc.template",
-    # Org-synced (make sync-ci)
+    # Inherited organization defaults
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
@@ -84,11 +83,6 @@ REQUIRED = (
     ".github/dependabot.yml",
     ".github/labels.yml",
     ".github/pull_request_template.md",
-    ".github/workflows/governance.yml",
-    ".github/governance/execution-profiles.yaml",
-    ".github/workflows/l9-analysis.yml",
-    ".github/workflows/l9-lint-test.yml",
-    "requirements-consumer-ci.txt",
 )
 
 MENTION_CHECKS = (
@@ -130,12 +124,11 @@ def main() -> int:
             errors.append(
                 f"Constellation node API in {path.relative_to(ROOT)} — use L9-Node-Template"
             )
-    pin = ROOT / ".l9" / "ci-pin"
-    if pin.is_file():
-        text = pin.read_text(encoding="utf-8")
-        for key in ("ORG_GITHUB_SHA", "L9_CI_CORE_PIN", "L9_REPO_RUNTIME_PIN"):
-            if f"{key}=" not in text:
-                errors.append(f".l9/ci-pin missing {key}")
+    provenance = ROOT / ".l9" / "runtime-provenance.yaml"
+    if provenance.is_file():
+        text = provenance.read_text(encoding="utf-8")
+        if "l9_ci_core_harvest_revision" not in text:
+            errors.append(".l9/runtime-provenance.yaml missing l9_ci_core_harvest_revision")
     makefile = ROOT / "Makefile"
     template = ROOT / "tools" / "l9_repo" / "Makefile.template"
     if makefile.is_file() and template.is_file():

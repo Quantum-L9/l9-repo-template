@@ -13,7 +13,6 @@ Details: [ops/REPO_BIRTH.md](ops/REPO_BIRTH.md).
 
 - Edit `src/` and helpers; keep hygiene (no eval/exec/print).
 - Re-render Cursor rules after `plugin-config.yaml` edits: `make render-rules`.
-- Refresh CI after pin bumps: `make sync-ci`.
 
 ## When to leave this template
 

@@ -2,8 +2,8 @@
 template: .cursor/rules/templates/00-global.mdc.template
 template_sha256: d2d7516dc8afaacc58264108e72221f74ebc6139e948c55a8eaf7b49097c9eb8
 config: plugin-config.yaml
-config_sha256: 8c5d18391bd536b6f70b2bfcaf83f5d2e31fc58ec98934054211fd40bee9f2e1
-render_id: a7585ece81cc287a963b261edf2fc58d218898ec2ced068d0edac44955d57f0e
+config_sha256: 5cdec002775f484fe40289b4af6f1f8d676128cd45efa05563f9fdda02f0f13a
+render_id: 98376c2424bc3d50495f47f86f6da05eab35d9ebc7999303d1828a7ed049891b
 /L9_RENDERED -->
 ---
 description: "l9-repo-template global conventions — generated from domain cartridge"
@@ -27,10 +27,7 @@ alwaysApply: true
 
 - `uv.lock`
 - `pyproject.toml`
-- `.github/workflows/*.yml`
-- `.github/governance/*.yaml`
-- `.l9/ci-pin`
-- `scripts/sync_ci_from_pack.py`
+- `.l9/runtime-provenance.yaml`
 - `scripts/bootstrap_rename.py`
 - `scripts/inventory_check.py`
 - `scripts/repo_hygiene_audit.py`
@@ -41,7 +38,6 @@ alwaysApply: true
 
 - `git push --force`
 - `rm -rf .venv`
-- `make sync-ci`
 
 ## CI Gates
 

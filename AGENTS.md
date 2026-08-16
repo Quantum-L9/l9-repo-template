@@ -15,7 +15,6 @@ Generic Quantum-L9 Python GitHub Template for runtimes, side projects, and exper
 
 - Example package under `src/` (thin FastAPI hello + optional helpers)
 - Local verify + Cursor rule drift + optional local obs stack
-- CI sync from org pack (`make sync-ci`)
 - Product Make targets in `Repo.mk`
 - Generic birth runner under `scripts/birth-runner/`
 
@@ -24,7 +23,7 @@ Generic Quantum-L9 Python GitHub Template for runtimes, side projects, and exper
 - Become a Constellation node template (`create_node_app`, Gate handlers, TransportPacket routing)
 - Become a `constellation_*` dependency birth factory
 - `engine/`, `chassis/`, `domains/`, Poetry, Sonar, Justfile, golden parallel CI
-- Hand-editing `.github/workflows/*` — re-run `make sync-ci`
+- Adding repository-local CI orchestration — CI execution semantics belong to l9-ci-core
 - Hand-editing generated `.cursor/rules/*.mdc`
 - Copying Cursor-Governance Makefile/ops into this repo
 - Requiring `make obs-up` for verify/CI
@@ -60,11 +59,13 @@ make gov-pr-check
 make -C "$HOME/.cursor-governance" pr-check WS="$(pwd)"
 ```
 
-## CI (org pack via sync-ci)
+## CI ownership boundary
 
-| Workflow | Role |
-|----------|------|
-| `l9-lint-test.yml` | ruff / mypy / pytest |
-| `l9-analysis.yml` | semgrep (+ `.semgrep/semgrep-rules.yaml`) + Core publish |
-
-Pins: `.l9/ci-pin` (`ORG_GITHUB_SHA`, `L9_CI_CORE_PIN`, `L9_REPO_RUNTIME_PIN`).
+- Repository owns deterministic local verification: `make verify` / `make ci`
+  (inventory, hygiene, rules, lint, typecheck, pytest) via `.l9/repo-workflow.json`.
+- l9-ci-core owns CI execution semantics (future invocation through the
+  repository execution contract).
+- l9-ci-control-plane owns organization CI targeting, versioning, and
+  enforcement (future).
+- This repository must not distribute, copy, pin, or synchronize organization
+  CI implementation.

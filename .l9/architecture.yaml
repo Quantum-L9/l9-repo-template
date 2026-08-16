@@ -16,9 +16,14 @@ boundaries:
   owns:
     - generic Python package scaffold under src/
     - Repo.mk product force-multipliers
-    - org CI sync via make sync-ci
     - optional local observability compose
   does_not_own:
     - Constellation node birth / Gate routing / TransportPacket handlers
     - constellation_* dependency package factory
     - Cursor-Governance control plane implementation
+    - organization CI distribution, targeting, versioning, or enforcement
+ci_ownership:
+  execution_semantics: Quantum-L9/l9-ci-core
+  organization_control: Quantum-L9/l9-ci-control-plane
+  organization_defaults: Quantum-L9/.github
+  distribution_model: repository_must_not_distribute_org_ci

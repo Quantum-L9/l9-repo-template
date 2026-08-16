@@ -31,5 +31,5 @@ ${ci_gates_bullets}
 
 - Package: `${package_name}`
 - Non-Constellation Python only — nodes and constellation_* deps use sibling templates.
-- Do not hand-edit `.github/workflows/*` — run `make sync-ci`.
+- Do not add repository-local CI orchestration — CI execution semantics belong to l9-ci-core; organization CI control belongs to l9-ci-control-plane.
 - Test isolation pattern: `${test_isolation_pattern}`

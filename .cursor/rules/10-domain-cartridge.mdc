@@ -2,8 +2,8 @@
 template: .cursor/rules/templates/10-domain-cartridge.mdc.template
 template_sha256: 9eb1c85dbfa2d44905e1b0cc73c5ab54bb2e0df2b2f4dd386a7e491944406a52
 config: plugin-config.yaml
-config_sha256: 8c5d18391bd536b6f70b2bfcaf83f5d2e31fc58ec98934054211fd40bee9f2e1
-render_id: 5799a566943825970d276914cc2a7b6d86e739d634e03532df36b5c912cbc981
+config_sha256: 5cdec002775f484fe40289b4af6f1f8d676128cd45efa05563f9fdda02f0f13a
+render_id: aa45ace5e84693cbb970e2cd5f96c9ae8ce616148d4d0a6c6869e5f2ff78c1fe
 /L9_RENDERED -->
 ---
 description: "Domain cartridge rule — generated from plugin-config.yaml"
@@ -25,7 +25,7 @@ Rules must be reusable across repos. Repo-specific values belong in `plugin-conf
 - Repo: `l9-repo-template`
 - Domain: `l9-python-museum`
 - Plugin version: `1.2.0`
-- Config SHA: `8c5d18391bd5`
+- Config SHA: `5cdec002775f`
 
 ## Template Variables
 
@@ -33,31 +33,22 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
 
 - `- `uv.lock`
 - `pyproject.toml`
-- `.github/workflows/*.yml`
-- `.github/governance/*.yaml`
-- `.l9/ci-pin`
-- `scripts/sync_ci_from_pack.py`
+- `.l9/runtime-provenance.yaml`
 - `scripts/bootstrap_rename.py`
 - `scripts/inventory_check.py`
 - `scripts/repo_hygiene_audit.py`
 - `Makefile`
 - `tools/l9_repo/**`` / `- `uv.lock`
 - `pyproject.toml`
-- `.github/workflows/*.yml`
-- `.github/governance/*.yaml`
-- `.l9/ci-pin`
-- `scripts/sync_ci_from_pack.py`
+- `.l9/runtime-provenance.yaml`
 - `scripts/bootstrap_rename.py`
 - `scripts/inventory_check.py`
 - `scripts/repo_hygiene_audit.py`
 - `Makefile`
-- `tools/l9_repo/**`` / ``uv.lock`, `pyproject.toml`, `.github/workflows/*.yml`, `.github/governance/*.yaml`, `.l9/ci-pin`, `scripts/sync_ci_from_pack.py`, `scripts/bootstrap_rename.py`, `scripts/inventory_check.py`, `scripts/repo_hygiene_audit.py`, `Makefile`, `tools/l9_repo/**`` / `[
+- `tools/l9_repo/**`` / ``uv.lock`, `pyproject.toml`, `.l9/runtime-provenance.yaml`, `scripts/bootstrap_rename.py`, `scripts/inventory_check.py`, `scripts/repo_hygiene_audit.py`, `Makefile`, `tools/l9_repo/**`` / `[
   "uv.lock",
   "pyproject.toml",
-  ".github/workflows/*.yml",
-  ".github/governance/*.yaml",
-  ".l9/ci-pin",
-  "scripts/sync_ci_from_pack.py",
+  ".l9/runtime-provenance.yaml",
   "scripts/bootstrap_rename.py",
   "scripts/inventory_check.py",
   "scripts/repo_hygiene_audit.py",
@@ -65,13 +56,10 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
   "tools/l9_repo/**"
 ]`
 - `- `git push --force`
-- `rm -rf .venv`
-- `make sync-ci`` / `- `git push --force`
-- `rm -rf .venv`
-- `make sync-ci`` / ``git push --force`, `rm -rf .venv`, `make sync-ci`` / `[
+- `rm -rf .venv`` / `- `git push --force`
+- `rm -rf .venv`` / ``git push --force`, `rm -rf .venv`` / `[
   "git push --force",
-  "rm -rf .venv",
-  "make sync-ci"
+  "rm -rf .venv"
 ]`
 - `- `make verify`
 - `make check-rules`
@@ -89,7 +77,6 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
 {
   "capabilities": [
     "verify",
-    "sync-ci",
     "rename",
     "render-rules",
     "hygiene-check",

@@ -26,8 +26,6 @@ Those already have sibling templates — [L9-Node-Template](https://github.com/Q
    make obs-up
    ```
 
-6. Refresh CI after pin bumps: `make sync-ci`
-
 ## Make surfaces (dual ladder)
 
 | Ladder | Command | Role |
@@ -46,7 +44,7 @@ make -C "$HOME/.cursor-governance" pr-check WS="$(pwd)"
 
 - Default example: minimal FastAPI hello (non-Gate)
 - Makefile: Core thin facade + `Repo.mk` product targets + `gov-*` wrappers
-- CI: Quantum-L9/.github via `make sync-ci`
+- CI: org control plane (l9-ci-core execution, l9-ci-control-plane targeting) — no repo-side sync
 - Obs stack: optional (`make obs-up`) — not required for `make verify`
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [TEMPLATE_INVENTORY.md](TEMPLATE_INVENTORY.md),

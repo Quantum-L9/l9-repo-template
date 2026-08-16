@@ -8,8 +8,7 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 |--------|-----|------|
 | Quantum-L9/L9-Node-Template | `8999fd1` (tree at mine) | DX gold only — REJECT_WRONG_PRODUCT for node/codegen surfaces |
 | Quantum-L9/Constellation.PackageTemplate | `dcb5d24` (tree at mine) | DX gold only — REJECT_WRONG_PRODUCT for constellation_* birth plays |
-| Quantum-L9/l9-ci-core | `L9_REPO_RUNTIME_PIN` in `.l9/ci-pin` | `tools/l9_repo` vendored |
-| Quantum-L9/.github | `ORG_GITHUB_SHA` | CI via sync-ci |
+| Quantum-L9/l9-ci-core | `l9_ci_core_harvest_revision` in `.l9/runtime-provenance.yaml` | `tools/l9_repo` vendored |
 
 ## Surfaces
 
@@ -30,7 +29,7 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 | Justfile | — | REJECT | dual runner |
 | Fix-B OTel Python package | — | REJECT | compose-only obs |
 | PackageTemplate plays / PyPI release | — | REJECT_WRONG_PRODUCT | dep factory |
-| Museum-owned parallel CI | — | REJECT | sync-ci only |
+| Museum-owned parallel CI | — | REJECT | organization CI control plane owns CI targeting |
 
 ## Deny at repo root
 
@@ -38,8 +37,10 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 
 `tools/` allowed only for `tools/l9_repo/` + `tools/check_workflow_integrity.py`.
 
-## Org-synced community / governance (via `make sync-ci`)
+## Inherited organization defaults
 
 Community health (`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`),
-`.github/CODEOWNERS`, `dependabot.yml`, labels, issue/PR templates, and `governance.yml`
-come from `Quantum-L9/.github` at `ORG_GITHUB_SHA` (see `.l9/ci-pin`).
+`.github/CODEOWNERS`, `dependabot.yml`, labels, and issue/PR templates are inherited
+from `Quantum-L9/.github` organization defaults — not synchronized by this
+repository. CI targeting and governance invocation belong to the future
+organization CI control plane (l9-ci-core / l9-ci-control-plane).

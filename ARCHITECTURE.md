@@ -20,8 +20,8 @@ scripts/birth-runner/    # Generic Use-template → rename → verify
 src/<pkg>/               # Thin FastAPI hello + optional helpers
 tests/unit|integration/  # package + template compliance tests
 observability/           # optional local Grafana/Prom/Tempo/OTelCol
-.github/                 # org pack via make sync-ci
-.l9/ci-pin               # org + Core workflow + runtime pins
+.github/                 # repository-local GitHub config only
+.l9/runtime-provenance.yaml  # vendored execution-runtime harvest provenance
 ```
 
 ## Ownership split
@@ -33,10 +33,11 @@ observability/           # optional local Grafana/Prom/Tempo/OTelCol
 | Product Make targets | `Repo.mk` |
 | Repository-execution facade | vendored `tools/l9_repo` |
 | Governance pr-check / wiring | Cursor-Governance via `gov-*` / `WS=` |
-| CI pack | Quantum-L9/.github via sync-ci |
+| CI execution semantics | l9-ci-core (future) |
+| Organization CI control | l9-ci-control-plane (future) |
 
 ## Force multipliers
 
-`make rename` · `make verify` · `make pr-check` · `make sync-ci` ·
+`make rename` · `make verify` · `make pr-check` ·
 `make render-rules` · `make run` · `make obs-up` · `make gov-pr-check` ·
 `make agent-check` · `make hygiene-check`

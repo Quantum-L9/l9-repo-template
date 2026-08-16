@@ -10,7 +10,7 @@ endif
 PYTHON ?= python3
 
 .PHONY: help install-dev setup-hooks lint typecheck inventory-check hygiene-check \
-	check-rules render-rules verify sync-ci rename ci run dev wait-http \
+	check-rules render-rules verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
 	birth-preflight birth-bootstrap birth-verify \
 	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
@@ -59,9 +59,6 @@ verify: inventory-check hygiene-check check-rules lint typecheck ## Full local p
 	$(PYTHON) -m pytest -q
 
 ci: verify ## Alias for verify
-
-sync-ci: ## Refresh .github from pinned Quantum-L9/.github
-	$(PYTHON) scripts/sync_ci_from_pack.py
 
 run: ## Run FastAPI hello with uvicorn (PKG_APP=package.app:app)
 	$(PYTHON) -m uvicorn $(PKG_APP) --host $${HOST:-127.0.0.1} --port $${PORT:-8000}

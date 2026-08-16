@@ -4,7 +4,7 @@
 > as an org bootstrap template.
 >
 > **SSOT replacement:** [Quantum-L9/l9-repo-template](https://github.com/Quantum-L9/l9-repo-template)
-> (`make rename` → `make verify` → `make sync-ci`).
+> (`make rename` → `make verify`).
 >
 > golden-repo retains kitchen-sink FastAPI/engine layout, Poetry, and parallel CI
 > that is not the Quantum-L9 org pack. New repos must Use Template from
