@@ -1,0 +1,16 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-repo-template
+# layer: security
+# owner: platform
+# status: active
+# --- /L9_META ---
+#
+# Thin repository policy. Detection rules remain owned by Gitleaks defaults;
+# L9 CI installs and invokes the scanner. Add project-specific allowlists only
+# for reviewed false positives, never as broad path exclusions.
+
+title = "Quantum-L9 repository template"
+
+[extend]
+useDefault = true

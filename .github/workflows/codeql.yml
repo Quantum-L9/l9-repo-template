@@ -1,0 +1,41 @@
+# --- L9_META ---
+# l9_schema: 1
+# artifact_type: ci_workflow
+# component: codeql_code_quality_caller
+# tags: [ci, codeql, code-quality, security, governance, quantum-l9, caller, template]
+# retrieval: on_demand
+# status: active
+# --- /L9_META ---
+#
+# ORG-WIDE CALLER TEMPLATE - copy verbatim to any Quantum-L9 repo as
+# `.github/workflows/codeql.yml`. Repo-agnostic: no per-repo edits required.
+# The reusable workflow auto-detects the repo's languages. Delete any pre-existing
+# `.github/codeql/codeql-config.yml` in the target repo (config is centralized).
+
+name: "CodeQL (security + code quality)"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "**/*.mdc"
+  schedule:
+    - cron: "24 3 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  codeql:
+    uses: Quantum-L9/Cursor-Governance/.github/workflows/codeql-reusable.yml@main
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
