@@ -26,6 +26,8 @@ DENY_FILES = ("Justfile", "justfile", "nodespec.yaml", "spec.yaml")
 
 # Legacy org CI distribution surfaces must not reappear: CI orchestration
 # belongs to l9-ci-core and organization CI control to l9-ci-control-plane.
+# Thin callers to centrally owned reusable workflows are allowed; local copies
+# of centrally owned configuration are not.
 DENY_CI_DISTRIBUTION = (
     ".l9/ci-pin",
     "scripts/sync_ci_from_pack.py",
@@ -35,6 +37,7 @@ DENY_CI_DISTRIBUTION = (
     ".github/workflows/on-org-update.yml",
     ".github/workflows/governance.yml",
     ".github/governance",
+    ".github/codeql/codeql-config.yml",
 )
 
 TOOLS_ALLOW = frozenset({"l9_repo", "check_workflow_integrity.py"})
@@ -48,6 +51,7 @@ REQUIRED = (
     ".l9/sdk-compatibility.yaml",
     ".l9-template-version",
     ".python-version",
+    ".pre-commit-config.yaml",
     "pyproject.toml",
     "uv.lock",
     "Makefile",
@@ -57,6 +61,7 @@ REQUIRED = (
     "LICENSE",
     "README.md",
     "AGENTS.md",
+    "CLAUDE.md",
     "ARCHITECTURE.md",
     "TEMPLATE_INVENTORY.md",
     "docs/WHEN_TO_USE.md",
@@ -97,12 +102,19 @@ REQUIRED = (
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".github/labels.yml",
+    # Sanctioned thin security caller; shared config remains centralized.
+    ".github/workflows/codeql.yml",
 )
 
 MENTION_CHECKS = (
     ("README.md", ("L9-Node-Template", "Constellation.PackageTemplate", "outside")),
     ("docs/WHEN_TO_USE.md", ("L9-Node-Template", "Constellation.PackageTemplate")),
     ("AGENTS.md", (".l9/architecture.yaml", ".l9/ownership.yaml")),
+    ("CLAUDE.md", ("AGENTS.md", ".l9/architecture.yaml", ".github/workflows/codeql.yml")),
+    (
+        ".github/workflows/codeql.yml",
+        ("Quantum-L9/Cursor-Governance/.github/workflows/codeql-reusable.yml@main",),
+    ),
 )
 
 
@@ -117,7 +129,7 @@ def main() -> int:
     for name in DENY_CI_DISTRIBUTION:
         if (ROOT / name).exists():
             errors.append(
-                f"legacy CI distribution surface present: {name} — "
+                f"legacy CI distribution surface present: {name} - "
                 "CI orchestration belongs to l9-ci-core / l9-ci-control-plane"
             )
     tools = ROOT / "tools"
@@ -147,7 +159,7 @@ def main() -> int:
         text = path.read_text(encoding="utf-8", errors="replace")
         if "create_node_app" in text or "register_handler" in text:
             errors.append(
-                f"Constellation node API in {path.relative_to(ROOT)} — use L9-Node-Template"
+                f"Constellation node API in {path.relative_to(ROOT)} - use L9-Node-Template"
             )
     provenance = ROOT / ".l9" / "runtime-provenance.yaml"
     if provenance.is_file():
