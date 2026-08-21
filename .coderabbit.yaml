@@ -1,0 +1,33 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-repo-template
+# layer: governance
+# owner: platform
+# status: active
+# --- /L9_META ---
+
+language: en-US
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches: [main]
+  instructions: |
+    Review this repository against its L9 authority surfaces before suggesting changes.
+    Read AGENTS.md first, then .l9/architecture.yaml, .l9/ownership.yaml,
+    .l9/sdk-compatibility.yaml, and CLAUDE.md when Claude-specific instructions apply.
+
+    Treat machine-readable .l9 contracts as higher authority than narrative guidance.
+    Flag duplicated CI/governance implementations, weakened validation, dependency
+    drift between pyproject.toml and uv.lock, secret exposure, destructive Git behavior,
+    and changes that cross the documented sibling-template product boundaries.
+
+    Do not require Constellation node APIs in this generic template. Constellation nodes
+    belong in Quantum-L9/L9-Node-Template and constellation_* dependency packages belong
+    in Quantum-L9/Constellation.PackageTemplate.
+chat:
+  auto_reply: false

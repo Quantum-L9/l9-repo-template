@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed if museum inventory invariants are violated."""
+"""Fail closed if template inventory invariants are violated."""
 
 from __future__ import annotations
 
@@ -22,7 +22,13 @@ DENY_DIRS = (
     "contracts",
 )
 
-DENY_FILES = ("Justfile", "justfile", "nodespec.yaml", "spec.yaml")
+DENY_FILES = (
+    "Justfile",
+    "justfile",
+    "nodespec.yaml",
+    "spec.yaml",
+    "docs/examples/coderabbit.yaml",
+)
 
 # Legacy org CI distribution surfaces must not reappear: CI orchestration
 # belongs to l9-ci-core and organization CI control to l9-ci-control-plane.
@@ -51,11 +57,16 @@ REQUIRED = (
     ".l9/sdk-compatibility.yaml",
     ".l9-template-version",
     ".python-version",
+    ".gitattributes",
     ".pre-commit-config.yaml",
+    ".gitleaks.toml",
+    ".coderabbit.yaml",
     "pyproject.toml",
     "uv.lock",
     "Makefile",
     "Repo.mk",
+    "bootstrap.sh",
+    "llms.txt",
     "MANIFEST.sha256",
     "requirements-repo-runtime.txt",
     "LICENSE",
@@ -115,6 +126,10 @@ MENTION_CHECKS = (
         ".github/workflows/codeql.yml",
         ("Quantum-L9/Cursor-Governance/.github/workflows/codeql-reusable.yml@main",),
     ),
+    ("llms.txt", ("AGENTS.md", "CLAUDE.md", ".l9/architecture.yaml", "bootstrap.sh")),
+    ("bootstrap.sh", ("python3 -m tools.l9_repo", "setup")),
+    (".gitleaks.toml", ("[extend]", "useDefault = true")),
+    (".coderabbit.yaml", ("AGENTS.md", ".l9/architecture.yaml", ".l9/ownership.yaml")),
 )
 
 
