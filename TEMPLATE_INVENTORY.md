@@ -19,7 +19,6 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 | `scripts/repo_hygiene_audit.py` | eval/exec/print + scaffold bans | PORT_SURGICAL | Node-Template audit_engine (generic) |
 | `scripts/birth-runner/new_repo.py` | One-command birth state machine (8 stages) | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/0*.sh` | Staged debugging surfaces | PORT_SURGICAL | PackageTemplate dep-build-runner mechanics |
-| `scripts/birth-runner/payload-ownership.yaml` | Chassis vs example-product boundary; makes a repository-shaped PAYLOAD authoritative | ALREADY_HAVE | this repo |
 | `.l9/org-birth-profile.yaml` | Declares the org repo class | ALREADY_HAVE | Quantum-L9/.github contract |
 | `src/*/settings|errors|health|retry.py` | Optional package helpers | PORT_SURGICAL | PackageTemplate concepts |
 | `.cursor/rules/templates/l9-python-repo.mdc.template` | Generic agent rule | PORT_SURGICAL | Node-Template contract rule rewrite |
