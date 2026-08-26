@@ -25,7 +25,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 RUNNER = REPO / "scripts" / "birth-runner" / "new_repo.py"
 _SPEC = importlib.util.spec_from_file_location("l9_birth_new_repo_it", RUNNER)
-assert _SPEC and _SPEC.loader
+assert _SPEC is not None
+assert _SPEC.loader is not None
 new_repo = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = new_repo
 _SPEC.loader.exec_module(new_repo)
@@ -51,45 +52,42 @@ pytestmark = [
     ),
 ]
 
-ORG_POLICY = json.dumps(
-    {
-        "schema": "l9.org-birth-profile/v1",
-        "default_class": "default",
-        "marker_path": ".l9/org-birth-profile.yaml",
-        "classes": {
-            "default": {"seed_categories": ["codeowners"]},
-            "non_constellation_python": {
-                "description": "test fixture mirroring the org contract",
-                "seed_categories": ["codeowners", "dependabot", "labels"],
-                "inherit": ["CODE_OF_CONDUCT.md"],
-                # Mirrors scripts/inventory_check.py DENY_CI_DISTRIBUTION.
-                "forbid": [
-                    ".github/workflows/l9-analysis.yml",
-                    ".github/workflows/l9-lint-test.yml",
-                    ".github/workflows/on-org-update.yml",
-                    ".github/workflows/governance.yml",
-                    ".github/governance/**",
-                ],
-                "remote_apply": {"labels": True, "repo_settings": True},
-                "mandatory_files_waive": [".github/workflows/governance.yml"],
-            },
-        },
-    },
-    indent=2,
-)
 
+# Stage 4 materializes the applicable org files by running the ORGANIZATION's
+# own `ops/build-seed-payload.js`, so a birth needs a real Quantum-L9/.github
+# checkout — not a stand-in. A hand-written fake builder would prove only that
+# the fake works, which is the opposite of what an acceptance test is for.
+def _real_org_checkout() -> Path | None:
+    """A genuine Quantum-L9/.github working tree, or None.
 
-def _org_profile_src(tmp_path: Path) -> Path:
-    """A stand-in Quantum-L9/.github holding only the class policy.
-
-    Reading the real organization repository over the network would make this
-    test depend on gh auth and on whatever is on that repo's default branch
-    today. The contract under test is the *shape*, which is pinned here.
+    Looks at `L9_ORG_GITHUB_SRC` first, then the usual sibling checkout. The
+    marker of "genuine" is that it carries the payload builder this birth will
+    actually execute.
     """
-    root = tmp_path / "org-github"
-    (root / "policies").mkdir(parents=True)
-    (root / "policies" / "repo-classes.yml").write_text(ORG_POLICY, encoding="utf-8")
-    return root
+    candidates = []
+    env_src = os.environ.get("L9_ORG_GITHUB_SRC")
+    if env_src:
+        candidates.append(Path(env_src))
+    candidates.append(REPO.parent / ".github")
+    for root in candidates:
+        if (root / "ops" / "build-seed-payload.js").is_file() and (
+            root / "policies" / "repo-classes.yml"
+        ).is_file():
+            return root.resolve()
+    return None
+
+
+ORG_SRC = _real_org_checkout()
+
+pytestmark.append(
+    pytest.mark.skipif(
+        ORG_SRC is None,
+        reason=(
+            "no Quantum-L9/.github checkout found (set L9_ORG_GITHUB_SRC or place one "
+            "beside this repo) — birth materializes org files with the org's own builder"
+        ),
+    )
+)
 
 
 def _birth(tmp_path: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -109,7 +107,7 @@ def _birth(tmp_path: Path, *extra: str) -> subprocess.CompletedProcess[str]:
             "--work-dir",
             str(tmp_path / "work"),
             "--org-profile-src",
-            str(_org_profile_src(tmp_path)),
+            str(ORG_SRC),
             "--no-remote",
             *extra,
         ],
@@ -174,7 +172,8 @@ def test_org_birth_profile_is_applied(
     marker = (dest / ".l9" / "org-birth-profile.yaml").read_text(encoding="utf-8")
     assert new_repo.parse_marker_profile(marker) == "non_constellation_python"
     assert "Quantum-L9/l9-birth-acceptance" in marker
-    assert "template_sha:" in marker and "org_profile_sha:" in marker
+    assert "template_sha:" in marker
+    assert "org_profile_sha:" in marker
 
 
 def test_no_forbidden_org_ci_distribution(
@@ -219,6 +218,70 @@ def test_receipt_records_both_provenance_shas(
     assert receipt["organization"]["birth_profile"] == "non_constellation_python"
     assert receipt["product"]["repository"] == "Quantum-L9/l9-birth-acceptance"
     assert receipt["template"]["template_version"]
+
+
+def test_org_contract_still_has_the_shape_birth_depends_on() -> None:
+    """Cross-repo contract check, against the real policy file.
+
+    Birth reads this from Quantum-L9/.github. If the class stops forbidding a
+    path that `scripts/inventory_check.py` denies, every repository born from
+    this template gets a pull request it cannot merge — which is exactly what
+    this whole contract was built to stop.
+    """
+    assert ORG_SRC is not None
+    doc = new_repo.parse_json_in_yaml(
+        (ORG_SRC / "policies" / "repo-classes.yml").read_text(encoding="utf-8")
+    )
+    profile = new_repo.resolve_profile(doc, new_repo.BIRTH_PROFILE_CLASS)
+    for denied in (
+        ".github/workflows/l9-analysis.yml",
+        ".github/workflows/l9-lint-test.yml",
+        ".github/workflows/on-org-update.yml",
+        ".github/workflows/governance.yml",
+    ):
+        assert new_repo.match_pattern(profile["forbid"], denied), (
+            f"org class {profile['name']} must forbid {denied}; inventory_check.py denies it"
+        )
+    assert new_repo.match_pattern(profile["forbid"], ".github/governance/waivers.yaml")
+    assert profile["seed_categories"], "the class must materialize something"
+
+
+def test_materialized_org_files_are_in_the_initial_commit(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """MATERIALIZE lands before the commit, not in a later seeder PR."""
+    proc, dest = born
+    receipt = json.loads(
+        (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+    )
+    assert "materialized" in receipt
+    for rel in receipt["materialized"]:
+        assert (dest / rel).is_file(), f"{rel} was reported materialized but is not on disk"
+    assert "org files materialized" in proc.stdout
+
+
+def test_license_governs_the_newborn_not_the_org_github_repo(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """The one defect a factory would reproduce perfectly, forever."""
+    _, dest = born
+    text = (dest / "LICENSE").read_text(encoding="utf-8")
+    assert new_repo.POISONED_LICENSE_NOTICE not in text
+    assert "QUANTUM AI PARTNERS" in text
+
+
+def test_no_origin_is_pre_created(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """`gh repo create --source --remote origin --push` owns remote creation.
+
+    Pre-creating `origin` in stage 2 gave two owners for one remote.
+    """
+    _, dest = born
+    remotes = subprocess.run(
+        ["git", "-C", str(dest), "remote"], capture_output=True, text=True, check=False
+    )
+    assert remotes.stdout.strip() == ""
 
 
 def test_a_payload_that_smuggles_org_ci_stops_the_birth(tmp_path: Path) -> None:

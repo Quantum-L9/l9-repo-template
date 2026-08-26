@@ -33,6 +33,7 @@ applies it.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -47,10 +48,36 @@ from pathlib import Path
 TEMPLATE_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_ORG = "Quantum-L9"
-DEFAULT_WORK_DIR = "/tmp/l9-births"
 ORG_PROFILE_REPO = "Quantum-L9/.github"
 ORG_PROFILE_PATH = "policies/repo-classes.yml"
+PYPROJECT = "pyproject.toml"
 MARKER_PATH = ".l9/org-birth-profile.yaml"
+SEED_BRANCH = "chore/auto-seed-governance"
+# A licence that names one repository is wrong in every other repository. The
+# org consumer template carried this notice; birth copies that file in as
+# canonical, so the assertion belongs in the birth engine too, not only upstream.
+POISONED_LICENSE_NOTICE = "applies only to the Quantum-L9/.github repository"
+# The org taxonomy is 33 labels; require most rather than an exact count, so
+# adding one label upstream does not fail every birth.
+MIN_ORG_LABELS = 20
+
+
+def default_work_dir() -> Path:
+    """A private, user-owned birth workspace.
+
+    Never a fixed path under /tmp. A world-writable directory with a
+    predictable name lets any local user pre-create `<workdir>/<repo>` — as a
+    symlink, or with their own contents — before the birth runs, and the
+    engine would then assemble a repository inside it and push the result.
+    `$XDG_STATE_HOME` (or `~/.local/state`) is user-owned, and the directory is
+    created 0700 so a pre-existing world-readable one is not silently reused.
+    """
+    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
+    root = Path(base) / "l9" / "births"
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return root
+
+
 BIRTH_PROFILE_CLASS = "non_constellation_python"
 CANONICAL_LICENSE = "LICENSE"
 
@@ -251,6 +278,7 @@ class BirthReceipt:
     workdir: str = ""
     head_sha: str = "unknown"
     born_at: str = ""
+    materialized: list[str] = field(default_factory=list)
     stages: list[StageResult] = field(default_factory=list)
 
     def record(self, key: str, label: str, status: str, detail: str = "") -> StageResult:
@@ -284,6 +312,7 @@ class BirthReceipt:
             },
             "workdir": self.workdir,
             "head_sha": self.head_sha,
+            "materialized": list(self.materialized),
             "result": "PASS" if not self.failed else "FAIL",
             "stages": [
                 {"key": s.key, "label": s.label, "status": s.status, "detail": s.detail}
@@ -413,9 +442,26 @@ def gh_json(args: list[str]) -> object:
     return json.loads(proc.stdout or "null")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stages
-# ─────────────────────────────────────────────────────────────────────────────
+def gh_json_safe(args: list[str]) -> object:
+    """gh api returning parsed JSON, or None on any failure. Never raises."""
+    proc = run(["gh", *args], check=False)
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout or "null")
+    except json.JSONDecodeError:
+        return None
+
+
+def _remote_text(slug: str, path: str) -> str | None:
+    """Decode a remote file's contents, or None when it cannot be read."""
+    proc = run(["gh", "api", f"repos/{slug}/contents/{path}", "--jq", ".content"], check=False)
+    if proc.returncode != 0:
+        return None
+    try:
+        return base64.b64decode("".join((proc.stdout or "").split())).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
 
 
 @dataclass
@@ -444,61 +490,69 @@ class BirthConfig:
         return self.work_dir / self.repo
 
 
-def stage_preflight(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Tools, auth, identity, and a target name that is actually free."""
+def _preflight_tools(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """Every executable the chosen mode needs, and a usable gh session."""
     for tool in ("git", "python3", "uv"):
         if shutil.which(tool) is None:
             raise BirthError(f"{tool} not found on PATH")
     receipt.record("preflight.tools", "tools", "PASS", "git, python3, uv")
 
-    needs_gh = cfg.remote or cfg.org_profile_src is None
-    if needs_gh:
-        if shutil.which("gh") is None:
-            raise BirthError(
-                "gh not found on PATH — required to read the org birth profile and to "
-                "create the repository. Use --org-profile-src and --no-remote for a "
-                "fully local birth."
-            )
-        proc = run(["gh", "auth", "status"], check=False)
-        if proc.returncode != 0:
-            raise BirthError("gh is not authenticated — run `gh auth login`")
-        receipt.record("preflight.auth", "auth", "PASS", "gh authenticated")
-    else:
+    # node runs the ORGANIZATION's seed payload builder in stage 4; a birth
+    # cannot materialize org state without it.
+    if shutil.which("node") is None:
+        raise BirthError(
+            "node not found on PATH — required to run the organization's seed payload builder"
+        )
+
+    if not (cfg.remote or cfg.org_profile_src is None):
         receipt.record("preflight.auth", "auth", "SKIP", "local birth, no gh needed")
+        return
+    if shutil.which("gh") is None:
+        raise BirthError(
+            "gh not found on PATH — required to read the org birth profile and to create "
+            "the repository. Use --org-profile-src and --no-remote for a fully local birth."
+        )
+    if run(["gh", "auth", "status"], check=False).returncode != 0:
+        raise BirthError("gh is not authenticated — run `gh auth login`")
+    receipt.record("preflight.auth", "auth", "PASS", "gh authenticated")
 
-    # Identity was validated when the config was built; record it as evidence.
-    receipt.record(
-        "preflight.identity",
-        "identity",
-        "PASS",
-        f"{cfg.slug} / {cfg.pkg}",
-    )
 
-    if not (cfg.template_src / "pyproject.toml").is_file():
+def _preflight_sources(cfg: BirthConfig) -> None:
+    """The template must be a pristine checkout, and the workspace must be free."""
+    if not (cfg.template_src / PYPROJECT).is_file():
         raise BirthError(f"template source is not a repository checkout: {cfg.template_src}")
     if not (cfg.template_src / "src" / "l9_example_pkg").is_dir():
         raise BirthError(
             f"template source has already been renamed: {cfg.template_src} — "
             "birth needs a pristine l9-repo-template checkout"
         )
-
     if cfg.payload is not None and not cfg.payload.is_dir():
         raise BirthError(f"PAYLOAD is not a directory: {cfg.payload}")
-
     if cfg.dest.exists() and any(cfg.dest.iterdir()):
         raise BirthError(
             f"work directory already populated: {cfg.dest} — remove it or pass a different WORK_DIR"
         )
 
-    if cfg.remote:
-        proc = run(["gh", "repo", "view", cfg.slug, "--json", "name"], check=False)
-        if proc.returncode == 0:
-            raise BirthError(
-                f"{cfg.slug} already exists — birth creates a repository, it does not adopt one"
-            )
-        receipt.record("preflight.name", "name available", "PASS", f"{cfg.slug} is free")
-    else:
+
+def _preflight_name_free(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """Birth creates a repository; it does not adopt one that already exists."""
+    if not cfg.remote:
         receipt.record("preflight.name", "name available", "SKIP", "local birth")
+        return
+    if run(["gh", "repo", "view", cfg.slug, "--json", "name"], check=False).returncode == 0:
+        raise BirthError(
+            f"{cfg.slug} already exists — birth creates a repository, it does not adopt one"
+        )
+    receipt.record("preflight.name", "name available", "PASS", f"{cfg.slug} is free")
+
+
+def stage_preflight(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """Tools, auth, identity, and a target name that is actually free."""
+    _preflight_tools(cfg, receipt)
+    # Identity was validated when the config was built; record it as evidence.
+    receipt.record("preflight.identity", "identity", "PASS", f"{cfg.slug} / {cfg.pkg}")
+    _preflight_sources(cfg)
+    _preflight_name_free(cfg, receipt)
 
 
 def stage_assemble(cfg: BirthConfig, receipt: BirthReceipt) -> None:
@@ -507,8 +561,12 @@ def stage_assemble(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     copied = copy_tree(cfg.template_src, cfg.dest)
     receipt.record("assemble.template", "template copied", "PASS", f"{copied} files")
 
+    # No `git remote add origin` here. Stage 6 runs `gh repo create --source
+    # --remote origin --push`, and gh's --remote flag CREATES that remote for
+    # the source repository; pre-creating it makes two owners for one remote.
+    # One operation owns remote-repo creation, origin creation, and the initial
+    # push.
     run(["git", "init", "-q", "-b", "main"], cwd=cfg.dest)
-    run(["git", "remote", "add", "origin", f"https://github.com/{cfg.slug}.git"], cwd=cfg.dest)
 
     run(
         [
@@ -541,7 +599,7 @@ def _stamp_description(cfg: BirthConfig) -> None:
     Only the `description = "..."` line in `[project]` is rewritten; prose that
     happens to quote the template description is left alone.
     """
-    pyproject = cfg.dest / "pyproject.toml"
+    pyproject = cfg.dest / PYPROJECT
     text = pyproject.read_text(encoding="utf-8")
     escaped = cfg.desc.replace("\\", "\\\\").replace('"', '\\"')
     updated, count = re.subn(
@@ -571,12 +629,117 @@ def _fetch_org_profile(cfg: BirthConfig) -> tuple[str, str]:
     text = run(
         ["gh", "api", f"repos/{ORG_PROFILE_REPO}/contents/{ORG_PROFILE_PATH}", "--jq", ".content"]
     ).stdout
-    import base64
 
     decoded = base64.b64decode("".join(text.split())).decode("utf-8")
     head = gh_json(["api", f"repos/{ORG_PROFILE_REPO}/commits/HEAD", "--jq", "{sha:.sha}"])
     sha = head.get("sha", "unknown") if isinstance(head, dict) else "unknown"
     return decoded, sha
+
+
+def _org_checkout(cfg: BirthConfig, org_sha: str) -> Path | None:
+    """A Quantum-L9/.github working tree at the exact recorded SHA.
+
+    Returned so the birth can run the ORGANIZATION's own payload builder
+    (`ops/build-seed-payload.js`) rather than reimplementing the
+    category -> destination mapping here. Two implementations of "what does
+    this class receive" is two answers, and the seeder's is authoritative.
+    """
+    if cfg.org_profile_src is not None:
+        return cfg.org_profile_src
+    if shutil.which("gh") is None:
+        return None
+    dest = cfg.work_dir / f".org-github-{org_sha[:12]}"
+    if (dest / "ops" / "build-seed-payload.js").is_file():
+        return dest
+    dest.mkdir(parents=True, exist_ok=True)
+    run(["git", "init", "-q"], cwd=dest)
+    run(["git", "remote", "add", "origin", f"https://github.com/{ORG_PROFILE_REPO}.git"], cwd=dest)
+    ref = org_sha if SHA_RE.match(org_sha) else "HEAD"
+    run(["git", "fetch", "-q", "--depth=1", "origin", ref], cwd=dest)
+    run(["git", "checkout", "-q", "--detach", "FETCH_HEAD"], cwd=dest)
+    return dest
+
+
+# With `node -e`, process.argv is [execPath, ...args] — there is no script path
+# at argv[1] the way there is for a file, so the arguments start at index 1.
+_PAYLOAD_JS = """
+const fs = require('fs');
+const path = require('path');
+const root = process.argv[1];
+const opts = JSON.parse(process.argv[2]);
+process.chdir(root);
+const { buildSeedPayload } = require(path.join(root, 'ops', 'build-seed-payload.js'));
+process.stdout.write(JSON.stringify(buildSeedPayload({ fs, ...opts })));
+"""
+
+
+def build_org_payload(checkout: Path, profile: dict, cfg: BirthConfig) -> dict[str, str]:
+    """Ask the organization what this class materializes. Do not guess.
+
+    Runs `ops/build-seed-payload.js` from the pinned checkout, so INHERIT drops
+    and FORBID throws inside the org's own code path — the same one the seeder
+    uses. A FORBID hit surfaces here as a birth failure rather than as a red
+    pull request opened against the newborn a week later.
+    """
+    if shutil.which("node") is None:
+        raise BirthError(
+            "node not found on PATH — required to run the organization's seed payload builder"
+        )
+    opts = {
+        "profile": profile,
+        "hasRootCodeowners": (cfg.dest / "CODEOWNERS").is_file(),
+        "hasPython": (cfg.dest / PYPROJECT).is_file(),
+        "hasPackageJson": (cfg.dest / "package.json").is_file(),
+        "repository": cfg.slug,
+    }
+    proc = run(["node", "-e", _PAYLOAD_JS, str(checkout), json.dumps(opts)], check=False)
+    if proc.returncode != 0:
+        detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
+        raise BirthError(f"organization seed payload builder failed:\n{detail[-1500:]}")
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise BirthError(f"seed payload builder returned non-JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise BirthError("seed payload builder returned a non-object payload")
+    return payload
+
+
+def materialize_org_payload(root: Path, payload: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Write MATERIALIZE files into the newborn at `root`, missing-only.
+
+    Missing-only matches the seeder's own semantics: the template and the
+    product payload are closer to the repository than the org default is, so
+    anything already present wins. Returns (written, kept).
+    """
+    written: list[str] = []
+    kept: list[str] = []
+    for dest, body in sorted(payload.items()):
+        target = root / dest
+        if target.exists():
+            kept.append(dest)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        written.append(dest)
+    return written, kept
+
+
+def inherited_present(root: Path, profile: dict) -> list[str]:
+    """INHERIT paths the repository is carrying its own copy of.
+
+    Not fatal: GitHub prefers a repository-local file over the organization
+    default, so a deliberate override is legal and supported. It is reported
+    because an *accidental* copy is duplication the organization would then
+    need a second synchronizer to clean up — which is the failure mode the
+    whole INHERIT/MATERIALIZE split exists to avoid.
+    """
+    hits: list[str] = []
+    for pattern in profile["inherit"]:
+        probe = pattern[:-3] if pattern.endswith("/**") else pattern
+        if (root / probe).exists():
+            hits.append(pattern)
+    return hits
 
 
 def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
@@ -590,6 +753,16 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     # a per-repo header. Restore the canonical text.
     replaced = target.is_file() and target.read_bytes() != canonical.read_bytes()
     shutil.copy2(canonical, target)
+    # MUST FIX BEFORE BIRTH. The canonical text is copied into every newborn,
+    # so a repository-specific notice in it is a licence that disclaims the
+    # repository it governs — reproduced automatically, in every repository the
+    # factory ever makes. This is the one thing a factory must never automate.
+    if POISONED_LICENSE_NOTICE in target.read_text(encoding="utf-8"):
+        raise BirthError(
+            f"canonical LICENSE carries a repository-specific notice "
+            f"({POISONED_LICENSE_NOTICE!r}) — it cannot govern {cfg.slug}. "
+            "Fix templates/community-health/LICENSE upstream and the template LICENSE here."
+        )
     receipt.record(
         "finalize.license",
         "license",
@@ -638,6 +811,39 @@ def stage_apply_org_profile(cfg: BirthConfig, receipt: BirthReceipt) -> dict:
         encoding="utf-8",
     )
     receipt.record("org.profile", "org defaults", "PASS", f"{profile['name']} @ {org_sha[:12]}")
+
+    # MATERIALIZE happens HERE, before validation and before the initial commit.
+    # A repository that is "born, then offered an org patch" is not born with
+    # the organization's current state; it is born incomplete and then sent a
+    # pull request. The applicable org files belong in the first commit.
+    checkout = _org_checkout(cfg, org_sha)
+    if checkout is None:
+        raise BirthError(
+            "cannot reach a Quantum-L9/.github checkout to materialize org files — "
+            "pass --org-profile-src for an offline birth"
+        )
+    payload = build_org_payload(checkout, profile, cfg)
+    written, kept = materialize_org_payload(cfg.dest, payload)
+    receipt.materialized = written
+    receipt.record(
+        "org.materialize",
+        "org files materialized",
+        "PASS",
+        f"{len(written)} written, {len(kept)} already present"
+        + (f": {', '.join(written)}" if written else ""),
+    )
+
+    # INHERIT is a claim that GitHub supplies the file org-wide. A repo-local
+    # copy overrides that, which is legal but worth naming.
+    overrides = inherited_present(cfg.dest, profile)
+    receipt.record(
+        "org.inherit",
+        "inherit clean",
+        "PASS",
+        "no local copies of inherited files"
+        if not overrides
+        else f"repo-local override of {len(overrides)}: {', '.join(overrides)}",
+    )
 
     # FORBID is an assertion about the assembled repository, not only a filter
     # on a seed payload — a product payload can introduce one just as easily.
@@ -711,6 +917,8 @@ def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     receipt.head_sha = git_head(cfg.dest)
 
     visibility = "--private" if cfg.private else "--public"
+    # One command owns all three: create the remote repository, create the
+    # `origin` remote for this working tree, and push the initial commit.
     run(
         [
             "gh",
@@ -724,77 +932,117 @@ def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
             str(cfg.dest),
             "--remote",
             "origin",
+            "--push",
         ]
     )
     receipt.record("github.create", "repository created", "PASS", cfg.slug)
-
-    run(["git", "push", "-u", "origin", "main"], cwd=cfg.dest)
     receipt.record("github.push", "initial push", "PASS", receipt.head_sha[:12])
 
 
+def _newest_dispatch_run(workflow: str, since: str) -> dict | None:
+    """The most recent workflow_dispatch run of `workflow` created at/after `since`.
+
+    `gh workflow run` prints nothing useful and returns before a run exists, so
+    the run has to be found by polling the runs list. Filtering on `since`
+    keeps an older run of the same workflow from being mistaken for this one.
+    """
+    proc = run(
+        [
+            "gh",
+            "api",
+            f"repos/{ORG_PROFILE_REPO}/actions/workflows/{workflow}/runs"
+            "?event=workflow_dispatch&per_page=20",
+            "--jq",
+            ".workflow_runs",
+        ],
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        runs = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError:
+        return None
+    fresh = [r for r in runs if isinstance(r, dict) and str(r.get("created_at", "")) >= since]
+    return max(fresh, key=lambda r: str(r.get("created_at", "")), default=None)
+
+
+def _await_workflow(workflow: str, since: str, timeout_s: int) -> tuple[str, str]:
+    """Block until one dispatched run reaches a conclusion.
+
+    Returns (state, detail) where state is PASS / FAIL / TIMEOUT. A dispatch
+    that GitHub merely ACCEPTED proves nothing: not that the run started, not
+    that it succeeded, not that a single label was applied. Only `success`
+    earns a PASS.
+    """
+    deadline = time.monotonic() + timeout_s
+    run_id = None
+    while time.monotonic() < deadline:
+        found = _newest_dispatch_run(workflow, since)
+        if found:
+            run_id = found.get("id")
+            status = str(found.get("status") or "")
+            conclusion = str(found.get("conclusion") or "")
+            if status == "completed":
+                detail = f"run {run_id}: {conclusion or 'no conclusion'}"
+                return ("PASS" if conclusion == "success" else "FAIL", detail)
+        time.sleep(5)
+    return ("TIMEOUT", f"run {run_id or '(never appeared)'} did not complete in {timeout_s}s")
+
+
 def stage_remote_bootstrap(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
-    """Invoke the org capabilities now, instead of waiting for the hourly sweep."""
+    """Invoke the org capabilities now — and WAIT for them to finish.
+
+    The organization contract says `make new-repo` dispatches the bootstrap
+    workflow and waits for it. A dispatch returning 0 proves only that GitHub
+    accepted the request; treating that as done let a birth report PASS while
+    labels, settings and attestation had not run at all.
+    """
+    since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     dispatches = [
-        (
-            "github.labels",
-            "labels applied",
-            [
-                "gh",
-                "workflow",
-                "run",
-                "repo-birth-bootstrap.yml",
-                "--repo",
-                ORG_PROFILE_REPO,
-                "-f",
-                f"target_repo={cfg.repo}",
-                "-f",
-                f"repo_class={profile['name']}",
-                "-f",
-                "dry_run=false",
-            ],
-        ),
-        (
-            "github.seed",
-            "org files seeded",
-            [
-                "gh",
-                "workflow",
-                "run",
-                "auto-seed-new-repo.yml",
-                "--repo",
-                ORG_PROFILE_REPO,
-                "-f",
-                f"target_repo={cfg.repo}",
-                "-f",
-                f"repo_class={profile['name']}",
-                "-f",
-                "dry_run=false",
-            ],
-        ),
+        ("github.bootstrap", "org bootstrap", "repo-birth-bootstrap.yml"),
+        ("github.seed", "org files seeded", "auto-seed-new-repo.yml"),
     ]
-    for key, label, cmd in dispatches:
+    for key, label, workflow in dispatches:
+        cmd = [
+            "gh",
+            "workflow",
+            "run",
+            workflow,
+            "--repo",
+            ORG_PROFILE_REPO,
+            "-f",
+            f"target_repo={cfg.repo}",
+            "-f",
+            f"repo_class={profile['name']}",
+            "-f",
+            "dry_run=false",
+        ]
         proc = run(cmd, check=False)
-        if proc.returncode == 0:
-            receipt.record(key, label, "PASS", "dispatched")
-        else:
+        if proc.returncode != 0:
             detail = ((proc.stderr or "") + (proc.stdout or "")).strip().splitlines()
             receipt.record(key, label, "FAIL", detail[-1] if detail else "dispatch failed")
+            continue
+        state, detail = _await_workflow(workflow, since, cfg.bootstrap_timeout)
+        receipt.record(key, label, "PASS" if state == "PASS" else "FAIL", detail)
 
 
-def stage_attest(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
-    """Read the remote back. Local assembly proves nothing about GitHub."""
+def _remote_has(slug: str, path: str) -> bool:
+    """True when `path` exists on the remote default branch (file or directory)."""
+    proc = run(["gh", "api", f"repos/{slug}/contents/{path}"], check=False)
+    return proc.returncode == 0
+
+
+def _attest_head(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """The remote default branch points at the commit birth actually made."""
     deadline = time.monotonic() + cfg.bootstrap_timeout
     remote_head = ""
     while time.monotonic() < deadline:
-        proc = run(
-            ["gh", "api", f"repos/{cfg.slug}/commits/main", "--jq", ".sha"],
-            check=False,
-        )
+        proc = run(["gh", "api", f"repos/{cfg.slug}/commits/main", "--jq", ".sha"], check=False)
         remote_head = (proc.stdout or "").strip()
         if SHA_RE.match(remote_head):
             break
         time.sleep(3)
-
     receipt.record(
         "github.head",
         "remote HEAD",
@@ -802,26 +1050,30 @@ def stage_attest(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None
         remote_head[:12] or "unreachable",
     )
 
-    for rel in ("README.md", CANONICAL_LICENSE, MARKER_PATH, "pyproject.toml", "uv.lock"):
-        proc = run(["gh", "api", f"repos/{cfg.slug}/contents/{rel}", "--jq", ".name"], check=False)
+
+def _attest_content(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
+    """Required files, a licence that governs THIS repo, and the class marker."""
+    for rel in ("README.md", CANONICAL_LICENSE, MARKER_PATH, PYPROJECT, "uv.lock"):
         receipt.record(
             f"github.present.{rel}",
             f"remote {rel}",
-            "PASS" if proc.returncode == 0 else "FAIL",
+            "PASS" if _remote_has(cfg.slug, rel) else "FAIL",
             rel,
         )
 
-    proc = run(
-        ["gh", "api", f"repos/{cfg.slug}/contents/{MARKER_PATH}", "--jq", ".content"],
-        check=False,
+    # The licence that actually landed must not disclaim the repository it
+    # governs. The org template carried a `.github`-only notice for a while,
+    # and birth copies that file in as canonical — so a poisoned licence is
+    # exactly what this factory would otherwise reproduce perfectly, forever.
+    remote_license = _remote_text(cfg.slug, CANONICAL_LICENSE)
+    receipt.record(
+        "github.license",
+        "license generic",
+        "PASS" if remote_license and POISONED_LICENSE_NOTICE not in remote_license else "FAIL",
+        "generic consumer licence" if remote_license else "unreadable or repo-specific",
     )
-    remote_class = None
-    if proc.returncode == 0:
-        import base64
 
-        remote_class = parse_marker_profile(
-            base64.b64decode("".join((proc.stdout or "").split())).decode("utf-8")
-        )
+    remote_class = parse_marker_profile(_remote_text(cfg.slug, MARKER_PATH))
     receipt.record(
         "github.class",
         "org policy attested",
@@ -829,20 +1081,85 @@ def stage_attest(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None
         remote_class or "marker unreadable",
     )
 
-    leaked = []
-    for pattern in profile["forbid"]:
-        probe = pattern[:-3] if pattern.endswith("/**") else pattern
-        proc = run(
-            ["gh", "api", f"repos/{cfg.slug}/contents/{probe}", "--jq", ".name"], check=False
-        )
-        if proc.returncode == 0:
-            leaked.append(pattern)
+
+def _attest_org_state(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
+    """MATERIALIZE present, FORBID absent, and no seeder PR left pending."""
+    missing = [rel for rel in receipt.materialized if not _remote_has(cfg.slug, rel)]
+    receipt.record(
+        "github.materialized",
+        "org files on remote",
+        "PASS" if not missing else "FAIL",
+        f"{len(receipt.materialized)} attested"
+        if not missing
+        else f"missing: {', '.join(missing)}",
+    )
+
+    leaked = [
+        pattern
+        for pattern in profile["forbid"]
+        if _remote_has(cfg.slug, pattern[:-3] if pattern.endswith("/**") else pattern)
+    ]
     receipt.record(
         "github.forbid",
         "forbid attested",
         "PASS" if not leaked else "FAIL",
         ", ".join(leaked) if leaked else f"{len(profile['forbid'])} probed",
     )
+
+    # If the applicable org state really is in the initial commit, the seeder
+    # has nothing left to offer. A pending seed PR means the repository was
+    # born incomplete and then sent a patch.
+    open_seed = gh_json_safe(
+        ["api", f"repos/{cfg.slug}/pulls?state=open&head={cfg.org}:{SEED_BRANCH}", "--jq", "length"]
+    )
+    pending = open_seed if isinstance(open_seed, int) else 0
+    receipt.record(
+        "github.no_pending_seed",
+        "no pending org PR",
+        "PASS" if pending == 0 else "FAIL",
+        "born with org state" if pending == 0 else f"{pending} seeder PR(s) still pending",
+    )
+
+
+def _attest_remote_apply(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
+    """Labels and settings are API state, proved by reading the API.
+
+    Not by the bootstrap workflow having exited zero — that is the same
+    dispatch-equals-done mistake one layer up.
+    """
+    if profile["remote_apply"].get("labels"):
+        proc = run(
+            ["gh", "api", f"repos/{cfg.slug}/labels?per_page=100", "--jq", "length"], check=False
+        )
+        count = int((proc.stdout or "0").strip() or 0) if proc.returncode == 0 else 0
+        receipt.record(
+            "github.labels",
+            "labels applied",
+            "PASS" if count >= MIN_ORG_LABELS else "FAIL",
+            f"{count} labels on remote",
+        )
+    if profile["remote_apply"].get("repo_settings"):
+        settings = gh_json_safe(["api", f"repos/{cfg.slug}"])
+        ok = isinstance(settings, dict) and settings.get("delete_branch_on_merge") is True
+        receipt.record(
+            "github.settings",
+            "repo settings applied",
+            "PASS" if ok else "FAIL",
+            "org policy applied" if ok else "settings not applied",
+        )
+
+
+def stage_attest(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
+    """Read the remote back. Local assembly proves nothing about GitHub.
+
+    Every check queries the REMOTE. A birth that only re-inspects the work
+    directory it just built has verified its own arithmetic, not the
+    repository it claims to have created.
+    """
+    _attest_head(cfg, receipt)
+    _attest_content(cfg, receipt, profile)
+    _attest_org_state(cfg, receipt, profile)
+    _attest_remote_apply(cfg, receipt, profile)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -881,7 +1198,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--desc", required=True, help="one-line repository description")
     parser.add_argument("--org", default=DEFAULT_ORG)
     parser.add_argument("--payload", default=None, help="product files to overlay on the scaffold")
-    parser.add_argument("--work-dir", default=os.environ.get("WORK_DIR", DEFAULT_WORK_DIR))
+    parser.add_argument("--work-dir", default=os.environ.get("WORK_DIR") or str(default_work_dir()))
     parser.add_argument("--template-src", default=str(TEMPLATE_ROOT))
     parser.add_argument(
         "--org-profile-src",

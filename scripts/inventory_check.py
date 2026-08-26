@@ -151,6 +151,15 @@ def main() -> int:
             errors.append(
                 f"Constellation node API in {path.relative_to(ROOT)} — use L9-Node-Template"
             )
+    license_path = ROOT / "LICENSE"
+    if license_path.is_file():
+        text = license_path.read_text(encoding="utf-8")
+        if "applies only to the Quantum-L9/.github repository" in text:
+            errors.append(
+                "LICENSE carries the .github-specific repository notice — this file is "
+                "copied into every repository born from this template and would disclaim "
+                "the repository it governs"
+            )
     marker = ROOT / ".l9" / "org-birth-profile.yaml"
     if marker.is_file():
         text = marker.read_text(encoding="utf-8")

@@ -21,7 +21,8 @@ REPO = Path(__file__).resolve().parents[2]
 _SPEC = importlib.util.spec_from_file_location(
     "l9_birth_new_repo", REPO / "scripts" / "birth-runner" / "new_repo.py"
 )
-assert _SPEC and _SPEC.loader
+assert _SPEC is not None
+assert _SPEC.loader is not None
 new_repo = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = new_repo
 _SPEC.loader.exec_module(new_repo)
@@ -190,7 +191,8 @@ class TestReceipt:
     def test_renders_grouped_stages(self) -> None:
         out = new_repo.render_receipt(self._receipt())
         assert "L9 REPOSITORY BIRTH" in out
-        assert "Preflight" in out and "Validation" in out
+        assert "Preflight" in out
+        assert "Validation" in out
         assert "BIRTH: PASS" in out
 
     def test_a_failed_stage_fails_the_birth(self) -> None:
@@ -223,3 +225,85 @@ class TestCopyExclusions:
     @pytest.mark.parametrize("rel", ["src/pkg/app.py", "README.md", ".github/CODEOWNERS"])
     def test_real_content_is_carried(self, rel: str) -> None:
         assert not new_repo._is_machine_state(Path(rel))
+
+
+class TestMaterializeOrgPayload:
+    """MATERIALIZE writes the applicable org files BEFORE the initial commit.
+
+    A repository that is "born, then offered an org patch" is born incomplete.
+    These assert the write/keep semantics directly, because a real birth
+    against the current template writes nothing — the template already ships
+    all three dests, so the happy path exercises only the keep branch.
+    """
+
+    def test_writes_missing_files(self, tmp_path: Path) -> None:
+        written, kept = new_repo.materialize_org_payload(
+            tmp_path,
+            {".github/CODEOWNERS": "* @team\n", ".github/labels.yml": "labels: []\n"},
+        )
+        assert written == [".github/CODEOWNERS", ".github/labels.yml"]
+        assert kept == []
+        assert (tmp_path / ".github" / "CODEOWNERS").read_text(encoding="utf-8") == "* @team\n"
+
+    def test_never_overwrites_what_the_repo_already_has(self, tmp_path: Path) -> None:
+        # Missing-only, matching the seeder: the template and the product
+        # payload are closer to the repository than the org default is.
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".github" / "CODEOWNERS").write_text("mine\n", encoding="utf-8")
+        written, kept = new_repo.materialize_org_payload(tmp_path, {".github/CODEOWNERS": "org\n"})
+        assert written == []
+        assert kept == [".github/CODEOWNERS"]
+        assert (tmp_path / ".github" / "CODEOWNERS").read_text(encoding="utf-8") == "mine\n"
+
+    def test_empty_payload_is_a_no_op(self, tmp_path: Path) -> None:
+        assert new_repo.materialize_org_payload(tmp_path, {}) == ([], [])
+
+
+class TestInheritedPresent:
+    def test_reports_a_repo_local_copy_of_an_inherited_file(self, tmp_path: Path) -> None:
+        (tmp_path / "CODE_OF_CONDUCT.md").write_text("x", encoding="utf-8")
+        profile = {"inherit": ["CODE_OF_CONDUCT.md", ".github/ISSUE_TEMPLATE/**"]}
+        assert new_repo.inherited_present(tmp_path, profile) == ["CODE_OF_CONDUCT.md"]
+
+    def test_reports_a_directory_pattern(self, tmp_path: Path) -> None:
+        (tmp_path / ".github" / "ISSUE_TEMPLATE").mkdir(parents=True)
+        profile = {"inherit": [".github/ISSUE_TEMPLATE/**"]}
+        assert new_repo.inherited_present(tmp_path, profile) == [".github/ISSUE_TEMPLATE/**"]
+
+    def test_clean_tree_reports_nothing(self, tmp_path: Path) -> None:
+        assert new_repo.inherited_present(tmp_path, {"inherit": ["CODE_OF_CONDUCT.md"]}) == []
+
+
+class TestLicenceIsNotRepositoryPoisoned:
+    """A licence naming one repository is wrong in every other repository.
+
+    The birth engine copies the template LICENSE into every newborn as
+    canonical, so this is the one defect a factory would reproduce perfectly,
+    forever, without anyone noticing.
+    """
+
+    def test_template_licence_is_generic(self) -> None:
+        text = (REPO / "LICENSE").read_text(encoding="utf-8")
+        assert new_repo.POISONED_LICENSE_NOTICE not in text
+        assert "QUANTUM AI PARTNERS" in text
+
+    def test_the_poisoned_notice_is_what_birth_refuses(self) -> None:
+        assert new_repo.POISONED_LICENSE_NOTICE == (
+            "applies only to the Quantum-L9/.github repository"
+        )
+
+
+class TestDefaultWorkDir:
+    def test_is_not_a_predictable_world_writable_tmp_path(self) -> None:
+        # A fixed /tmp path lets any local user pre-create <workdir>/<repo> —
+        # as a symlink, or with their own contents — before the birth runs.
+        root = new_repo.default_work_dir()
+        assert not str(root).startswith("/tmp/")
+        assert root.is_dir()
+
+    def test_is_private_to_the_owner(self) -> None:
+        import stat
+
+        mode = new_repo.default_work_dir().stat().st_mode
+        assert not mode & stat.S_IRWXG
+        assert not mode & stat.S_IRWXO

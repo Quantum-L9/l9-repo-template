@@ -18,11 +18,14 @@ SNAKE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 ORG_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$")
 REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 TEMPLATE_IDENTITY = "Quantum-L9/l9-repo-template"
+# `repository:` at column 0, and the same key nested one level under `metadata:`.
+_REPO_LINE = rf"^repository: {re.escape(TEMPLATE_IDENTITY)}$"
+_REPO_LINE_INDENTED = rf"^  repository: {re.escape(TEMPLATE_IDENTITY)}$"
 IDENTITY_FILES = (
-    (".l9/architecture.yaml", r"^  repository: Quantum-L9/l9-repo-template$"),
-    (".l9/ownership.yaml", r"^repository: Quantum-L9/l9-repo-template$"),
-    (".l9/sdk-compatibility.yaml", r"^repository: Quantum-L9/l9-repo-template$"),
-    (".l9/org-birth-profile.yaml", r"^repository: Quantum-L9/l9-repo-template$"),
+    (".l9/architecture.yaml", _REPO_LINE_INDENTED),
+    (".l9/ownership.yaml", _REPO_LINE),
+    (".l9/sdk-compatibility.yaml", _REPO_LINE),
+    (".l9/org-birth-profile.yaml", _REPO_LINE),
 )
 SKIP_DIRS = {
     ".git",
