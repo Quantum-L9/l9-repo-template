@@ -81,6 +81,7 @@ REQUIRED = (
     "scripts/regenerate_runtime_manifest.py",
     "scripts/birth-runner/README.md",
     "scripts/birth-runner/new_repo.py",
+    "scripts/birth-runner/payload-ownership.yaml",
     "scripts/birth-runner/01_preflight.sh",
     "scripts/birth-runner/02_bootstrap.sh",
     "scripts/birth-runner/03_verify.sh",

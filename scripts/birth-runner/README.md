@@ -18,6 +18,13 @@ waiting for the hourly sweep, and then reads the remote back to attest it.
 
 Full contract: [`docs/ops/REPO_BIRTH.md`](../../docs/ops/REPO_BIRTH.md).
 
+`PAYLOAD` is additive when it is a fragment and **authoritative** when it is a
+standalone repository — see
+[`payload-ownership.yaml`](payload-ownership.yaml), which declares what a
+product inherits from this template and what it does not. Absence is meaningless
+in an overlay and meaningful in a repository: a product that ships no Dockerfile
+is not handed the template's.
+
 Useful flags for local work:
 
 | Flag | Effect |

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -327,3 +329,211 @@ class TestAuthPreflightUsesRest:
     def test_preflight_probes_rest_instead(self) -> None:
         source = (REPO / "scripts" / "birth-runner" / "new_repo.py").read_text(encoding="utf-8")
         assert '["gh", "api", "user", "--jq", ".login"]' in source
+
+
+class TestPayloadOwnershipContract:
+    """The template's declaration of what a product inherits from it."""
+
+    def test_template_ships_a_loadable_contract(self) -> None:
+        doc = new_repo.load_ownership(REPO)
+        assert doc["schema"] == "l9.birth-payload-ownership/v1"
+        assert doc["repository_shape"] and doc["product"] and doc["chassis"]
+
+    def test_a_missing_contract_stops_the_birth(self, tmp_path: Path) -> None:
+        # Fail closed. Falling back to "the template owns everything" is the
+        # defect this contract removes.
+        with pytest.raises(new_repo.BirthError):
+            new_repo.load_ownership(tmp_path)
+
+    @pytest.mark.parametrize("text", ["", "not json", "[1, 2]", '{"product": []}'])
+    def test_an_unusable_contract_stops_the_birth(self, tmp_path: Path, text: str) -> None:
+        path = tmp_path / new_repo.OWNERSHIP_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        with pytest.raises(new_repo.BirthError):
+            new_repo.load_ownership(tmp_path)
+
+    def test_every_template_path_is_classified(self) -> None:
+        """No surface may be silently template-owned.
+
+        Adding a file to this template forces an answer to "does a product
+        inherit this?" — the question the additive-only overlay never asked.
+        """
+        doc = new_repo.load_ownership(REPO)
+        declared = list(doc["product"]) + list(doc["chassis"])
+        tracked = subprocess.run(
+            ["git", "-C", str(REPO), "ls-files"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        unclassified = [rel for rel in tracked if new_repo.match_pattern(declared, rel) is None]
+        assert unclassified == [], f"unclassified template surfaces: {unclassified}"
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "Dockerfile",
+            "docker-compose.yml",
+            "observability/docker-compose.observability.yml",
+            "src/l9_example_pkg/app.py",
+            "src/l9_example_pkg/health.py",
+            "src/l9_example_pkg/protocols.py",
+            "src/l9_example_pkg/retry.py",
+            "src/l9_example_pkg/settings.py",
+            "tests/integration/test_app_http.py",
+            "docs/examples/observability/prometheus_slo_alerts.example.yml",
+        ],
+    )
+    def test_example_product_surfaces_are_product_owned(self, rel: str) -> None:
+        doc = new_repo.load_ownership(REPO)
+        assert new_repo.match_pattern(doc["product"], rel) is not None
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "Makefile",
+            "Repo.mk",
+            "LICENSE",
+            "tools/l9_repo/__main__.py",
+            "scripts/birth-runner/new_repo.py",
+            "scripts/inventory_check.py",
+            "scripts/render_cursor_rules.py",
+            ".l9/org-birth-profile.yaml",
+            ".cursor/rules/templates/l9-python-repo.mdc.template",
+        ],
+    )
+    def test_chassis_surfaces_are_never_product_owned(self, rel: str) -> None:
+        doc = new_repo.load_ownership(REPO)
+        assert new_repo.match_pattern(doc["product"], rel) is None
+
+
+def _repository_payload(root: Path, pkg: str = "l9_product") -> Path:
+    """A minimal standalone repository payload — the shape, not a real product."""
+    for rel, body in {
+        "pyproject.toml": '[project]\nname = "l9-product"\n',
+        ".l9/architecture.yaml": "schema: l9.architecture-spec/v1\n",
+        f"src/{pkg}/__init__.py": '"""product"""\n',
+        f"src/{pkg}/canonical.py": "VALUE = 1\n",
+        "tests/test_canonical.py": "def test_ok() -> None:\n    assert True\n",
+        "scripts/inventory_check.py": "raise SystemExit(0)\n",
+    }.items():
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    return root
+
+
+class TestRepositoryPayloadDetection:
+    def test_a_standalone_repository_is_identified(self, tmp_path: Path) -> None:
+        payload = _repository_payload(tmp_path / "payload")
+        assert new_repo.is_repository_payload(payload, new_repo.load_ownership(REPO))
+
+    @pytest.mark.parametrize("drop", ["pyproject.toml", ".l9/architecture.yaml", "src", "tests"])
+    def test_a_fragment_is_not(self, tmp_path: Path, drop: str) -> None:
+        payload = _repository_payload(tmp_path / "payload")
+        target = payload / drop
+        shutil.rmtree(target) if target.is_dir() else target.unlink()
+        assert not new_repo.is_repository_payload(payload, new_repo.load_ownership(REPO))
+
+    def test_a_payload_carrying_only_src_is_still_additive(self, tmp_path: Path) -> None:
+        # The pre-existing partial-overlay contract. Products depend on it.
+        payload = tmp_path / "payload"
+        (payload / "src" / "l9_product").mkdir(parents=True)
+        (payload / "src" / "l9_product" / "__init__.py").write_text("", encoding="utf-8")
+        assert not new_repo.is_repository_payload(payload, new_repo.load_ownership(REPO))
+
+
+class TestReconcileProductOwnership:
+    """Absence in an authoritative payload is meaningful."""
+
+    @staticmethod
+    def _assembled(root: Path, pkg: str = "l9_product") -> Path:
+        for rel in (
+            "Dockerfile",
+            "docker-compose.yml",
+            ".dockerignore",
+            ".env.example",
+            "observability/docker-compose.observability.yml",
+            "observability/grafana/provisioning/dashboards/dashboards.yaml",
+            "docs/examples/coderabbit.yaml",
+            f"src/{pkg}/__init__.py",
+            f"src/{pkg}/app.py",
+            f"src/{pkg}/health.py",
+            f"src/{pkg}/protocols.py",
+            f"src/{pkg}/retry.py",
+            f"src/{pkg}/settings.py",
+            "tests/integration/test_app_http.py",
+            "Makefile",
+            "Repo.mk",
+            "LICENSE",
+            "docs/LIFECYCLE.md",
+            "scripts/render_cursor_rules.py",
+            "tools/l9_repo/__main__.py",
+            ".l9/org-birth-profile.yaml",
+        ):
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("template\n", encoding="utf-8")
+        return root
+
+    def test_unsupplied_product_surfaces_are_removed(self, tmp_path: Path) -> None:
+        dest = self._assembled(tmp_path / "dest")
+        payload = _repository_payload(tmp_path / "payload")
+        removed = new_repo.reconcile_product_ownership(dest, payload, new_repo.load_ownership(REPO))
+        for rel in ("Dockerfile", "docker-compose.yml", "src/l9_product/app.py"):
+            assert rel in removed
+            assert not (dest / rel).exists()
+        assert not (dest / "observability").exists()
+
+    def test_the_payload_package_replaces_the_template_package(self, tmp_path: Path) -> None:
+        dest = self._assembled(tmp_path / "dest")
+        payload = _repository_payload(tmp_path / "payload")
+        new_repo.overlay_payload(payload, dest)
+        new_repo.reconcile_product_ownership(dest, payload, new_repo.load_ownership(REPO))
+        assert sorted(p.name for p in (dest / "src" / "l9_product").iterdir()) == [
+            "__init__.py",
+            "canonical.py",
+        ]
+
+    def test_chassis_and_org_surfaces_survive(self, tmp_path: Path) -> None:
+        dest = self._assembled(tmp_path / "dest")
+        payload = _repository_payload(tmp_path / "payload")
+        new_repo.reconcile_product_ownership(dest, payload, new_repo.load_ownership(REPO))
+        for rel in (
+            "Makefile",
+            "Repo.mk",
+            "LICENSE",
+            "docs/LIFECYCLE.md",
+            "scripts/render_cursor_rules.py",
+            "tools/l9_repo/__main__.py",
+            ".l9/org-birth-profile.yaml",
+        ):
+            assert (dest / rel).is_file(), f"reconciliation removed chassis surface {rel}"
+
+    def test_a_supplied_product_surface_is_kept(self, tmp_path: Path) -> None:
+        dest = self._assembled(tmp_path / "dest")
+        payload = _repository_payload(tmp_path / "payload")
+        (payload / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        new_repo.overlay_payload(payload, dest)
+        removed = new_repo.reconcile_product_ownership(dest, payload, new_repo.load_ownership(REPO))
+        assert "Dockerfile" not in removed
+        assert (dest / "Dockerfile").read_text(encoding="utf-8") == "FROM scratch\n"
+
+    def test_git_state_is_never_touched(self, tmp_path: Path) -> None:
+        dest = self._assembled(tmp_path / "dest")
+        (dest / ".git" / "objects").mkdir(parents=True)
+        (dest / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        payload = _repository_payload(tmp_path / "payload")
+        new_repo.reconcile_product_ownership(dest, payload, new_repo.load_ownership(REPO))
+        assert (dest / ".git" / "HEAD").is_file()
+        assert (dest / ".git" / "objects").is_dir()
+
+
+class TestPayloadPackageDirs:
+    def test_lists_the_packages_a_payload_ships(self, tmp_path: Path) -> None:
+        payload = _repository_payload(tmp_path / "payload", pkg="l9_observability_core")
+        assert new_repo.payload_package_dirs(payload) == ["l9_observability_core"]
+
+    def test_a_payload_without_src_lists_nothing(self, tmp_path: Path) -> None:
+        assert new_repo.payload_package_dirs(tmp_path) == []
