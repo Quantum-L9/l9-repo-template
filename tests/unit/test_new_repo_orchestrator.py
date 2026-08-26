@@ -337,7 +337,9 @@ class TestPayloadOwnershipContract:
     def test_template_ships_a_loadable_contract(self) -> None:
         doc = new_repo.load_ownership(REPO)
         assert doc["schema"] == "l9.birth-payload-ownership/v1"
-        assert doc["repository_shape"] and doc["product"] and doc["chassis"]
+        assert doc["repository_shape"]
+        assert doc["product"]
+        assert doc["chassis"]
 
     def test_a_missing_contract_stops_the_birth(self, tmp_path: Path) -> None:
         # Fail closed. Falling back to "the template owns everything" is the

@@ -726,10 +726,19 @@ def stage_assemble(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     _stamp_description(cfg)
     receipt.record("assemble.description", "description", "PASS", cfg.desc[:48])
 
+    status, detail = _assemble_payload(cfg, receipt)
+    receipt.record("assemble.ownership", "payload ownership", status, detail)
+
+
+def _assemble_payload(cfg: BirthConfig, receipt: BirthReceipt) -> tuple[str, str]:
+    """Overlay the payload; return the ownership verdict for the caller to record.
+
+    The overlay stage is recorded here and the ownership stage by the caller, so
+    each stage key is written in exactly one place.
+    """
     if cfg.payload is None:
         receipt.record("assemble.payload", "payload overlay", "SKIP", "no PAYLOAD given")
-        receipt.record("assemble.ownership", "payload ownership", "SKIP", "no PAYLOAD given")
-        return
+        return "SKIP", "no PAYLOAD given"
 
     ownership = load_ownership(cfg.template_src)
     authoritative = is_repository_payload(cfg.payload, ownership)
@@ -741,21 +750,12 @@ def stage_assemble(cfg: BirthConfig, receipt: BirthReceipt) -> None:
 
     if not authoritative:
         # A fragment adds and overrides; it never speaks for what it omits.
-        receipt.record(
-            "assemble.ownership",
-            "payload ownership",
-            "PASS",
-            "additive overlay — payload is not repository-shaped",
-        )
-        return
+        return "PASS", "additive overlay — payload is not repository-shaped"
 
     removed = reconcile_product_ownership(cfg.dest, cfg.payload, ownership)
-    receipt.record(
-        "assemble.ownership",
-        "payload ownership",
-        "PASS",
+    return "PASS", (
         f"authoritative — {len(removed)} template product surface(s) not owned by the payload"
-        + (f": {', '.join(removed[:8])}" if removed else ""),
+        + (f": {', '.join(removed[:8])}" if removed else "")
     )
 
 
