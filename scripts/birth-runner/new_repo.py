@@ -535,20 +535,25 @@ def reconcile_product_ownership(dest: Path, payload: Path, ownership: dict) -> l
             continue
         (dest / rel).unlink()
         removed.append(rel)
-    _prune_empty_dirs(dest)
+    _prune_emptied_dirs(dest, removed)
     return removed
 
 
-def _prune_empty_dirs(root: Path) -> None:
-    """Drop directories emptied by reconciliation. `.git` and its kin are left."""
-    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if not path.is_dir():
-            continue
-        rel = path.relative_to(root)
-        if _is_machine_state(rel):
-            continue
-        if not any(path.iterdir()):
-            path.rmdir()
+def _prune_emptied_dirs(root: Path, removed: list[str]) -> None:
+    """Drop the directories reconciliation itself emptied, and only those.
+
+    Walking every directory in the tree would also collect one that was empty
+    before the birth started; this walks up from each removed file instead, so a
+    directory disappears only as a consequence of its own contents going.
+    """
+    for rel in removed:
+        parent = (root / rel).parent
+        while parent != root:
+            if parent.is_dir() and not any(parent.iterdir()):
+                parent.rmdir()
+                parent = parent.parent
+            else:
+                break
 
 
 def git_head(root: Path) -> str:

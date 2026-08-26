@@ -520,6 +520,14 @@ class TestReconcileProductOwnership:
         assert "Dockerfile" not in removed
         assert (dest / "Dockerfile").read_text(encoding="utf-8") == "FROM scratch\n"
 
+    def test_a_directory_empty_before_the_birth_is_left_alone(self, tmp_path: Path) -> None:
+        """Only directories reconciliation itself emptied are pruned."""
+        dest = self._assembled(tmp_path / "dest")
+        (dest / "docs" / "adr").mkdir(parents=True)
+        payload = _repository_payload(tmp_path / "payload")
+        new_repo.reconcile_product_ownership(dest, payload, new_repo.load_ownership(REPO))
+        assert (dest / "docs" / "adr").is_dir()
+
     def test_git_state_is_never_touched(self, tmp_path: Path) -> None:
         dest = self._assembled(tmp_path / "dest")
         (dest / ".git" / "objects").mkdir(parents=True)
