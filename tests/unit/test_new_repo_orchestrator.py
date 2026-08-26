@@ -307,3 +307,23 @@ class TestDefaultWorkDir:
         mode = new_repo.default_work_dir().stat().st_mode
         assert not mode & stat.S_IRWXG
         assert not mode & stat.S_IRWXO
+
+
+class TestAuthPreflightUsesRest:
+    """`gh auth status` is not authoritative on a GraphQL-restricted surface.
+
+    The session gateway serves REST and refuses GraphQL; `gh auth status`
+    verifies over GraphQL, so it reports "The token in GH_TOKEN is invalid"
+    while every REST call the birth makes succeeds. Gating on it failed a birth
+    that would have worked.
+    """
+
+    def test_preflight_does_not_shell_to_gh_auth_status(self) -> None:
+        # Assert on the argv literal, not on prose: the comment above the fix
+        # names `gh auth status` deliberately, to say why it is not used.
+        source = (REPO / "scripts" / "birth-runner" / "new_repo.py").read_text(encoding="utf-8")
+        assert '"auth", "status"' not in source
+
+    def test_preflight_probes_rest_instead(self) -> None:
+        source = (REPO / "scripts" / "birth-runner" / "new_repo.py").read_text(encoding="utf-8")
+        assert '["gh", "api", "user", "--jq", ".login"]' in source

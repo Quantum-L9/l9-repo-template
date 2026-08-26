@@ -512,9 +512,20 @@ def _preflight_tools(cfg: BirthConfig, receipt: BirthReceipt) -> None:
             "gh not found on PATH — required to read the org birth profile and to create "
             "the repository. Use --org-profile-src and --no-remote for a fully local birth."
         )
-    if run(["gh", "auth", "status"], check=False).returncode != 0:
-        raise BirthError("gh is not authenticated — run `gh auth login`")
-    receipt.record("preflight.auth", "auth", "PASS", "gh authenticated")
+    # Probe with REST, not `gh auth status`. On a proxied surface the session
+    # gateway serves REST but refuses GraphQL, and `gh auth status` verifies
+    # over GraphQL — so it reports "The token in GH_TOKEN is invalid" while
+    # every REST call this birth makes succeeds. GH_TOKEN there is a 14-char
+    # placeholder; the proxy injects the real credential. Gating on auth status
+    # fails a birth that would have worked.
+    probe = run(["gh", "api", "user", "--jq", ".login"], check=False)
+    login = (probe.stdout or "").strip()
+    if probe.returncode != 0 or not login:
+        raise BirthError(
+            "GitHub REST is not reachable via gh — check credentials/proxy. "
+            "(`gh auth status` is NOT authoritative on a GraphQL-restricted surface.)"
+        )
+    receipt.record("preflight.auth", "auth", "PASS", f"REST reachable as {login}")
 
 
 def _preflight_sources(cfg: BirthConfig) -> None:
