@@ -8,6 +8,24 @@ Those already have sibling templates — [L9-Node-Template](https://github.com/Q
 
 ## Quick start
 
+```bash
+make new-repo \
+  REPO=l9-observability-core \
+  PKG=l9_observability_core \
+  DESC="Canonical backend-neutral observability domain contracts" \
+  PAYLOAD=/path/to/l9-observability-core
+```
+
+When that returns **PASS** the repository is born — identity stamped, `uv.lock`
+resolved, the current `Quantum-L9/.github` birth profile applied, the full gate
+green, the repository created and pushed, org labels and settings applied, and
+the remote read back and attested. Nothing is created until validation passes.
+
+See [docs/ops/REPO_BIRTH.md](docs/ops/REPO_BIRTH.md) for the eight stages and
+every parameter.
+
+## Manual path
+
 1. **Use this template** on GitHub.
 2. Rename:
 
@@ -30,6 +48,7 @@ Those already have sibling templates — [L9-Node-Template](https://github.com/Q
 
 | Ladder | Command | Role |
 |--------|---------|------|
+| Birth | `make new-repo` | One-command repository birth (8 stages) |
 | Product | `make verify` / `make pr-check` | In-repo museum gate (`OPEN_PR=0`) |
 | Core facade | `make agent-check` / `make validate` | Vendored `tools.l9_repo` completion proof |
 | Governance | `make gov-pr-check` | Cursor-Governance via `WS=$(pwd)` |
@@ -45,6 +64,8 @@ make -C "$HOME/.cursor-governance" pr-check WS="$(pwd)"
 - Default example: minimal FastAPI hello (non-Gate)
 - Makefile: Core thin facade + `Repo.mk` product targets + `gov-*` wrappers
 - CI: org control plane (l9-ci-core execution, l9-ci-control-plane targeting) — no repo-side sync
+- Org birth profile: this repo declares its class in `.l9/org-birth-profile.yaml`;
+  `Quantum-L9/.github` decides what that class receives
 - Obs stack: optional (`make obs-up`) — not required for `make verify`
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [TEMPLATE_INVENTORY.md](TEMPLATE_INVENTORY.md),

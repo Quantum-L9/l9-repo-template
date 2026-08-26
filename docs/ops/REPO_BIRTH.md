@@ -1,28 +1,146 @@
 # Repo birth (non-Constellation)
 
-## Manual (recommended)
+```bash
+make new-repo \
+  REPO=l9-observability-core \
+  PKG=l9_observability_core \
+  DESC="Canonical backend-neutral observability domain contracts" \
+  PAYLOAD=/path/to/l9-observability-core
+```
+
+When that returns **PASS** the repository is born. Not "created, now go do
+seven other things".
+
+## What `make new-repo` guarantees
+
+One command executes one state machine. Every stage passes or the birth stops.
+
+```
+make new-repo
+      │
+      ▼
+[1] PREFLIGHT              git / gh / uv · auth · repo-name + package validation
+                           · target repo does not already exist
+      ▼
+[2] ASSEMBLE LOCALLY       current l9-repo-template · rename/stamp identity
+                           · optional product PAYLOAD
+      ▼
+[3] FINALIZE               canonical LICENSE · uv lock · render generated rules
+   AUTOMATICALLY           · regenerate manifests · normalize metadata
+      ▼
+[4] APPLY ORG BIRTH        current Quantum-L9/.github · only applicable
+    PROFILE                non-inheritable controls · current org SHA recorded
+      ▼
+[5] VALIDATE BEFORE        inventory · hygiene · rules · lint · format
+    CREATION               · typecheck · tests · uv lock --check
+      ▼
+[6] CREATE GITHUB REPO     create remote · push finalized initial repository
+      ▼
+[7] REMOTE ORG BOOTSTRAP   labels · repo settings · applicable seeding
+      ▼
+[8] REMOTE ATTESTATION     read the actual remote back · verify org profile
+                           · verify required files · verify HEAD
+      ▼
+BIRTH: PASS
+```
+
+`uv lock` is stage 3. It is not something a product author is asked to
+remember; it is a birth invariant, and a birth invariant belongs to the birth
+engine.
+
+**Nothing is created until stage 5 is green.** A failed test does not leave a
+half-born repository on GitHub — it leaves a work directory and a receipt.
+
+## Parameters
+
+| Variable | Required | Meaning |
+|----------|----------|---------|
+| `REPO` | yes | GitHub repository name |
+| `PKG` | yes | snake_case Python package name |
+| `DESC` | yes | one-line description |
+| `PAYLOAD` | no | directory of product files overlaid on the scaffold (payload wins on collision) |
+| `ORG` | no | GitHub owner (default `Quantum-L9`) |
+| `WORK_DIR` | no | where the repository is assembled (default `/tmp/l9-births`) |
+| `CLASS` | no | org repo class (default `non_constellation_python`) |
+| `ORG_PROFILE_SRC` | no | local `Quantum-L9/.github` checkout — skips the `gh` read, enables an offline birth |
+| `RECEIPT` | no | where to write the birth receipt JSON |
+| `PRIVATE` | no | create the repository private |
+| `NO_REMOTE` | no | stop after stage 5 — assemble, finalize, and validate only |
+
+## The org birth profile
+
+Stage 4 reads `policies/repo-classes.yml` from `Quantum-L9/.github` at its
+current SHA and applies the class this repository declares in
+`.l9/org-birth-profile.yaml`. The organization contract has four modes:
+
+| Mode | Meaning |
+|------|---------|
+| **INHERIT** | GitHub supplies it org-wide; the repository must not carry a copy |
+| **MATERIALIZE** | the repository must contain the file |
+| **REMOTE APPLY** | GitHub API state, not a file (labels, settings) |
+| **FORBID** | the repository must never carry this path |
+
+`FORBID` is not only a filter on the organization's seed payload — it is an
+assertion about the assembled tree, checked before creation. A product
+`PAYLOAD` that ships `.github/workflows/l9-analysis.yml` stops the birth in
+stage 4 with a named violation, because organization CI targeting belongs to
+`l9-ci-core` / `l9-ci-control-plane` and never to the repository.
+
+This is what keeps a beautiful automation machine from automatically punching
+itself in the face: the organization seeder's historic default categories write
+11 paths that this template's `scripts/inventory_check.py` fails closed on.
+Class-aware seeding means the newborn is given applicable *capabilities*, not
+all files.
+
+See `docs/REPO_BIRTH_PROFILES.md` in `Quantum-L9/.github` for the contract.
+
+## The birth receipt
+
+Every run writes `<WORK_DIR>/<REPO>-birth-receipt.json` — the two provenance
+SHAs (template and organization), the resolved class, and per-stage results.
+The same two SHAs are committed into the newborn's `.l9/org-birth-profile.yaml`,
+so a repository can always answer *which pair of commits was I born from*.
+
+## Ownership
+
+```
+l9-repo-template      owns HOW A REPO IS BORN
+Quantum-L9/.github    owns WHAT THE ORGANIZATION REQUIRES
+l9-ci-core            owns HOW CI EXECUTES
+l9-ci-control-plane   owns WHICH CI APPLIES WHERE
+the product repo      owns ITS PRODUCT
+```
+
+No duplicated authority. This template never decides what the organization
+requires; it reads the contract at a recorded SHA and applies it.
+
+## Manual path
+
+Still supported, and still what the stages automate:
 
 1. Use template: `Quantum-L9/l9-repo-template`
 2. Clone the new repo
 3. `make rename PKG=your_pkg`
 4. `make verify`
-5. Push your feature branch; open PR via Cursor-Governance (`make gov-pr`) when wired
+5. Push your feature branch; open the PR via Cursor-Governance (`make gov-pr`)
 
 In-repo gates never open PRs (`OPEN_PR=0`).
 
-## Automated runner
+## Staged runner (debugging surface)
+
+The original four-stage runner remains for debugging an individual stage. It
+does **not** apply the org birth profile and does not attest the remote — use
+`make new-repo` for a real birth.
 
 ```bash
 export PLAY_DIR=/tmp/museum-birth-demo
 mkdir -p "$PLAY_DIR"
 cp scripts/birth-runner/config.template.yaml "$PLAY_DIR/config.yaml"
 # edit config.yaml: org, repo_name, package_name, description, work_dir
-export PLAY_DIR
 bash scripts/birth-runner/01_preflight.sh
 bash scripts/birth-runner/02_bootstrap.sh
 bash scripts/birth-runner/03_verify.sh
-# optional remote (explicit):
-PUSH=1 bash scripts/birth-runner/04_push.sh
+PUSH=1 bash scripts/birth-runner/04_push.sh   # optional, explicit
 ```
 
 No PackageTemplate plays catalog. No Gate-worker birth framing.
