@@ -1,0 +1,99 @@
+# Birth payload ownership contract.
+#
+# `make new-repo PAYLOAD=<dir>` has two modes, and this file is what separates
+# them.
+#
+#   ADDITIVE OVERLAY  — a partial payload (a few files, a fragment of a tree).
+#                       It adds and overrides. The template keeps everything the
+#                       payload does not mention. Absence means nothing.
+#
+#   AUTHORITATIVE     — a repository-shaped payload: a standalone product
+#                       repository, identified by `repository_shape` below. It
+#                       OWNS its product tree. Absence IS meaningful: a
+#                       `product` surface the payload does not supply is removed
+#                       from the newborn rather than inherited from the example
+#                       product this template ships.
+#
+# Without that second mode a product that explicitly does not own Docker, a
+# local observability stack, or a FastAPI service still receives all three,
+# because the payload has no same-named file with which to overwrite them.
+#
+# Four kinds of surface exist in an assembled newborn:
+#
+#   1. birth / chassis-owned   `chassis` below — the engine that performs the
+#                              birth and the repository-execution facade.
+#   2. organization-owned      Quantum-L9/.github, via MATERIALIZE in stage 4.
+#                              Never listed here; birth does not decide it.
+#   3. product-payload-owned   supplied by the payload. Always wins.
+#   4. optional / template-demo `product` below, unsupplied by the payload —
+#                              the example product. Removed under an
+#                              authoritative payload.
+#
+# PRECEDENCE: `product` is evaluated first. A path matching both lists is
+# product-owned (`docs/**` is chassis, `docs/examples/**` is product).
+#
+# PATTERN GRAMMAR is the organization policy's, deliberately: an exact
+# repository-relative path, or one trailing `/**` directory prefix. No globs. A
+# birth contract that needs a regex to explain what a repository receives is not
+# a contract.
+#
+# COMPLETENESS is enforced by tests/unit/test_new_repo_orchestrator.py: every
+# path this template tracks must match one of the two lists. Adding a file to
+# the template forces a conscious answer to "does a product inherit this?"
+# rather than defaulting to yes.
+{
+  "schema": "l9.birth-payload-ownership/v1",
+
+  "repository_shape": [
+    "pyproject.toml",
+    ".l9/architecture.yaml",
+    "src",
+    "tests",
+    "scripts/inventory_check.py"
+  ],
+
+  "product": [
+    "src/**",
+    "tests/**",
+    "observability/**",
+    "docs/examples/**",
+    "Dockerfile",
+    "docker-compose.yml",
+    ".dockerignore",
+    ".env.example"
+  ],
+
+  "chassis": [
+    ".cursor/**",
+    ".devcontainer/**",
+    ".editorconfig",
+    ".gitattributes",
+    ".github/**",
+    ".gitignore",
+    ".l9/**",
+    ".l9-template-version",
+    ".pre-commit-config.yaml",
+    ".python-version",
+    ".semgrep/**",
+    ".vscode/**",
+    "AGENTS.md",
+    "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "MANIFEST.sha256",
+    "Makefile",
+    "README.md",
+    "Repo.mk",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "TEMPLATE_INVENTORY.md",
+    "docs/**",
+    "plugin-config.yaml",
+    "pyproject.toml",
+    "requirements-repo-runtime.txt",
+    "scripts/**",
+    "tools/**",
+    "uv.lock"
+  ]
+}

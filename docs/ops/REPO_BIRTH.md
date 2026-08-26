@@ -23,7 +23,7 @@ make new-repo
                            · target repo does not already exist
       ▼
 [2] ASSEMBLE LOCALLY       current l9-repo-template · rename/stamp identity
-                           · optional product PAYLOAD
+                           · optional product PAYLOAD · payload ownership
       ▼
 [3] FINALIZE               canonical LICENSE · uv lock · render generated rules
    AUTOMATICALLY           · regenerate manifests · normalize metadata
@@ -58,7 +58,7 @@ half-born repository on GitHub — it leaves a work directory and a receipt.
 | `REPO` | yes | GitHub repository name |
 | `PKG` | yes | snake_case Python package name |
 | `DESC` | yes | one-line description |
-| `PAYLOAD` | no | directory of product files overlaid on the scaffold (payload wins on collision) |
+| `PAYLOAD` | no | product files. A fragment is overlaid (payload wins on collision); a whole repository is **authoritative** — see below |
 | `ORG` | no | GitHub owner (default `Quantum-L9`) |
 | `WORK_DIR` | no | where the repository is assembled (default `/tmp/l9-births`) |
 | `CLASS` | no | org repo class (default `non_constellation_python`) |
@@ -66,6 +66,53 @@ half-born repository on GitHub — it leaves a work directory and a receipt.
 | `RECEIPT` | no | where to write the birth receipt JSON |
 | `PRIVATE` | no | create the repository private |
 | `NO_REMOTE` | no | stop after stage 5 — assemble, finalize, and validate only |
+
+## What a PAYLOAD owns
+
+`PAYLOAD` has two modes, and which one applies is decided by the payload's
+shape, never by a flag.
+
+| Payload | Mode | Absence means |
+|---------|------|---------------|
+| a fragment — some files, part of a tree | **additive overlay** | nothing. The template keeps everything the payload does not mention. |
+| a standalone repository | **authoritative** | the product does not own that surface. It is removed. |
+
+A payload is repository-shaped when it carries every path in
+`repository_shape` — today `pyproject.toml`, `.l9/architecture.yaml`, `src/`,
+`tests/`, and `scripts/inventory_check.py`. Identification is positive: a large
+payload, or one that merely happens to have a `src/` directory, stays additive.
+
+This exists because an overlay can only ever *overwrite*. It cannot say "this
+product has no Dockerfile", because there is no file in the payload with which
+to say it. Without the authoritative mode, a repository of backend-neutral
+domain contracts is born carrying the template's FastAPI service, its Docker
+runtime, and its local observability stack — not because anyone asked for them,
+but because nothing in the payload had the same name.
+
+What survives an authoritative payload is declared in
+`scripts/birth-runner/payload-ownership.yaml`, which splits this template's own
+surfaces two ways:
+
+| List | Contents | Under an authoritative payload |
+|------|----------|-------------------------------|
+| `chassis` | the birth engine, the repository-execution facade, `tools/`, generated-rule templates, the canonical LICENSE, org metadata | always kept; a payload may still overwrite an individual file |
+| `product` | the example product — `src/**`, `tests/**`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example`, `observability/**`, `docs/examples/**` | kept only where the payload supplies it |
+
+Organization surfaces are not listed there at all: stage 4 MATERIALIZE decides
+those, and birth does not get a second opinion. A product owns its product, not
+the factory that made it.
+
+Two consequences worth stating plainly:
+
+- The payload's package **replaces** the renamed template package. It is not
+  union-merged with it, so `app.py`, `settings.py`, `health.py`, `protocols.py`
+  and `retry.py` do not reappear as if the product had written them.
+- `PKG` must name the package the payload ships. A mismatch stops the birth in
+  stage 2 rather than surfacing as an import error in stage 5.
+
+Every path this template tracks must appear in one of the two lists; a unit test
+enforces it. Adding a file to this template therefore forces an answer to "does
+a product inherit this?" instead of defaulting to yes.
 
 ## The org birth profile
 
