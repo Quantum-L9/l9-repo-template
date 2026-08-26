@@ -22,6 +22,7 @@ IDENTITY_FILES = (
     (".l9/architecture.yaml", r"^  repository: Quantum-L9/l9-repo-template$"),
     (".l9/ownership.yaml", r"^repository: Quantum-L9/l9-repo-template$"),
     (".l9/sdk-compatibility.yaml", r"^repository: Quantum-L9/l9-repo-template$"),
+    (".l9/org-birth-profile.yaml", r"^repository: Quantum-L9/l9-repo-template$"),
 )
 SKIP_DIRS = {
     ".git",
@@ -34,10 +35,16 @@ SKIP_DIRS = {
     ".eggs",
 }
 SKIP_SUFFIXES = (".egg-info",)
-# Keep the rename self-test fixture on the template identity strings.
+# Files where `l9_example_pkg` is the TEMPLATE SENTINEL, not this repository's
+# package identity. Rewriting the sentinel breaks the tool that reads it: a
+# renamed `new_repo.py` would reject the very package name it was just given,
+# and the rename self-test would assert against its own output.
 SKIP_REL_PATHS = {
     "tests/unit/test_bootstrap_rename.py",
+    "tests/unit/test_new_repo_orchestrator.py",
+    "tests/integration/test_new_repo_local_birth.py",
     "scripts/bootstrap_rename.py",
+    "scripts/birth-runner/new_repo.py",
     "scripts/render_cursor_rules.py",
     "MANIFEST.sha256",
     "docs/repository-execution-runtime.md",

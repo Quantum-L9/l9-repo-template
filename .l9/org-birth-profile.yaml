@@ -1,0 +1,17 @@
+# Organization birth profile marker.
+#
+# This repository declares its own class; Quantum-L9/.github decides what that
+# class receives (INHERIT / MATERIALIZE / REMOTE APPLY / FORBID), per
+# policies/repo-classes.yml over there.
+#
+# Deliberately flat: the org seeder parses it with one regex in Node, the birth
+# orchestrator parses it with yaml.safe_load in Python. Neither needs the other
+# to grow a dependency.
+#
+# scripts/birth-runner/new_repo.py rewrites this file at birth and appends the
+# provenance keys (template_sha, org_profile_sha, born_at) that only exist once
+# a repository has actually been born from a specific pair of commits.
+schema: l9.org-birth-profile-marker/v1
+profile: non_constellation_python
+authority: Quantum-L9/.github
+repository: Quantum-L9/l9-repo-template

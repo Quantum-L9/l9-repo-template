@@ -45,6 +45,7 @@ REQUIRED = (
     ".l9/repo-workflow.schema.json",
     ".l9/architecture.yaml",
     ".l9/ownership.yaml",
+    ".l9/org-birth-profile.yaml",
     ".l9/sdk-compatibility.yaml",
     ".l9-template-version",
     ".python-version",
@@ -79,6 +80,7 @@ REQUIRED = (
     "scripts/preflight_local_env.py",
     "scripts/regenerate_runtime_manifest.py",
     "scripts/birth-runner/README.md",
+    "scripts/birth-runner/new_repo.py",
     "scripts/birth-runner/01_preflight.sh",
     "scripts/birth-runner/02_bootstrap.sh",
     "scripts/birth-runner/03_verify.sh",
@@ -148,6 +150,14 @@ def main() -> int:
         if "create_node_app" in text or "register_handler" in text:
             errors.append(
                 f"Constellation node API in {path.relative_to(ROOT)} — use L9-Node-Template"
+            )
+    marker = ROOT / ".l9" / "org-birth-profile.yaml"
+    if marker.is_file():
+        text = marker.read_text(encoding="utf-8")
+        if not re.search(r"^profile:[ \t]*[\"']?[A-Za-z0-9_-]+[\"']?[ \t]*$", text, re.M):
+            errors.append(
+                ".l9/org-birth-profile.yaml declares no parseable `profile:` — "
+                "Quantum-L9/.github resolves an unreadable marker to the default class"
             )
     provenance = ROOT / ".l9" / "runtime-provenance.yaml"
     if provenance.is_file():

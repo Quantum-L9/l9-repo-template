@@ -17,7 +17,9 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 | `Makefile` / `Repo.mk` / `tools/l9_repo/` | Core facade + product/gov wrappers | ALREADY_HAVE | l9-ci-core |
 | `scripts/inventory_check.py` | Layout + mention drift | PORT_SURGICAL | Node-Template verify_contracts idea |
 | `scripts/repo_hygiene_audit.py` | eval/exec/print + scaffold bans | PORT_SURGICAL | Node-Template audit_engine (generic) |
-| `scripts/birth-runner/` | Use-template → rename → verify | PORT_SURGICAL | PackageTemplate dep-build-runner mechanics |
+| `scripts/birth-runner/new_repo.py` | One-command birth state machine (8 stages) | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/0*.sh` | Staged debugging surfaces | PORT_SURGICAL | PackageTemplate dep-build-runner mechanics |
+| `.l9/org-birth-profile.yaml` | Declares the org repo class | ALREADY_HAVE | Quantum-L9/.github contract |
 | `src/*/settings|errors|health|retry.py` | Optional package helpers | PORT_SURGICAL | PackageTemplate concepts |
 | `.cursor/rules/templates/l9-python-repo.mdc.template` | Generic agent rule | PORT_SURGICAL | Node-Template contract rule rewrite |
 | `.cursor/rules/templates/fastapi.mdc.template` | FastAPI conventions | PORT_SURGICAL | Node-Template fastapi rule |
@@ -55,3 +57,9 @@ because this template customizes them for the museum. `.github/CODEOWNERS`,
 `dependabot.yml`, and `labels.yml` are not inheritable and stay repo-local.
 CI targeting and governance invocation belong to the future organization CI
 control plane (l9-ci-core / l9-ci-control-plane).
+
+Which of these a repository actually receives is decided by its class in
+`Quantum-L9/.github` `policies/repo-classes.yml`, declared here in
+`.l9/org-birth-profile.yaml`. The `non_constellation_python` class FORBIDs the
+whole `DENY_CI_DISTRIBUTION` set, so the organization seeder can never write a
+file this template then fails closed on.

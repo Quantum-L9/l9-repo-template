@@ -22,6 +22,11 @@ boundaries:
     - constellation_* dependency package factory
     - Cursor-Governance control plane implementation
     - organization CI distribution, targeting, versioning, or enforcement
+org_birth_profile:
+  class: non_constellation_python
+  authority: Quantum-L9/.github
+  contract: policies/repo-classes.yml
+  marker: .l9/org-birth-profile.yaml
 ci_ownership:
   execution_semantics: Quantum-L9/l9-ci-core
   organization_control: Quantum-L9/l9-ci-control-plane
