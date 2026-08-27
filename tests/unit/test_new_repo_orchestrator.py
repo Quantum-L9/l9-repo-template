@@ -17,17 +17,20 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+BIRTH_RUNNER = REPO / "scripts" / "birth-runner"
 # scripts/birth-runner is not an importable package name, so load by path. The
 # module must be in sys.modules *before* exec_module: @dataclass resolves
 # annotations through sys.modules[cls.__module__].
-_SPEC = importlib.util.spec_from_file_location(
-    "l9_birth_new_repo", REPO / "scripts" / "birth-runner" / "new_repo.py"
-)
+_SPEC = importlib.util.spec_from_file_location("l9_birth_new_repo", BIRTH_RUNNER / "new_repo.py")
 assert _SPEC is not None
 assert _SPEC.loader is not None
 new_repo = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = new_repo
 _SPEC.loader.exec_module(new_repo)
+# The engine locates its provenance module relative to its own file, so reading
+# it back off the loaded engine is what guarantees the test and the birth are
+# talking about the same module rather than two copies that agree for now.
+prov = new_repo.prov
 
 # The template's own DENY_CI_DISTRIBUTION, transcribed. A class that stops
 # forbidding one of these while inventory_check still denies it recreates the
@@ -160,12 +163,48 @@ class TestMarker:
             profile_name="non_constellation_python",
             repository="Quantum-L9/l9-observability-core",
             template_sha="a" * 40,
+            template_version="2.1.0",
             org_profile_sha="b" * 40,
             born_at="2026-08-26T00:00:00+00:00",
         )
         assert new_repo.parse_marker_profile(text) == "non_constellation_python"
         assert "a" * 40 in text
         assert "b" * 40 in text
+
+    def test_the_org_contract_keys_stay_flat(self) -> None:
+        """Quantum-L9/.github parses this file with one regex on `profile:`.
+
+        Birth provenance is an additive nested block; the three keys the
+        organization's contract names must stay at the top level or an org-wide
+        sweep silently resolves every born repository to the default class.
+        """
+        text = new_repo.render_marker(
+            profile_name="non_constellation_python",
+            repository="Quantum-L9/x",
+            template_sha="a" * 40,
+            template_version="2.1.0",
+            org_profile_sha="b" * 40,
+            born_at="2026-08-26T00:00:00+00:00",
+        )
+        doc = prov.parse_flat_yaml(text)
+        assert doc["schema"] == prov.MARKER_SCHEMA
+        assert doc["profile"] == "non_constellation_python"
+        assert doc["authority"] == "Quantum-L9/.github"
+
+    def test_provenance_lives_under_the_birth_block(self) -> None:
+        text = new_repo.render_marker(
+            profile_name="non_constellation_python",
+            repository="Quantum-L9/x",
+            template_sha="a" * 40,
+            template_version="2.1.0",
+            org_profile_sha="b" * 40,
+            born_at="2026-08-26T00:00:00+00:00",
+        )
+        birth = prov.birth_block(text)
+        assert birth["template_sha"] == "a" * 40
+        assert birth["template_version"] == "2.1.0"
+        assert birth["org_policy_sha"] == "b" * 40
+        assert birth["born_at"] == "2026-08-26T00:00:00+00:00"
 
     def test_committed_marker_declares_the_expected_class(self) -> None:
         text = (REPO / ".l9" / "org-birth-profile.yaml").read_text(encoding="utf-8")
@@ -227,6 +266,63 @@ class TestCopyExclusions:
     @pytest.mark.parametrize("rel", ["src/pkg/app.py", "README.md", ".github/CODEOWNERS"])
     def test_real_content_is_carried(self, rel: str) -> None:
         assert not new_repo._is_machine_state(Path(rel))
+
+
+class TestSessionScaffoldingIsNeverBorn:
+    """Agent session bootstrap is this machine's, not the template's.
+
+    `.claude/` carries symlinks into the governance clone at an absolute machine
+    path plus a copy of the governance command/skill library, and `.mcp.json` is
+    0600 environment configuration. Copied into a newborn they are staged by
+    `git add -A` and land in the ROOT COMMIT — the one commit that is supposed
+    to be attestable provenance and nothing else.
+    """
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            ".claude/settings.json",
+            ".claude/rules",
+            ".claude/skills/l9-plan/SKILL.md",
+            ".mcp.json",
+        ],
+    )
+    def test_the_template_copy_drops_it(self, rel: str) -> None:
+        assert new_repo._is_session_scaffolding(Path(rel))
+
+    @pytest.mark.parametrize("rel", ["src/pkg/app.py", ".github/CODEOWNERS", "docs/x.md"])
+    def test_template_content_is_untouched(self, rel: str) -> None:
+        assert not new_repo._is_session_scaffolding(Path(rel))
+
+    def test_copy_tree_leaves_it_behind(self, tmp_path: Path) -> None:
+        src = tmp_path / "template"
+        (src / ".claude" / "hooks").mkdir(parents=True)
+        (src / ".claude" / "hooks" / "wrap.py").write_text("", encoding="utf-8")
+        (src / ".mcp.json").write_text("{}", encoding="utf-8")
+        (src / "README.md").write_text("# t\n", encoding="utf-8")
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        new_repo.copy_tree(src, dest)
+        assert (dest / "README.md").is_file()
+        assert not (dest / ".claude").exists()
+        assert not (dest / ".mcp.json").exists()
+
+    def test_a_payload_may_still_own_its_own_claude_config(self, tmp_path: Path) -> None:
+        # The exclusion is about THIS machine's scaffolding, not about forbidding
+        # a product from shipping Claude configuration it actually wrote.
+        payload = tmp_path / "payload"
+        (payload / ".claude").mkdir(parents=True)
+        (payload / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        assert new_repo.overlay_payload(payload, dest) == [".claude/settings.json"]
+
+    def test_the_template_gitignores_it_for_the_newborn(self) -> None:
+        # copy_tree keeps it out of the assembled tree; .gitignore keeps it out
+        # of the commit when the bootstrap later runs INSIDE a born repository.
+        ignored = (REPO / ".gitignore").read_text(encoding="utf-8")
+        assert "/.claude/" in ignored
+        assert "/.mcp.json" in ignored
 
 
 class TestMaterializeOrgPayload:

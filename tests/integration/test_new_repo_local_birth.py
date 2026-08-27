@@ -23,13 +23,15 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-RUNNER = REPO / "scripts" / "birth-runner" / "new_repo.py"
+BIRTH_RUNNER = REPO / "scripts" / "birth-runner"
+RUNNER = BIRTH_RUNNER / "new_repo.py"
 _SPEC = importlib.util.spec_from_file_location("l9_birth_new_repo_it", RUNNER)
 assert _SPEC is not None
 assert _SPEC.loader is not None
 new_repo = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = new_repo
 _SPEC.loader.exec_module(new_repo)
+prov = new_repo.prov
 
 # A birth takes ~40s and only means something in a pristine template checkout.
 # Two things must never run it:
@@ -177,8 +179,95 @@ def test_org_birth_profile_is_applied(
     marker = (dest / ".l9" / "org-birth-profile.yaml").read_text(encoding="utf-8")
     assert new_repo.parse_marker_profile(marker) == "non_constellation_python"
     assert "Quantum-L9/l9-birth-acceptance" in marker
-    assert "template_sha:" in marker
-    assert "org_profile_sha:" in marker
+    # The class declaration is the organization's contract and stays flat; the
+    # provenance it used to sit beside now lives in the immutable `birth:` block.
+    birth = prov.birth_block(marker)
+    assert new_repo.SHA_RE.match(str(birth["template_sha"]))
+    assert new_repo.SHA_RE.match(str(birth["org_policy_sha"]))
+    assert birth["born_at"]
+
+
+def test_birth_stamps_an_immutable_record(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """The four provenance surfaces, stamped after everything that could move."""
+    _, dest = born
+    receipt = json.loads((dest / prov.BIRTH_RECEIPT_PATH).read_text(encoding="utf-8"))
+    assert receipt["schema"] == prov.RECEIPT_SCHEMA
+    assert receipt["repository"] == "Quantum-L9/l9-birth-acceptance"
+    assert receipt["repo_class"] == "non_constellation_python"
+    assert receipt["digest"] == prov.receipt_digest(receipt)
+
+    version = (dest / prov.TEMPLATE_VERSION_PATH).read_text(encoding="utf-8").strip()
+    assert version == receipt["template"]["version"]
+
+    birth = prov.birth_block((dest / prov.MARKER_PATH).read_text(encoding="utf-8"))
+    assert birth["template_sha"] == receipt["template"]["sha"]
+    assert birth["template_version"] == version
+    assert birth["org_policy_sha"] == receipt["org_policy"]["sha"]
+
+
+def test_the_recorded_version_is_the_version_at_the_recorded_sha(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """The invariant that would have caught a 2.0.0 / 2.1.0 disagreement.
+
+    The record pins a template commit, so the version it records has to be the
+    version that commit carries — read out of git here, not out of the template
+    working tree the birth ran from.
+    """
+    _, dest = born
+    receipt = json.loads((dest / prov.BIRTH_RECEIPT_PATH).read_text(encoding="utf-8"))
+    at_sha = prov.template_version_at(REPO, receipt["template"]["sha"])
+    assert receipt["template"]["version"] == at_sha
+
+
+def test_the_conformance_record_is_born_equal_and_separate(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """Born equal to the birth record, and a different file so it can move."""
+    _, dest = born
+    state = prov.parse_flat_yaml((dest / prov.TEMPLATE_STATE_PATH).read_text(encoding="utf-8"))
+    receipt = json.loads((dest / prov.BIRTH_RECEIPT_PATH).read_text(encoding="utf-8"))
+    assert state["schema"] == prov.TEMPLATE_STATE_SCHEMA
+    assert state["template"]["current_sha"] == receipt["template"]["sha"]
+    assert state["template"]["current_version"] == receipt["template"]["version"]
+    assert state["policy"]["current_sha"] == receipt["org_policy"]["sha"]
+    assert state["reconciled_by"] == "birth"
+    assert prov.TEMPLATE_STATE_PATH not in prov.BIRTH_OWNED_PATHS
+
+
+def test_the_newborn_can_prove_its_own_birth(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """The repository carries the checker, so the proof outlives the birth run."""
+    _, dest = born
+    proc = subprocess.run(
+        [sys.executable, "scripts/birth-runner/verify_birth_integrity.py", "--require-receipt"],
+        cwd=dest,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "BIRTH INTEGRITY: PASS" in proc.stdout
+
+
+def test_a_payload_carrying_birth_provenance_stops_the_birth(tmp_path: Path) -> None:
+    """A product owns its product. It never owns the record of its own birth.
+
+    A payload copied out of an older repository carries that repository's
+    `.l9-template-version`, and the overlay wins on collision — so without this
+    the newborn is born claiming provenance that belongs to somebody else.
+    """
+    payload = tmp_path / "payload"
+    payload.mkdir(parents=True)
+    (payload / prov.TEMPLATE_VERSION_PATH).write_text("0.0.1\n", encoding="utf-8")
+
+    proc = _birth(tmp_path, "--payload", str(payload))
+    assert proc.returncode != 0
+    assert "protected birth paths" in proc.stderr
+    assert "repository created" not in proc.stdout
 
 
 def test_no_forbidden_org_ci_distribution(
@@ -195,6 +284,23 @@ def test_no_forbidden_org_ci_distribution(
         ]
     }
     assert new_repo.forbidden_present(dest, profile) == []
+
+
+def test_no_agent_session_scaffolding_is_inherited(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """A birth run from a governed workspace must not carry that workspace in.
+
+    `.claude/` holds symlinks into the governance clone at an absolute machine
+    path and a copy of the governance command/skill library; `.mcp.json` is 0600
+    environment configuration. Both were landing in the newborn's root commit.
+    """
+    _, dest = born
+    assert not (dest / ".claude").exists()
+    assert not (dest / ".mcp.json").exists()
+    ignored = (dest / ".gitignore").read_text(encoding="utf-8")
+    assert "/.claude/" in ignored
+    assert "/.mcp.json" in ignored
 
 
 def test_no_template_git_history_is_inherited(
@@ -223,6 +329,9 @@ def test_receipt_records_both_provenance_shas(
     assert receipt["organization"]["birth_profile"] == "non_constellation_python"
     assert receipt["product"]["repository"] == "Quantum-L9/l9-birth-acceptance"
     assert receipt["template"]["template_version"]
+    assert receipt["birth_receipt"]["digest"]
+    assert receipt["manifest_sha256"]
+    assert receipt["product"]["payload_mode"] == "none"
 
 
 def test_org_contract_still_has_the_shape_birth_depends_on() -> None:

@@ -12,7 +12,7 @@ PYTHON ?= python3
 .PHONY: help install-dev setup-hooks lint typecheck inventory-check hygiene-check \
 	check-rules render-rules check-config reconcile-config verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
-	new-repo birth-preflight birth-bootstrap birth-verify \
+	new-repo birth-check birth-preflight birth-bootstrap birth-verify \
 	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
 
 # Override thin-facade help to list product + governance wrappers.
@@ -69,7 +69,10 @@ preflight: ## Validate .env.example (or ENV_FILE=...) museum keys
 test-cov: ## Pytest with coverage (no hard library threshold)
 	$(PYTHON) -m pytest -q --cov=l9_example_pkg --cov-report=term-missing
 
-verify: inventory-check hygiene-check check-config check-rules lint typecheck ## Full local product validation ladder
+birth-check: ## Prove this repo is what its birth record claims (UNBORN repos pass)
+	$(PYTHON) scripts/birth-runner/verify_birth_integrity.py --root .
+
+verify: inventory-check hygiene-check birth-check check-config check-rules lint typecheck ## Full local product validation ladder
 	$(PYTHON) -m pytest -q
 
 ci: verify ## Alias for verify

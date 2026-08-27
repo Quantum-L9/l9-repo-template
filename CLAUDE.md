@@ -16,11 +16,14 @@ This is a thin Claude-specific overlay. It does not replace or duplicate
 
 1. Read `AGENTS.md`.
 2. Read `.l9/architecture.yaml`, `.l9/ownership.yaml`,
-   `.l9/org-birth-profile.yaml`, `.l9/repo-workflow.json`, and
-   `.l9/sdk-compatibility.yaml`.
+   `.l9/org-birth-profile.yaml` (immutable birth record),
+   `.l9/template-state.yaml` (mutable conformance state),
+   `.l9/repo-workflow.json`, and `.l9/sdk-compatibility.yaml`.
 3. Read `docs/WHEN_TO_USE.md` before changing product boundaries.
-4. Read `docs/ops/REPO_BIRTH.md` and
-   `scripts/birth-runner/payload-ownership.yaml` before changing birth behavior.
+4. Read `docs/ops/REPO_BIRTH.md`,
+   `scripts/birth-runner/payload-ownership.yaml`, and
+   `scripts/birth-runner/birth_provenance.py` before changing birth behavior.
+   Birth provenance is immutable; only `.l9/template-state.yaml` is reconciled.
 5. Read `Repo.mk` and `pyproject.toml` before changing execution or dependency
    surfaces.
 
