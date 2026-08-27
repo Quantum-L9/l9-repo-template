@@ -78,7 +78,11 @@ TRAILER_CLASS = "L9-Class"
 REQUIRED_TRAILERS = (TRAILER_RECEIPT, TRAILER_TEMPLATE, TRAILER_POLICY, TRAILER_CLASS)
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$")
+# Possessive `{0,63}+`: the trailing class contains the leading one, so on a
+# string that does not match, a greedy quantifier retries every split point.
+# Bounded at 64 the blowup is small, but a provenance validator is the wrong
+# place to leave a regex that backtracks at all.
+VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}+$")
 _TRAILER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*):[ \t]*(.*)$")
 
 
@@ -417,25 +421,29 @@ def parse_flat_yaml(text: str | None) -> dict[str, object]:
     doc: dict[str, object] = {}
     parent: str | None = None
     for raw in (text or "").splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
+        parsed = _flat_line(raw)
+        if parsed is None:
             continue
-        if ":" not in raw:
-            continue
-        key, _, value = raw.strip().partition(":")
-        key = key.strip()
-        value = value.strip().strip("\"'")
-        if raw[:1].isspace():
+        indented, key, value = parsed
+        if indented:
             block = doc.get(parent) if parent else None
             if isinstance(block, dict):
                 block[key] = value
-            continue
-        if value:
+        elif value:
             doc[key] = value
             parent = None
         else:
             doc[key] = {}
             parent = key
     return doc
+
+
+def _flat_line(raw: str) -> tuple[bool, str, str] | None:
+    """`(indented, key, value)` for one provenance line, or None to skip it."""
+    if not raw.strip() or raw.lstrip().startswith("#") or ":" not in raw:
+        return None
+    key, _, value = raw.strip().partition(":")
+    return raw[:1].isspace(), key.strip(), value.strip().strip("\"'")
 
 
 def birth_block(marker_text: str | None) -> dict[str, object]:

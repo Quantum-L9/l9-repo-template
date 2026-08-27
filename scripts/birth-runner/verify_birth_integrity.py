@@ -59,6 +59,14 @@ def _load_sibling(name: str):
 prov = _load_sibling("birth_provenance")
 
 
+# A check is a (key, label) pair. Repeating the strings per branch is how a
+# typo silently becomes a second row in the report instead of the same row
+# reporting a different status, so the pairs that appear more than once are
+# named once and unpacked into `record()` / `ok()`.
+CHECK_RECEIPT = ("receipt.present", "birth receipt")
+CHECK_ROOT_COMMIT = ("root.commit", "root commit")
+
+
 @dataclass
 class Check:
     key: str
@@ -234,19 +242,32 @@ def _check_root_commit(root: Path, receipt: dict[str, object], report: Report) -
     birth produced, and it is the only thing in the repository that still says so
     after three years of ordinary development on top of it.
     """
+    commit = _resolve_root_commit(root, report)
+    if commit is None:
+        return
+    _check_trailers(root, commit, receipt, report)
+    _check_birth_record_intact(root, commit, report)
+    _check_contents_digest(root, commit, receipt, report)
+
+
+def _resolve_root_commit(root: Path, report: Report) -> str | None:
+    """The single root commit, or None with the reason already recorded."""
     if not prov.is_git_repo(root):
-        report.record("root.commit", "root commit", "SKIP", "not a git repository")
-        return
+        report.record(*CHECK_ROOT_COMMIT, "SKIP", "not a git repository")
+        return None
     if not prov.has_commits(root):
-        report.record("root.commit", "root commit", "SKIP", "no commits yet")
-        return
+        report.record(*CHECK_ROOT_COMMIT, "SKIP", "no commits yet")
+        return None
     try:
         commit = prov.root_commit(root)
     except prov.ProvenanceError as exc:
-        report.record("root.commit", "root commit", "FAIL", str(exc))
-        return
-    report.record("root.commit", "root commit", "PASS", commit[:12])
+        report.record(*CHECK_ROOT_COMMIT, "FAIL", str(exc))
+        return None
+    report.record(*CHECK_ROOT_COMMIT, "PASS", commit[:12])
+    return commit
 
+
+def _check_trailers(root: Path, commit: str, receipt: dict[str, object], report: Report) -> None:
     expected = prov.expected_trailers(receipt)
     found = prov.parse_trailers(prov.commit_message(root, commit))
     missing = [key for key in prov.REQUIRED_TRAILERS if key not in found]
@@ -260,6 +281,8 @@ def _check_root_commit(root: Path, receipt: dict[str, object], report: Report) -
         + (f"disagree: {', '.join(wrong)}" if wrong else ""),
     )
 
+
+def _check_birth_record_intact(root: Path, commit: str, report: Report) -> None:
     mutated = []
     for rel in sorted(prov.BIRTH_OWNED_PATHS):
         at_root = prov.read_blob(root, commit, rel)
@@ -275,6 +298,10 @@ def _check_root_commit(root: Path, receipt: dict[str, object], report: Report) -
         f"mutated since birth: {', '.join(mutated)}",
     )
 
+
+def _check_contents_digest(
+    root: Path, commit: str, receipt: dict[str, object], report: Report
+) -> None:
     recorded = str(receipt.get("manifest_sha256") or "")
     try:
         files = prov.commit_manifest(root, commit, exclude={prov.BIRTH_RECEIPT_PATH})
@@ -297,8 +324,7 @@ def verify(root: Path, *, require_receipt: bool) -> tuple[Report, bool]:
     receipt, state = _load_receipt(root)
     if state == "absent":
         report.record(
-            "receipt.present",
-            "birth receipt",
+            *CHECK_RECEIPT,
             "FAIL" if require_receipt else "SKIP",
             f"{prov.BIRTH_RECEIPT_PATH} is absent"
             + (
@@ -309,9 +335,9 @@ def verify(root: Path, *, require_receipt: bool) -> tuple[Report, bool]:
         )
         return report, False
     if receipt is None:
-        report.record("receipt.present", "birth receipt", "FAIL", state)
+        report.record(*CHECK_RECEIPT, "FAIL", state)
         return report, True
-    report.record("receipt.present", "birth receipt", "PASS", prov.BIRTH_RECEIPT_PATH)
+    report.record(*CHECK_RECEIPT, "PASS", prov.BIRTH_RECEIPT_PATH)
     report.repository = str(receipt.get("repository") or "")
     _check_digest(receipt, report)
     _check_template_version(root, receipt, report)
