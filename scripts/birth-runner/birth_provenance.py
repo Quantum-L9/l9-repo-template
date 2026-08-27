@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import re
+import string
 import subprocess
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -78,16 +79,33 @@ TRAILER_CLASS = "L9-Class"
 REQUIRED_TRAILERS = (TRAILER_RECEIPT, TRAILER_TEMPLATE, TRAILER_POLICY, TRAILER_CLASS)
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-# Possessive `{0,63}+`: the trailing class contains the leading one, so on a
-# string that does not match, a greedy quantifier retries every split point.
-# Bounded at 64 the blowup is small, but a provenance validator is the wrong
-# place to leave a regex that backtracks at all.
-VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}+$")
+VERSION_MAX = 64
+VERSION_HEAD = frozenset(string.ascii_letters + string.digits)
+VERSION_BODY = VERSION_HEAD | frozenset(".+_-")
 _TRAILER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*):[ \t]*(.*)$")
 
 
 class ProvenanceError(RuntimeError):
     """A provenance record could not be produced or could not be trusted."""
+
+
+def is_usable_version(value: str) -> bool:
+    """A template version: an alphanumeric first character, then version punctuation.
+
+    A character scan rather than a regex, deliberately. The pattern this replaces
+    — `^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$` — had a trailing class containing its
+    leading one, which is the shape that makes an engine retry every split point
+    on a string that does not match. Bounded at 64 the blowup was small, and a
+    possessive quantifier would have closed it, but a provenance validator does
+    not need a regex engine to answer this at all: expressed as a scan there is
+    nothing to backtrack, and the rule is readable without knowing what
+    `{0,63}+` means.
+    """
+    return (
+        1 <= len(value) <= VERSION_MAX
+        and value[0] in VERSION_HEAD
+        and all(char in VERSION_BODY for char in value)
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,7 +179,7 @@ def template_version_at(template_src: Path, sha: str) -> str:
         raise ProvenanceError(
             f"commit {sha[:12]} of the template carries no {TEMPLATE_VERSION_PATH}: {exc}"
         ) from exc
-    if not VERSION_RE.match(version):
+    if not is_usable_version(version):
         raise ProvenanceError(f"commit {sha[:12]} records an unusable template version {version!r}")
     return version
 

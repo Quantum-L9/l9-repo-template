@@ -143,6 +143,36 @@ class TestFlatReader:
         assert prov.parse_flat_yaml(text) == {}
 
 
+class TestVersionValidation:
+    """The accepted shape, held by a test rather than by a regex nobody rereads."""
+
+    @pytest.mark.parametrize(
+        "value",
+        ["2.1.0", "a", "1.0.0-rc.1+build_9", "v2", "2026.08.27", "A" * 64],
+    )
+    def test_accepts_a_template_version(self, value: str) -> None:
+        assert prov.is_usable_version(value)
+
+    @pytest.mark.parametrize(
+        "value",
+        ["", ".1.0", "-2.1.0", "_x", "A" * 65, "2.1.0 ", " 2.1.0", "2.1.0\n2.0.0", "2/1", "2:1"],
+    )
+    def test_rejects_anything_else(self, value: str) -> None:
+        assert not prov.is_usable_version(value)
+
+    def test_a_rejected_version_stops_the_birth(self, tmp_path: Path) -> None:
+        # The pinned commit is the only place a version may come from, so an
+        # unusable one there is a birth failure, not a value to sanitize.
+        root = tmp_path / "template"
+        root.mkdir()
+        _git(root, "init", "-q", "-b", "main")
+        (root / prov.TEMPLATE_VERSION_PATH).write_text("not a version!\n", encoding="utf-8")
+        _commit(root, "chore: template")
+        sha = _git(root, "rev-parse", "HEAD").strip()
+        with pytest.raises(prov.ProvenanceError, match="unusable template version"):
+            prov.template_version_at(root, sha)
+
+
 class TestDigests:
     def test_receipt_digest_ignores_key_order(self) -> None:
         a = {"schema": "x", "repository": "r", "digest": "ignored"}
