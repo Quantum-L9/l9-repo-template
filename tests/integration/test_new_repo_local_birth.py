@@ -286,6 +286,23 @@ def test_no_forbidden_org_ci_distribution(
     assert new_repo.forbidden_present(dest, profile) == []
 
 
+def test_no_agent_session_scaffolding_is_inherited(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """A birth run from a governed workspace must not carry that workspace in.
+
+    `.claude/` holds symlinks into the governance clone at an absolute machine
+    path and a copy of the governance command/skill library; `.mcp.json` is 0600
+    environment configuration. Both were landing in the newborn's root commit.
+    """
+    _, dest = born
+    assert not (dest / ".claude").exists()
+    assert not (dest / ".mcp.json").exists()
+    ignored = (dest / ".gitignore").read_text(encoding="utf-8")
+    assert "/.claude/" in ignored
+    assert "/.mcp.json" in ignored
+
+
 def test_no_template_git_history_is_inherited(
     born: tuple[subprocess.CompletedProcess[str], Path],
 ) -> None:

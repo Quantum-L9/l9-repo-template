@@ -268,6 +268,63 @@ class TestCopyExclusions:
         assert not new_repo._is_machine_state(Path(rel))
 
 
+class TestSessionScaffoldingIsNeverBorn:
+    """Agent session bootstrap is this machine's, not the template's.
+
+    `.claude/` carries symlinks into the governance clone at an absolute machine
+    path plus a copy of the governance command/skill library, and `.mcp.json` is
+    0600 environment configuration. Copied into a newborn they are staged by
+    `git add -A` and land in the ROOT COMMIT — the one commit that is supposed
+    to be attestable provenance and nothing else.
+    """
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            ".claude/settings.json",
+            ".claude/rules",
+            ".claude/skills/l9-plan/SKILL.md",
+            ".mcp.json",
+        ],
+    )
+    def test_the_template_copy_drops_it(self, rel: str) -> None:
+        assert new_repo._is_session_scaffolding(Path(rel))
+
+    @pytest.mark.parametrize("rel", ["src/pkg/app.py", ".github/CODEOWNERS", "docs/x.md"])
+    def test_template_content_is_untouched(self, rel: str) -> None:
+        assert not new_repo._is_session_scaffolding(Path(rel))
+
+    def test_copy_tree_leaves_it_behind(self, tmp_path: Path) -> None:
+        src = tmp_path / "template"
+        (src / ".claude" / "hooks").mkdir(parents=True)
+        (src / ".claude" / "hooks" / "wrap.py").write_text("", encoding="utf-8")
+        (src / ".mcp.json").write_text("{}", encoding="utf-8")
+        (src / "README.md").write_text("# t\n", encoding="utf-8")
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        new_repo.copy_tree(src, dest)
+        assert (dest / "README.md").is_file()
+        assert not (dest / ".claude").exists()
+        assert not (dest / ".mcp.json").exists()
+
+    def test_a_payload_may_still_own_its_own_claude_config(self, tmp_path: Path) -> None:
+        # The exclusion is about THIS machine's scaffolding, not about forbidding
+        # a product from shipping Claude configuration it actually wrote.
+        payload = tmp_path / "payload"
+        (payload / ".claude").mkdir(parents=True)
+        (payload / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        assert new_repo.overlay_payload(payload, dest) == [".claude/settings.json"]
+
+    def test_the_template_gitignores_it_for_the_newborn(self) -> None:
+        # copy_tree keeps it out of the assembled tree; .gitignore keeps it out
+        # of the commit when the bootstrap later runs INSIDE a born repository.
+        ignored = (REPO / ".gitignore").read_text(encoding="utf-8")
+        assert "/.claude/" in ignored
+        assert "/.mcp.json" in ignored
+
+
 class TestMaterializeOrgPayload:
     """MATERIALIZE writes the applicable org files BEFORE the initial commit.
 

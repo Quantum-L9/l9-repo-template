@@ -162,6 +162,20 @@ COPY_EXCLUDE_DIRS = frozenset(
 # have.
 COPY_EXCLUDE_SUFFIXES = (".egg-info",)
 
+# Agent session scaffolding, projected into whatever checkout the bootstrap ran
+# in. It is not template content and a newborn must not inherit it: `.claude/`
+# carries symlinks into the governance clone at an absolute machine path and a
+# copy of the governance command/skill library, and `.mcp.json` is 0600
+# environment configuration. Before this exclusion a birth run from a governed
+# workspace copied all of it in, `git add -A` staged it, and it landed in the
+# newborn's ROOT COMMIT — the one commit that is supposed to be attestable
+# provenance and nothing else.
+#
+# Excluded from the TEMPLATE copy only. A product payload that genuinely owns a
+# `.claude/` directory still overlays it; that is the product's file, not this
+# machine's.
+TEMPLATE_EXCLUDE_TOP_LEVEL = frozenset({".claude", ".mcp.json"})
+
 REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 PKG_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 MARKER_PROFILE_RE = re.compile(r"^profile:[ \t]*[\"']?([A-Za-z0-9_-]+)[\"']?[ \t]*$", re.M)
@@ -447,12 +461,17 @@ def _is_machine_state(rel: Path) -> bool:
     )
 
 
+def _is_session_scaffolding(rel: Path) -> bool:
+    return bool(rel.parts) and rel.parts[0] in TEMPLATE_EXCLUDE_TOP_LEVEL
+
+
 def copy_tree(src: Path, dest: Path) -> int:
-    """Copy the template working tree, skipping git and machine state."""
+    """Copy the template working tree, skipping git, machine state, and session
+    scaffolding."""
     copied = 0
     for path in src.rglob("*"):
         rel = path.relative_to(src)
-        if _is_machine_state(rel):
+        if _is_machine_state(rel) or _is_session_scaffolding(rel):
             continue
         target = dest / rel
         if path.is_dir():
