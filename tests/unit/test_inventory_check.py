@@ -64,7 +64,12 @@ def test_legacy_ci_surface_rejected(tmp_path: Path, surface: str) -> None:
         env=env,
     )
     assert proc.returncode == 1, proc.stderr + proc.stdout
-    assert "legacy CI distribution surface" in proc.stderr
+    # Assert on the surface and on the reason, not on a wording. The wording
+    # this asserted was replaced when the message started naming where CI
+    # execution actually belongs, and the test kept failing on prose while the
+    # behaviour it exists to protect had never changed.
+    assert "repository-local CI/control surface present" in proc.stderr
+    assert surface.rstrip("/") in proc.stderr
 
 
 def test_repo_mk_ci_facade_required(tmp_path: Path) -> None:
