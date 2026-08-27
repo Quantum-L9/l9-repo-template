@@ -1,25 +1,39 @@
+# L9_META
+#   l9_schema: 1
+#   repo_class: non_constellation_python
+#   path: .pre-commit-config.yaml
+#   layer: repository
+#   owner: platform
+#   status: active
+#   version: 2.1.0
+#   updated: 2026-08-26
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: check-merge-conflict
       - id: check-yaml
+      - id: check-json
       - id: check-toml
+      - id: check-case-conflict
+      - id: check-symlinks
       - id: detect-private-key
+      - id: debug-statements
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: mixed-line-ending
       - id: check-added-large-files
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.1
+    rev: v0.16.4
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.0
+    rev: v2.3.1
     hooks:
       - id: mypy
         files: ^src/
@@ -28,12 +42,12 @@ repos:
   - repo: local
     hooks:
       - id: inventory-check
-        name: museum inventory-check
+        name: l9 inventory-check
         entry: python scripts/inventory_check.py
         language: system
         pass_filenames: false
       - id: hygiene-check
-        name: museum hygiene-check
+        name: l9 hygiene-check
         entry: python scripts/repo_hygiene_audit.py
         language: system
         pass_filenames: false

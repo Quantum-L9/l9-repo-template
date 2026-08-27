@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed if museum inventory invariants are violated."""
+"""Fail closed if template inventory invariants are violated."""
 
 from __future__ import annotations
 
@@ -22,19 +22,29 @@ DENY_DIRS = (
     "contracts",
 )
 
-DENY_FILES = ("Justfile", "justfile", "nodespec.yaml", "spec.yaml")
+DENY_FILES = (
+    "Justfile",
+    "justfile",
+    "nodespec.yaml",
+    "spec.yaml",
+    "docs/examples/coderabbit.yaml",
+)
 
-# Legacy org CI distribution surfaces must not reappear: CI orchestration
-# belongs to l9-ci-core and organization CI control to l9-ci-control-plane.
+# Repository-local CI orchestration must not reappear. Execution semantics belong
+# to l9-ci-core and organization targeting/enforcement belongs to the central
+# control plane. Repo-local shared CodeQL query policy is also forbidden.
 DENY_CI_DISTRIBUTION = (
     ".l9/ci-pin",
     "scripts/sync_ci_from_pack.py",
     "requirements-consumer-ci.txt",
     ".github/workflows/l9-analysis.yml",
     ".github/workflows/l9-lint-test.yml",
+    ".github/workflows/l9-lint-test-node.yml",
     ".github/workflows/on-org-update.yml",
     ".github/workflows/governance.yml",
+    ".github/workflows/codeql.yml",
     ".github/governance",
+    ".github/codeql/codeql-config.yml",
 )
 
 TOOLS_ALLOW = frozenset({"l9_repo", "check_workflow_integrity.py"})
@@ -49,15 +59,22 @@ REQUIRED = (
     ".l9/sdk-compatibility.yaml",
     ".l9-template-version",
     ".python-version",
+    ".gitattributes",
+    ".pre-commit-config.yaml",
+    ".gitleaks.toml",
+    ".coderabbit.yaml",
     "pyproject.toml",
     "uv.lock",
     "Makefile",
     "Repo.mk",
+    "bootstrap.sh",
+    "llms.txt",
     "MANIFEST.sha256",
     "requirements-repo-runtime.txt",
     "LICENSE",
     "README.md",
     "AGENTS.md",
+    "CLAUDE.md",
     "ARCHITECTURE.md",
     "TEMPLATE_INVENTORY.md",
     "docs/WHEN_TO_USE.md",
@@ -93,7 +110,6 @@ REQUIRED = (
     "observability/docker-compose.observability.yml",
     ".cursor/rules/templates/l9-python-repo.mdc.template",
     ".cursor/rules/templates/fastapi.mdc.template",
-    # Inherited organization defaults
     "CONTRIBUTING.md",
     "SECURITY.md",
     "SUPPORT.md",
@@ -106,6 +122,11 @@ MENTION_CHECKS = (
     ("README.md", ("L9-Node-Template", "Constellation.PackageTemplate", "outside")),
     ("docs/WHEN_TO_USE.md", ("L9-Node-Template", "Constellation.PackageTemplate")),
     ("AGENTS.md", (".l9/architecture.yaml", ".l9/ownership.yaml")),
+    ("CLAUDE.md", ("AGENTS.md", ".l9/architecture.yaml", ".l9/org-birth-profile.yaml")),
+    ("llms.txt", ("AGENTS.md", "CLAUDE.md", ".l9/architecture.yaml", "bootstrap.sh")),
+    ("bootstrap.sh", ("python3 -m tools.l9_repo", "setup")),
+    (".gitleaks.toml", ("[extend]", "useDefault = true")),
+    (".coderabbit.yaml", ("AGENTS.md", ".l9/architecture.yaml", ".l9/ownership.yaml")),
 )
 
 
@@ -120,8 +141,8 @@ def main() -> int:
     for name in DENY_CI_DISTRIBUTION:
         if (ROOT / name).exists():
             errors.append(
-                f"legacy CI distribution surface present: {name} — "
-                "CI orchestration belongs to l9-ci-core / l9-ci-control-plane"
+                f"repository-local CI/control surface present: {name} — "
+                "CI execution belongs to l9-ci-core / central targeting"
             )
     tools = ROOT / "tools"
     if tools.exists():
@@ -140,7 +161,6 @@ def main() -> int:
         errors.append("handlers.py must not exist (use L9-Node-Template for nodes)")
     pyproject_path = ROOT / "pyproject.toml"
     if not pyproject_path.is_file():
-        # Already reported by the REQUIRED check; avoid an unguarded read crash.
         pyproject = ""
     else:
         pyproject = pyproject_path.read_text(encoding="utf-8")
