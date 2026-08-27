@@ -1,3 +1,4 @@
+<!-- L9_RENDER_REQUIRES: app_entrypoint -->
 ---
 description: "${repo_name} FastAPI conventions — generated from museum cartridge"
 globs: ["src/**/*.py"]

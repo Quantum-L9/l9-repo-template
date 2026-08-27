@@ -10,7 +10,7 @@ endif
 PYTHON ?= python3
 
 .PHONY: help install-dev setup-hooks lint typecheck inventory-check hygiene-check \
-	check-rules render-rules verify rename ci run dev wait-http \
+	check-rules render-rules check-config reconcile-config verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
 	new-repo birth-preflight birth-bootstrap birth-verify \
 	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
@@ -57,13 +57,19 @@ render-rules: ## Render .cursor/rules/*.mdc from templates + plugin-config.yaml
 check-rules: ## Fail if rendered Cursor rules drift
 	$(PYTHON) scripts/render_cursor_rules.py --check
 
+check-config: ## Fail if plugin-config.yaml claims what this repository is not
+	$(PYTHON) scripts/reconcile_plugin_config.py --check
+
+reconcile-config: ## Rewrite plugin-config.yaml to describe this repository
+	$(PYTHON) scripts/reconcile_plugin_config.py
+
 preflight: ## Validate .env.example (or ENV_FILE=...) museum keys
 	$(PYTHON) scripts/preflight_local_env.py $${ENV_FILE:-.env.example}
 
 test-cov: ## Pytest with coverage (no hard library threshold)
 	$(PYTHON) -m pytest -q --cov=l9_example_pkg --cov-report=term-missing
 
-verify: inventory-check hygiene-check check-rules lint typecheck ## Full local product validation ladder
+verify: inventory-check hygiene-check check-config check-rules lint typecheck ## Full local product validation ladder
 	$(PYTHON) -m pytest -q
 
 ci: verify ## Alias for verify

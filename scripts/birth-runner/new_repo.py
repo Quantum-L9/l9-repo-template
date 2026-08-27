@@ -960,11 +960,41 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     run(["uv", "sync", "--extra", "dev"], cwd=cfg.dest)
     receipt.record("finalize.lock", "uv.lock generated", "PASS", "uv lock + sync")
 
+    # BEFORE the rules are rendered, not after. Every generated rule is rendered
+    # FROM this config, so a config that still describes the template produces
+    # rules that are internally consistent and semantically false: an app
+    # entrypoint the newborn has no module for, an optional stack an
+    # authoritative payload removed, and the template's own name and domain.
+    # Package-token substitution cannot see any of that; only the assembled tree
+    # can, and it exists by now.
+    reconcile = run(
+        [str(_venv_python(cfg.dest)), "scripts/reconcile_plugin_config.py"],
+        cwd=cfg.dest,
+        check=False,
+    )
+    if reconcile.returncode != 0:
+        raise BirthError(
+            "plugin-config.yaml cannot be reconciled with the assembled repository: "
+            + (reconcile.stderr or reconcile.stdout).strip()
+        )
+    receipt.record(
+        "finalize.config",
+        "config reconciled",
+        "PASS",
+        _reconcile_detail(reconcile.stdout),
+    )
+
     run([str(_venv_python(cfg.dest)), "scripts/render_cursor_rules.py", "--force"], cwd=cfg.dest)
     receipt.record("finalize.rules", "generated rules", "PASS", "cursor rules rendered")
 
     run([str(_venv_python(cfg.dest)), "scripts/regenerate_runtime_manifest.py"], cwd=cfg.dest)
     receipt.record("finalize.manifest", "manifest", "PASS", "MANIFEST.sha256 regenerated")
+
+
+def _reconcile_detail(stdout: str) -> str:
+    """The reconciler's own account of what it changed, as one receipt line."""
+    changes = [line.strip() for line in stdout.splitlines() if line.startswith("  ")]
+    return "; ".join(changes) if changes else "already describes this repository"
 
 
 def _venv_python(root: Path) -> Path:

@@ -12,6 +12,18 @@ Template syntax uses Python string.Template placeholders:
     ${protected_paths_bullets}
     ${ci_gates_bullets}
 
+A template may also declare its own precondition on the first line:
+
+    <!-- L9_RENDER_REQUIRES: app_entrypoint -->
+
+The named config keys must be present and non-empty or the rule is NOT
+rendered, and any previously rendered copy of it is removed. A generated rule
+is an instruction to an agent; a rule about a surface this repository does not
+have is a false instruction, and the template is the only place that knows what
+its own subject is. `plugin-config.yaml` is reconciled against the repository by
+`scripts/reconcile_plugin_config.py`, so an unmet requirement means the surface
+is genuinely absent rather than merely unmentioned.
+
 This script depends on PyYAML. Add to dev dependencies if missing:
     uv add --dev pyyaml
 """
@@ -22,6 +34,7 @@ import argparse
 import difflib
 import hashlib
 import json
+import re
 import sys
 import textwrap
 from dataclasses import dataclass
@@ -36,10 +49,22 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment guard
     raise SystemExit("PyYAML is required. Install with: uv add --dev pyyaml") from exc
 
 RENDER_MARKER = "L9_RENDERED"
+REQUIRES_RE = re.compile(r"^[ \t]*<!--[ \t]*L9_RENDER_REQUIRES:(?P<keys>[^>]*?)-->[ \t]*$", re.M)
 DEFAULT_CONFIG = Path("plugin-config.yaml")
 DEFAULT_TEMPLATE_DIR = Path(".cursor/rules/templates")
 DEFAULT_OUTPUT_DIR = Path(".cursor/rules")
 DEFAULT_MANIFEST = Path(".cursor/rules/.render-manifest.json")
+
+
+@dataclass(frozen=True)
+class SkippedRule:
+    template_path: Path
+    output_path: Path
+    unmet: tuple[str, ...]
+
+    @property
+    def reason(self) -> str:
+        return f"requires {', '.join(self.unmet)}"
 
 
 @dataclass(frozen=True)
@@ -170,7 +195,8 @@ def render_one(
 ) -> RenderedRule:
     raw = template_path.read_text(encoding="utf-8")
     template_sha = sha256_text(raw)
-    rendered_body = Template(raw).safe_substitute(context)
+    body, _ = template_requirements(raw)
+    rendered_body = Template(body).safe_substitute(context)
     header = managed_header(
         template_path=template_path,
         template_sha=template_sha,
@@ -188,6 +214,19 @@ def render_one(
         render_id=render_id,
         content=content,
     )
+
+
+def template_requirements(raw: str) -> tuple[str, tuple[str, ...]]:
+    """Split a template into its body and the config keys it requires."""
+    keys: list[str] = []
+    for match in REQUIRES_RE.finditer(raw):
+        keys.extend(part for part in re.split(r"[\s,]+", match.group("keys")) if part)
+    return REQUIRES_RE.sub("", raw).lstrip("\n"), tuple(dict.fromkeys(keys))
+
+
+def unmet_requirements(config: dict[str, Any], keys: tuple[str, ...]) -> tuple[str, ...]:
+    """The required keys this config does not actually supply."""
+    return tuple(key for key in keys if not str(config.get(key, "") or "").strip())
 
 
 def discover_templates(template_dir: Path) -> list[Path]:
@@ -216,7 +255,12 @@ def unified_diff(path: Path, expected: str) -> str:
 
 
 def write_manifest(
-    path: Path, *, config_path: Path, config_sha: str, rendered: list[RenderedRule]
+    path: Path,
+    *,
+    config_path: Path,
+    config_sha: str,
+    rendered: list[RenderedRule],
+    skipped: list[SkippedRule],
 ) -> None:
     manifest = {
         "schema": "l9.cursor_rules.render_manifest.v1",
@@ -234,6 +278,16 @@ def write_manifest(
             }
             for rule in rendered
         ],
+        # A rule this repository does not qualify for is recorded, not silently
+        # missing: "absent" and "never applied" are different facts.
+        "skipped": [
+            {
+                "template": str(rule.template_path),
+                "output": str(rule.output_path),
+                "unmet_requirements": list(rule.unmet),
+            }
+            for rule in skipped
+        ],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -249,10 +303,23 @@ def run(args: argparse.Namespace) -> int:
     config_sha = sha256_file(config_path)
     context = build_context(config, config_path=config_path, config_sha=config_sha)
 
-    rendered = [
-        render_one(path, output_dir, context, config_path=config_path, config_sha=config_sha)
-        for path in discover_templates(template_dir)
-    ]
+    rendered: list[RenderedRule] = []
+    skipped: list[SkippedRule] = []
+    for path in discover_templates(template_dir):
+        _, requires = template_requirements(path.read_text(encoding="utf-8"))
+        unmet = unmet_requirements(config, requires)
+        if unmet:
+            skipped.append(
+                SkippedRule(
+                    template_path=path,
+                    output_path=output_dir / output_name_for_template(path),
+                    unmet=unmet,
+                )
+            )
+            continue
+        rendered.append(
+            render_one(path, output_dir, context, config_path=config_path, config_sha=config_sha)
+        )
 
     stale: list[RenderedRule] = []
     for rule in rendered:
@@ -262,17 +329,38 @@ def run(args: argparse.Namespace) -> int:
         ):
             stale.append(rule)
 
+    # A skipped rule whose output is still on disk is stale in the other
+    # direction: the file states a rule this repository no longer qualifies for.
+    orphaned = [rule for rule in skipped if rule.output_path.exists()]
+
     if args.check:
-        if not stale:
-            print(f"OK: {len(rendered)} rendered Cursor rules are current")
+        if not stale and not orphaned:
+            print(f"OK: {len(rendered)} rendered Cursor rules are current", end="")
+            print(f" ({len(skipped)} skipped)" if skipped else "")
             return 0
-        print(f"DRIFT: {len(stale)} rendered Cursor rule(s) are stale", file=sys.stderr)
+        print(
+            f"DRIFT: {len(stale)} stale, {len(orphaned)} unqualified Cursor rule(s)",
+            file=sys.stderr,
+        )
+        for rule in orphaned:
+            print(f"  {rule.output_path}: {rule.reason} — remove it", file=sys.stderr)
         if args.diff:
             for rule in stale:
                 print(unified_diff(rule.output_path, rule.content), file=sys.stderr)
         return 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    for rule in orphaned:
+        if not is_managed(rule.output_path) and not args.force:
+            raise SystemExit(
+                f"Refusing to remove unmanaged file: {rule.output_path}\n"
+                f"This repository does not qualify for it ({rule.reason}); "
+                "run once with --force to migrate."
+            )
+        rule.output_path.unlink()
+        print(f"removed {rule.output_path} ({rule.reason})")
+    for rule in skipped:
+        print(f"skipped {rule.template_path} ({rule.reason})")
     for rule in rendered:
         if rule.output_path.exists() and not is_managed(rule.output_path) and not args.force:
             raise SystemExit(
@@ -282,7 +370,13 @@ def run(args: argparse.Namespace) -> int:
         rule.output_path.write_text(rule.content, encoding="utf-8")
         print(f"rendered {rule.template_path} -> {rule.output_path}")
 
-    write_manifest(manifest_path, config_path=config_path, config_sha=config_sha, rendered=rendered)
+    write_manifest(
+        manifest_path,
+        config_path=config_path,
+        config_sha=config_sha,
+        rendered=rendered,
+        skipped=skipped,
+    )
     print(f"manifest {manifest_path}")
     return 0
 

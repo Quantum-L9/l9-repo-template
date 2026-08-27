@@ -93,6 +93,7 @@ REQUIRED = (
     "scripts/inventory_check.py",
     "scripts/repo_hygiene_audit.py",
     "scripts/render_cursor_rules.py",
+    "scripts/reconcile_plugin_config.py",
     "scripts/wait_for_http.py",
     "scripts/preflight_local_env.py",
     "scripts/regenerate_runtime_manifest.py",

@@ -25,8 +25,8 @@ make new-repo
 [2] ASSEMBLE LOCALLY       current l9-repo-template · rename/stamp identity
                            · optional product PAYLOAD · payload ownership
       ▼
-[3] FINALIZE               canonical LICENSE · uv lock · render generated rules
-   AUTOMATICALLY           · regenerate manifests · normalize metadata
+[3] FINALIZE               canonical LICENSE · uv lock · reconcile plugin-config
+   AUTOMATICALLY           · render generated rules · regenerate manifests
       ▼
 [4] APPLY ORG BIRTH        current Quantum-L9/.github · only applicable
     PROFILE                non-inheritable controls · current org SHA recorded
@@ -47,6 +47,24 @@ BIRTH: PASS
 `uv lock` is stage 3. It is not something a product author is asked to
 remember; it is a birth invariant, and a birth invariant belongs to the birth
 engine.
+
+So is the agent-facing metadata. `plugin-config.yaml` is chassis and every
+generated Cursor rule is rendered from it, so a value in it that still describes
+this template becomes an active, false instruction in the newborn — internally
+consistent, and about a repository that does not exist. Stage 3 therefore
+reconciles the config against the assembled tree **before** the rules are
+rendered: `repo_name` and `domain` are derived from the newborn's own
+`.l9/architecture.yaml`, an `app_entrypoint` is kept only if the module it names
+is in the tree, and a capability is kept only while the evidence path declared
+for it in `capability_evidence` exists. A rule template may declare its own
+precondition with `<!-- L9_RENDER_REQUIRES: <config keys> -->`; an unqualified
+rule is not rendered, and a previously rendered copy of it is removed.
+
+Package-token substitution cannot do this. Renaming `l9_example_pkg.app:app` to
+`<product>.app:app` produces a claim about a module an authoritative payload
+never shipped, and `repo_name` / `domain` are literal template values no rename
+ever touched. `make check-config` is the same computation as a gate, so a
+repository that drifts later fails its own ladder rather than the next birth.
 
 **Nothing is created until stage 5 is green.** A failed test does not leave a
 half-born repository on GitHub — it leaves a work directory and a receipt.
