@@ -12,7 +12,7 @@ PYTHON ?= python3
 .PHONY: help install-dev setup-hooks lint typecheck inventory-check hygiene-check \
 	check-rules render-rules verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
-	birth-preflight birth-bootstrap birth-verify \
+	new-repo birth-preflight birth-bootstrap birth-verify \
 	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
 
 # Override thin-facade help to list product + governance wrappers.
@@ -85,6 +85,29 @@ obs-down: ## Stop optional local obs stack
 
 obs-ps: ## Show optional local obs stack status
 	docker compose -f observability/docker-compose.observability.yml ps
+
+# ─── Repository birth ────────────────────────────────────────────────────────
+# One command. When it returns PASS the repository is born, not "created, now
+# go do seven other things". uv lock, the org birth profile, and the full
+# product gate are birth invariants, not steps an author remembers.
+#
+# The three targets below stay as debugging surfaces for the individual stages.
+new-repo: ## Birth a repository (REPO= PKG= DESC= [PAYLOAD=] [ORG=] [WORK_DIR=] [NO_REMOTE=1])
+	@test -n "$(REPO)" || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
+	@test -n "$(PKG)"  || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
+	@test -n "$(DESC)" || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
+	$(PYTHON) scripts/birth-runner/new_repo.py \
+		--repo "$(REPO)" \
+		--pkg "$(PKG)" \
+		--desc "$(DESC)" \
+		$(if $(ORG),--org "$(ORG)",) \
+		$(if $(PAYLOAD),--payload "$(PAYLOAD)",) \
+		$(if $(WORK_DIR),--work-dir "$(WORK_DIR)",) \
+		$(if $(ORG_PROFILE_SRC),--org-profile-src "$(ORG_PROFILE_SRC)",) \
+		$(if $(CLASS),--repo-class "$(CLASS)",) \
+		$(if $(RECEIPT),--receipt "$(RECEIPT)",) \
+		$(if $(PRIVATE),--private,) \
+		$(if $(NO_REMOTE),--no-remote,)
 
 birth-preflight: ## Birth-runner preflight (PLAY_DIR=...)
 	@test -n "$(PLAY_DIR)" || (echo "usage: make birth-preflight PLAY_DIR=/tmp/birth" >&2; exit 2)

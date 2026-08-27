@@ -1,7 +1,7 @@
-# Quantum-L9 Repository Template
+# Quantum-L9 Python Repository
 
-> Baseline Python repository chassis for Quantum-L9 projects that are not
-> Constellation nodes or `constellation_*` dependency packages.
+> Baseline repository chassis for Quantum-L9 projects that are not Constellation
+> nodes or `constellation_*` dependency packages.
 
 ## Authority
 
@@ -9,6 +9,7 @@
 - [CLAUDE.md](CLAUDE.md): Claude-specific overlay; never replaces AGENTS.md
 - [.l9/architecture.yaml](.l9/architecture.yaml): authoritative product boundary
 - [.l9/ownership.yaml](.l9/ownership.yaml): ownership and sibling boundaries
+- [.l9/org-birth-profile.yaml](.l9/org-birth-profile.yaml): organization capability class
 - [.l9/repo-workflow.json](.l9/repo-workflow.json): repository execution contract
 - [ARCHITECTURE.md](ARCHITECTURE.md): architecture narrative
 
@@ -27,11 +28,15 @@ pre-commit run --all-files
 - [.semgrep/semgrep-rules.yaml](.semgrep/semgrep-rules.yaml): high-signal repo-local Semgrep rules
 - [.gitleaks.toml](.gitleaks.toml): thin extension of the Gitleaks default rule set
 - [.coderabbit.yaml](.coderabbit.yaml): L9-aware PR review instructions
-- [.github/workflows/codeql.yml](.github/workflows/codeql.yml): thin caller to centrally owned CodeQL execution
 
-## Product boundaries
+CI execution and organization targeting remain centrally owned. Do not add a
+repository-local workflow caller to compensate for a central CI gap.
+
+## Birth and product boundaries
+
+- [docs/ops/REPO_BIRTH.md](docs/ops/REPO_BIRTH.md): one-command birth contract
+- [scripts/birth-runner/payload-ownership.yaml](scripts/birth-runner/payload-ownership.yaml): authoritative-vs-additive payload ownership
 
 Use `Quantum-L9/L9-Node-Template` for Constellation nodes and
 `Quantum-L9/Constellation.PackageTemplate` for `constellation_*` dependency
-packages. Do not vendor or fork centrally owned CI, governance, or CodeQL policy
-into repositories created from this template.
+packages. Do not vendor or fork centrally owned CI or governance implementation.

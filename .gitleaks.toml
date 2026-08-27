@@ -7,10 +7,10 @@
 # --- /L9_META ---
 #
 # Thin repository policy. Detection rules remain owned by Gitleaks defaults;
-# L9 CI installs and invokes the scanner. Add project-specific allowlists only
-# for reviewed false positives, never as broad path exclusions.
+# central L9 CI may install and invoke the scanner. Add project-specific
+# allowlists only for reviewed false positives, never as broad path exclusions.
 
-title = "Quantum-L9 repository template"
+title = "Quantum-L9 Python repository"
 
 [extend]
 useDefault = true

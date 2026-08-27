@@ -161,3 +161,78 @@ def test_refuse_existing_target(tmp_path: Path) -> None:
         text=True,
     )
     assert proc.returncode == 1
+
+
+# `l9_example_pkg` appears in two different roles across the tree:
+#
+#   identity  — this repository's package (src/, imports, inventory REQUIRED).
+#               Rename MUST rewrite these.
+#   sentinel  — the string the birth tooling compares against to recognize a
+#               pristine template. Rename MUST NOT rewrite these: a renamed
+#               new_repo.py rejects the very package name it was just given.
+#
+# Only the second set belongs in SKIP_REL_PATHS, and the failure is invisible
+# until someone runs the tests inside a repository born from the template.
+SENTINEL_FILES = (
+    "scripts/bootstrap_rename.py",
+    "scripts/birth-runner/new_repo.py",
+    "tests/unit/test_bootstrap_rename.py",
+    "tests/unit/test_new_repo_orchestrator.py",
+    "tests/integration/test_new_repo_local_birth.py",
+)
+
+
+def _rename_tree_containing(
+    tmp_path: Path, rels: tuple[str, ...]
+) -> subprocess.CompletedProcess[str]:
+    _seed_tree(tmp_path)
+    for rel in rels:
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((REPO / rel).read_bytes())
+    return subprocess.run(
+        [sys.executable, str(RENAME), "--pkg", "smoke_pkg", "--root", str(tmp_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_sentinel_files_survive_rename_byte_for_byte(tmp_path: Path) -> None:
+    proc = _rename_tree_containing(tmp_path, SENTINEL_FILES)
+    assert proc.returncode == 0, proc.stderr
+    for rel in SENTINEL_FILES:
+        assert (tmp_path / rel).read_bytes() == (REPO / rel).read_bytes(), (
+            f"{rel} carries the template sentinel and must be in SKIP_REL_PATHS"
+        )
+    # Identity references elsewhere are still rewritten.
+    assert "smoke_pkg" in (tmp_path / "Repo.mk").read_text(encoding="utf-8")
+
+
+def test_renamed_orchestrator_still_rejects_the_sentinel(tmp_path: Path) -> None:
+    """The behavioral form of the invariant above.
+
+    If rename rewrites the sentinel inside new_repo.py, the renamed copy starts
+    rejecting the new package name and accepting `l9_example_pkg` — exactly
+    backwards.
+    """
+    proc = _rename_tree_containing(tmp_path, ("scripts/birth-runner/new_repo.py",))
+    assert proc.returncode == 0, proc.stderr
+
+    probe = (
+        "import importlib.util, sys;"
+        f"spec = importlib.util.spec_from_file_location('probe', r'{tmp_path}/scripts/birth-runner/new_repo.py');"
+        "m = importlib.util.module_from_spec(spec);"
+        "sys.modules['probe'] = m;"
+        "spec.loader.exec_module(m);"
+        "ok = m.validate_package_name('smoke_pkg');"
+        "rejected = False\n"
+        "try:\n"
+        "    m.validate_package_name('l9_example_pkg')\n"
+        "except m.BirthError:\n"
+        "    rejected = True\n"
+        "print(ok, rejected)"
+    )
+    out = subprocess.run([sys.executable, "-c", probe], check=False, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "smoke_pkg True", out.stdout + out.stderr

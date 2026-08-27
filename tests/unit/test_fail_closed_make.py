@@ -42,10 +42,13 @@ def test_pr_check_fails_when_lock_check_fails(tmp_path: Path) -> None:
     """A failing uv lock --check must fail pr-check, not be swallowed."""
     bindir = _fake_tool(tmp_path, "uv")
     # The nested pr-check runs the verify ladder (which re-runs pytest); ignore
-    # this file there so the negative test cannot recurse into itself.
+    # this file there so the negative test cannot recurse into itself, and mark
+    # the run nested so the birth acceptance test does not run a ~40s birth
+    # inside it.
     env = {
         "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
         "PYTEST_ADDOPTS": "--ignore=tests/unit/test_fail_closed_make.py",
+        "L9_SKIP_BIRTH_ACCEPTANCE": "1",
     }
     proc = _make(tmp_path, "pr-check", env)
     assert proc.returncode != 0, proc.stdout + proc.stderr

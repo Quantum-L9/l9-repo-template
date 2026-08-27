@@ -26,8 +26,8 @@ reviews:
     drift between pyproject.toml and uv.lock, secret exposure, destructive Git behavior,
     and changes that cross the documented sibling-template product boundaries.
 
-    Do not require Constellation node APIs in this generic template. Constellation nodes
-    belong in Quantum-L9/L9-Node-Template and constellation_* dependency packages belong
-    in Quantum-L9/Constellation.PackageTemplate.
+    Do not require Constellation node APIs in this non-Constellation Python repository.
+    Constellation nodes belong in Quantum-L9/L9-Node-Template and constellation_*
+    dependency packages belong in Quantum-L9/Constellation.PackageTemplate.
 chat:
   auto_reply: false
