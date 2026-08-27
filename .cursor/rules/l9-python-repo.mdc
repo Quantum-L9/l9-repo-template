@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/l9-python-repo.mdc.template
 template_sha256: a7cf6dc2973684b1f718e9926bd38c895a91e552be4ece627f12fde1f5262a82
 config: plugin-config.yaml
-config_sha256: 5cdec002775f484fe40289b4af6f1f8d676128cd45efa05563f9fdda02f0f13a
-render_id: 3789d8407cf5fd9732dcb592421580632425dcd1a5b5bd029017fe643e26c34f
+config_sha256: 60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46
+render_id: ef9fef7a001cc00ea9c09afa97549fe803180acd93fb29dff146acd2a908596d
 /L9_RENDERED -->
 ---
 description: "l9-repo-template Quantum-L9 Python museum invariants — generated"
 globs: ["src/**/*.py", "scripts/**", "AGENTS.md", "docs/**"]
 alwaysApply: true
 ---
-<!-- L9_META role: cursor_rule tags: [l9, python, museum, l9-python-museum] version: 1.2.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [l9, python, museum, quantum-l9-python-museum] version: 1.2.0 /L9_META -->
 
 # Quantum-L9 Python Museum — l9-repo-template
 

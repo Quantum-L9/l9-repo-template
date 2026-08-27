@@ -65,4 +65,3 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "l9_example_pkg.settings"
 disable_error_code = ["misc"]
-
