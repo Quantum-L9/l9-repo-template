@@ -32,10 +32,12 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 | Alembic (`alembic.ini` / `alembic/`) | Database migration runtime | CONDITIONAL_CARTRIDGE | add only when a downstream repo declares a database/SQLAlchemy capability |
 | `scripts/inventory_check.py` | Layout + mention drift | PORT_SURGICAL | Node-Template verify_contracts idea |
 | `scripts/repo_hygiene_audit.py` | eval/exec/print + scaffold bans | PORT_SURGICAL | Node-Template audit_engine (generic) |
-| `scripts/birth-runner/new_repo.py` | One-command birth state machine (8 stages) | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/new_repo.py` | One-command birth state machine (9 stages) | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/birth_provenance.py` | Birth-record shapes + digests, shared by engine and checker | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/verify_birth_integrity.py` | P0 proof that a repo is what its birth record claims | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/payload-ownership.yaml` | Authoritative-vs-additive product/chassis ownership | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/0*.sh` | Staged debugging surfaces | PORT_SURGICAL | PackageTemplate dep-build-runner mechanics |
-| `.l9/org-birth-profile.yaml` | Declares the org repo class | ALREADY_HAVE | Quantum-L9/.github contract |
+| `.l9/org-birth-profile.yaml` | Declares the org repo class; carries the immutable `birth:` record in a newborn | ALREADY_HAVE | Quantum-L9/.github contract |
 | `src/*/settings|errors|health|retry.py` | Optional package helpers | PORT_SURGICAL | PackageTemplate concepts |
 | `.cursor/rules/templates/l9-python-repo.mdc.template` | Generic agent rule | PORT_SURGICAL | Node-Template contract rule rewrite |
 | `.cursor/rules/templates/fastapi.mdc.template` | FastAPI conventions | PORT_SURGICAL | Node-Template fastapi rule |

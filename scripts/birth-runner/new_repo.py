@@ -9,13 +9,33 @@ machine, and every one of them either passes or stops the birth.
     [2] ASSEMBLE LOCALLY       template + identity stamp + optional payload
     [3] FINALIZE               LICENSE, uv lock, rules, manifest, metadata
     [4] APPLY ORG BIRTH PROFILE current Quantum-L9/.github, class capabilities
-    [5] VALIDATE BEFORE CREATION  the full product gate, on the newborn
-    [6] CREATE GITHUB REPOSITORY  create remote, push finalized initial repo
-    [7] REMOTE ORG BOOTSTRAP      labels, settings, applicable seeding
-    [8] REMOTE ATTESTATION        read the remote back and prove it
+    [5] STAMP BIRTH PROVENANCE the immutable record, written AFTER the payload
+    [6] VALIDATE BEFORE CREATION  the full product gate, on the newborn
+    [7] CREATE GITHUB REPOSITORY  commit with provenance trailers, create, push
+    [8] REMOTE ORG BOOTSTRAP      labels, settings, applicable seeding
+    [9] REMOTE ATTESTATION        read the remote back and prove it
 
 `uv lock` is stage 3, not something a product author is asked to remember. A
 birth invariant belongs to the birth engine.
+
+Stage 5 exists because ORDER IS THE CONTRACT. Provenance is generated output, so
+it is stamped after the product payload has been overlaid and after the
+organization has had its say — never copied in with the template and hoped over.
+A payload may not carry any of it: `scripts/birth-runner/birth_provenance.py`
+names the protected paths and the birth refuses a payload that supplies one,
+rather than letting an overlay silently overwrite the record of the newborn's own
+birth with some older repository's.
+
+Stage 5 also splits two questions that were previously one file's job:
+
+    .l9-template-version         IMMUTABLE  what this repository was born from
+    .l9/org-birth-profile.yaml   IMMUTABLE  class + the exact pair of commits
+    .l9/birth-receipt.json       IMMUTABLE  the whole record, plus a digest
+    .l9/template-state.yaml      MUTABLE    what it must conform to TODAY
+
+Reconciliation moves the last one. Nothing moves the first three, so
+"is this repository genuinely what it claims it was born from?" keeps its answer
+years after "is it up to date?" has changed its own.
 
 Ownership, unchanged by this script:
 
@@ -42,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import importlib.util
 import json
 import os
 import re
@@ -53,13 +74,40 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+
+def _load_sibling(name: str):
+    """Load a module that lives next to this file, wherever this file lives.
+
+    Not a bare `import`: that resolves for free when the script is executed
+    directly (sys.path[0] is the script's directory) and fails when a fixture,
+    a renamed tree, or a test harness loads this file by path instead. The
+    provenance module is not optional, so it is located relative to THIS file
+    rather than to whatever the interpreter's search path happens to be.
+    """
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).resolve().parent / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load the birth provenance module at {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# The engine that WRITES provenance and the checker that VERIFIES it share one
+# module deliberately: two copies of a digest algorithm are two digests.
+prov = _load_sibling("birth_provenance")
+
 TEMPLATE_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_ORG = "Quantum-L9"
 ORG_PROFILE_REPO = "Quantum-L9/.github"
 ORG_PROFILE_PATH = "policies/repo-classes.yml"
 PYPROJECT = "pyproject.toml"
-MARKER_PATH = ".l9/org-birth-profile.yaml"
+MARKER_PATH = prov.MARKER_PATH
+VERIFY_BIRTH = "scripts/birth-runner/verify_birth_integrity.py"
 # The template's own answer to "what does a product inherit from me?". Read from
 # the template source, never from the payload: a payload does not get to widen
 # the set of template surfaces it silently keeps.
@@ -214,6 +262,7 @@ def resolve_profile(doc: dict, class_name: str | None) -> dict:
         "forbid": list(cls.get("forbid") or []),
         "remote_apply": dict(cls.get("remote_apply") or {}),
         "mandatory_files_waive": list(cls.get("mandatory_files_waive") or []),
+        "marker_path": doc.get("marker_path", MARKER_PATH),
     }
 
 
@@ -239,31 +288,9 @@ def forbidden_present(root: Path, profile: dict) -> list[str]:
     return hits
 
 
-def render_marker(
-    *,
-    profile_name: str,
-    repository: str,
-    template_sha: str,
-    org_profile_sha: str,
-    born_at: str,
-) -> str:
-    return (
-        "# Organization birth profile marker.\n"
-        "#\n"
-        "# This repository declares its own class; Quantum-L9/.github decides what that\n"
-        "# class receives (INHERIT / MATERIALIZE / REMOTE APPLY / FORBID), per\n"
-        "# policies/repo-classes.yml over there.\n"
-        "#\n"
-        "# Written by scripts/birth-runner/new_repo.py at birth. The two SHAs below are\n"
-        "# the exact pair of commits this repository was born from.\n"
-        "schema: l9.org-birth-profile-marker/v1\n"
-        f"profile: {profile_name}\n"
-        f"authority: {ORG_PROFILE_REPO}\n"
-        f"repository: {repository}\n"
-        f"template_sha: {template_sha}\n"
-        f"org_profile_sha: {org_profile_sha}\n"
-        f"born_at: {born_at}\n"
-    )
+# The marker is rendered by the shared provenance module: the checker has to
+# read exactly what the engine wrote, so one function writes it.
+render_marker = prov.render_marker
 
 
 @dataclass
@@ -287,9 +314,16 @@ class BirthReceipt:
     org_profile_sha: str = "unknown"
     birth_profile: str = ""
     payload: str = ""
+    payload_mode: str = "none"
     workdir: str = ""
     head_sha: str = "unknown"
     born_at: str = ""
+    manifest_sha256: str = ""
+    # The birth receipt COMMITTED INTO the newborn (`.l9/birth-receipt.json`).
+    # This run receipt is an operator report and lives in the work directory;
+    # that one is the repository's own permanent record and carries the digest
+    # the root commit's trailer names.
+    birth_receipt: dict = field(default_factory=dict)
     materialized: list[str] = field(default_factory=list)
     stages: list[StageResult] = field(default_factory=list)
 
@@ -321,7 +355,10 @@ class BirthReceipt:
                 "package": self.package,
                 "description": self.description,
                 "payload": self.payload,
+                "payload_mode": self.payload_mode,
             },
+            "birth_receipt": dict(self.birth_receipt),
+            "manifest_sha256": self.manifest_sha256,
             "workdir": self.workdir,
             "head_sha": self.head_sha,
             "materialized": list(self.materialized),
@@ -338,6 +375,7 @@ _GROUPS = (
     ("assemble", "Assemble"),
     ("finalize", "Finalization"),
     ("org", "Organization"),
+    ("stamp", "Provenance"),
     ("validate", "Validation"),
     ("github", "GitHub"),
 )
@@ -355,7 +393,11 @@ def render_receipt(receipt: BirthReceipt) -> str:
     lines.append(f"  {'repository':<22} {receipt.org}/{receipt.repository}")
     lines.append(f"  {'package':<22} {receipt.package}")
     if receipt.payload:
-        lines.append(f"  {'payload':<22} {receipt.payload}")
+        lines.append(f"  {'payload':<22} {receipt.payload} ({receipt.payload_mode})")
+    if receipt.birth_receipt:
+        lines.append("Birth record")
+        lines.append(f"  {'receipt digest':<22} sha256:{receipt.birth_receipt.get('digest', '')}")
+        lines.append(f"  {'contents digest':<22} sha256:{receipt.manifest_sha256}")
 
     for prefix, heading in _GROUPS:
         group = [s for s in receipt.stages if s.key.startswith(f"{prefix}.")]
@@ -668,6 +710,11 @@ def _preflight_sources(cfg: BirthConfig) -> None:
         # Fail here, not after a full tree copy: without the ownership contract
         # a repository-shaped payload cannot be told from a fragment.
         load_ownership(cfg.template_src)
+        # And fail here rather than at stamping time: a payload carrying
+        # `.l9-template-version` or a birth marker is almost always a tree copied
+        # out of an older repository, and the overlay wins on collision. Reject
+        # it while nothing has been assembled.
+        prov.assert_payload_owns_no_birth_paths(cfg.payload)
     if cfg.dest.exists() and any(cfg.dest.iterdir()):
         raise BirthError(
             f"work directory already populated: {cfg.dest} — remove it or pass a different WORK_DIR"
@@ -692,6 +739,12 @@ def stage_preflight(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     # Identity was validated when the config was built; record it as evidence.
     receipt.record("preflight.identity", "identity", "PASS", f"{cfg.slug} / {cfg.pkg}")
     _preflight_sources(cfg)
+    receipt.record(
+        "preflight.provenance",
+        "birth paths free",
+        "PASS",
+        f"{len(prov.ENGINE_OWNED_PATHS)} engine-owned path(s) unclaimed by the payload",
+    )
     _preflight_name_free(cfg, receipt)
 
 
@@ -738,10 +791,12 @@ def _assemble_payload(cfg: BirthConfig, receipt: BirthReceipt) -> tuple[str, str
     """
     if cfg.payload is None:
         receipt.record("assemble.payload", "payload overlay", "SKIP", "no PAYLOAD given")
+        receipt.payload_mode = "none"
         return "SKIP", "no PAYLOAD given"
 
     ownership = load_ownership(cfg.template_src)
     authoritative = is_repository_payload(cfg.payload, ownership)
+    receipt.payload_mode = "authoritative" if authoritative else "additive"
     if authoritative:
         _assert_payload_package_matches(cfg)
 
@@ -981,18 +1036,9 @@ def stage_apply_org_profile(cfg: BirthConfig, receipt: BirthReceipt) -> dict:
     receipt.org_profile_sha = org_sha
     receipt.birth_profile = profile["name"]
 
-    marker_rel = doc.get("marker_path", MARKER_PATH)
-    (cfg.dest / marker_rel).parent.mkdir(parents=True, exist_ok=True)
-    (cfg.dest / marker_rel).write_text(
-        render_marker(
-            profile_name=profile["name"],
-            repository=cfg.slug,
-            template_sha=receipt.template_sha,
-            org_profile_sha=org_sha,
-            born_at=receipt.born_at,
-        ),
-        encoding="utf-8",
-    )
+    # The class marker is NOT written here. It is birth provenance, and
+    # provenance is stamped in stage 5 — after the product payload, after
+    # MATERIALIZE, after everything that could still overwrite a file.
     receipt.record("org.profile", "org defaults", "PASS", f"{profile['name']} @ {org_sha[:12]}")
 
     # MATERIALIZE happens HERE, before validation and before the initial commit.
@@ -1045,6 +1091,133 @@ def stage_apply_org_profile(cfg: BirthConfig, receipt: BirthReceipt) -> dict:
     return profile
 
 
+def stage_stamp_provenance(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
+    """Write the birth record — after the payload, after the organization, last.
+
+    Everything before this stage can still overwrite a file: the template copy,
+    the identity rename, the product overlay, MATERIALIZE. So the record of what
+    made this repository is generated HERE, from values the engine resolved, and
+    not copied in with the template and hoped over.
+
+    Four files, two lifetimes:
+
+        .l9-template-version        immutable   born-from version
+        .l9/org-birth-profile.yaml  immutable   class + the exact commit pair
+        .l9/birth-receipt.json      immutable   the whole record + its digest
+        .l9/template-state.yaml     mutable     what it must conform to today
+
+    The version is read from the template commit the record PINS, not from the
+    template working tree, and the two must agree. That single invariant is what
+    stops a repository being stamped `template_version: 2.1.0` beside a
+    `template_sha` whose tree says `2.0.0` — a claim nothing downstream could
+    ever check, discovered only when someone finally reads both.
+    """
+    marker_rel = str(profile.get("marker_path") or MARKER_PATH)
+    if marker_rel not in prov.BIRTH_OWNED_PATHS:
+        raise BirthError(
+            f"the organization policy puts the class marker at {marker_rel!r}, which this "
+            f"template does not protect as birth-owned ({sorted(prov.BIRTH_OWNED_PATHS)}) — "
+            "a payload could overwrite it. Update the template's protected paths first."
+        )
+
+    version_file = cfg.dest / prov.TEMPLATE_VERSION_PATH
+    pinned = prov.template_version_at(cfg.template_src, receipt.template_sha)
+    prov.assert_version_agrees(
+        assembled=version_file.read_text(encoding="utf-8").strip()
+        if version_file.is_file()
+        else "",
+        pinned=pinned,
+        sha=receipt.template_sha,
+    )
+    version_file.write_text(pinned + "\n", encoding="utf-8")
+    receipt.template_version = pinned
+    receipt.record(
+        "stamp.version",
+        "template version",
+        "PASS",
+        f"{pinned} @ {receipt.template_sha[:12]}",
+    )
+
+    marker = cfg.dest / marker_rel
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        prov.render_marker(
+            profile_name=profile["name"],
+            repository=cfg.slug,
+            template_sha=receipt.template_sha,
+            template_version=pinned,
+            org_profile_sha=receipt.org_profile_sha,
+            born_at=receipt.born_at,
+        ),
+        encoding="utf-8",
+    )
+    receipt.record(
+        "stamp.marker",
+        "birth marker",
+        "PASS",
+        f"{profile['name']} @ {receipt.org_profile_sha[:12]}",
+    )
+
+    (cfg.dest / prov.TEMPLATE_STATE_PATH).write_text(
+        prov.render_template_state(
+            template_sha=receipt.template_sha,
+            template_version=pinned,
+            org_policy_sha=receipt.org_profile_sha,
+            reconciled_at=receipt.born_at,
+        ),
+        encoding="utf-8",
+    )
+    receipt.record("stamp.conformance", "conformance state", "PASS", f"conforms to {pinned}")
+
+    # The contents digest is taken over exactly the files git is about to
+    # commit — `ls-files --cached --others --exclude-standard` — so the number
+    # recorded here is the number the root commit's tree hashes to. A gitignored
+    # build artifact lying in the work directory cannot make the two disagree.
+    manifest = prov.worktree_manifest(cfg.dest, exclude={prov.BIRTH_RECEIPT_PATH})
+    receipt.manifest_sha256 = prov.manifest_digest(manifest)
+    receipt.birth_receipt = prov.build_receipt(
+        repository=cfg.slug,
+        repo_class=profile["name"],
+        template_sha=receipt.template_sha,
+        template_version=pinned,
+        org_policy_sha=receipt.org_profile_sha,
+        payload_mode=receipt.payload_mode,
+        manifest_sha256=receipt.manifest_sha256,
+        born_at=receipt.born_at,
+    )
+    (cfg.dest / prov.BIRTH_RECEIPT_PATH).write_text(
+        prov.render_receipt_json(receipt.birth_receipt),
+        encoding="utf-8",
+    )
+    receipt.record(
+        "stamp.receipt",
+        "birth receipt",
+        "PASS",
+        f"{len(manifest)} files, sha256:{str(receipt.birth_receipt['digest'])[:12]}",
+    )
+
+
+def _verify_provenance(cfg: BirthConfig, receipt: BirthReceipt, key: str, label: str) -> None:
+    """Run the newborn's own birth-integrity checker against the newborn.
+
+    The same script the repository will carry forever, so what birth proves and
+    what CI proves later are the same proof rather than two implementations that
+    agree until they do not.
+    """
+    proc = run(
+        [str(_venv_python(cfg.dest)), VERIFY_BIRTH, "--require-receipt"],
+        cwd=cfg.dest,
+        check=False,
+    )
+    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if proc.returncode != 0:
+        receipt.record(key, label, "FAIL", output.splitlines()[-1] if output else "")
+        raise BirthError(f"birth integrity verification failed:\n{output[-1500:]}")
+    receipt.record(
+        key, label, "PASS", f"sha256:{str(receipt.birth_receipt.get('digest', ''))[:12]}"
+    )
+
+
 def stage_validate(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     """The full product gate, run on the newborn, before anything is created."""
     python = _venv_python(cfg.dest)
@@ -1061,6 +1234,11 @@ def stage_validate(cfg: BirthConfig, receipt: BirthReceipt) -> None:
         ("validate.typecheck", "typecheck", [str(python), "-m", "mypy", "src"]),
         ("validate.tests", "tests", [str(python), "-m", "pytest", "-q"]),
         ("validate.lock", "lock", ["uv", "lock", "--check"]),
+        (
+            "validate.provenance",
+            "birth provenance",
+            [str(python), VERIFY_BIRTH, "--require-receipt"],
+        ),
     )
     # The newborn carries the template's own test suite, including the birth
     # acceptance test. Running a birth inside a birth is pure recursion.
@@ -1083,6 +1261,17 @@ def stage_validate(cfg: BirthConfig, receipt: BirthReceipt) -> None:
 def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     """Create the remote and push the finalized initial repository."""
     run(["git", "add", "-A"], cwd=cfg.dest)
+    # The root commit carries the record too. Three independently comparable
+    # things come out of one birth — the commit, the receipt, and the contents
+    # the receipt's manifest digest covers — and a mismatch between any two of
+    # them means the birth is not what it says it is.
+    message = "\n".join(
+        [
+            f"chore: birth {cfg.slug} from l9-repo-template@{receipt.template_sha[:12]}",
+            "",
+            *prov.commit_trailers(receipt.birth_receipt),
+        ]
+    )
     run(
         [
             "git",
@@ -1093,11 +1282,14 @@ def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
             "commit",
             "-q",
             "-m",
-            f"chore: birth {cfg.slug} from l9-repo-template@{receipt.template_sha[:12]}",
+            message,
         ],
         cwd=cfg.dest,
     )
     receipt.head_sha = git_head(cfg.dest)
+    # The root commit only becomes checkable once it exists, so the full
+    # three-way proof runs here — before anything is pushed, not after.
+    _verify_provenance(cfg, receipt, "github.provenance", "birth record proved")
 
     visibility = "--private" if cfg.private else "--public"
     # One command owns all three: create the remote repository, create the
@@ -1236,7 +1428,16 @@ def _attest_head(cfg: BirthConfig, receipt: BirthReceipt) -> None:
 
 def _attest_content(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
     """Required files, a licence that governs THIS repo, and the class marker."""
-    for rel in ("README.md", CANONICAL_LICENSE, MARKER_PATH, PYPROJECT, "uv.lock"):
+    for rel in (
+        "README.md",
+        CANONICAL_LICENSE,
+        MARKER_PATH,
+        prov.TEMPLATE_VERSION_PATH,
+        prov.BIRTH_RECEIPT_PATH,
+        prov.TEMPLATE_STATE_PATH,
+        PYPROJECT,
+        "uv.lock",
+    ):
         receipt.record(
             f"github.present.{rel}",
             f"remote {rel}",
@@ -1263,6 +1464,36 @@ def _attest_content(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> N
         "PASS" if remote_class == profile["name"] else "FAIL",
         remote_class or "marker unreadable",
     )
+
+    # The birth receipt that landed must be the birth receipt that was written,
+    # and must still hash to its own digest. Reading the local work directory
+    # back would prove only that this process can read its own output.
+    local_digest = str(receipt.birth_receipt.get("digest") or "")
+    remote_digest, recomputed = _remote_receipt_digests(cfg.slug)
+    receipt.record(
+        "github.receipt",
+        "birth receipt attested",
+        "PASS"
+        if local_digest and remote_digest == local_digest and recomputed == local_digest
+        else "FAIL",
+        f"sha256:{local_digest[:12]}"
+        if remote_digest == local_digest == recomputed
+        else f"remote says {remote_digest[:12] or '(unreadable)'}, hashes to {recomputed[:12]}",
+    )
+
+
+def _remote_receipt_digests(slug: str) -> tuple[str, str]:
+    """(digest the remote receipt claims, digest it actually hashes to)."""
+    text = _remote_text(slug, prov.BIRTH_RECEIPT_PATH)
+    if not text:
+        return "", ""
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return "", ""
+    if not isinstance(parsed, dict):
+        return "", ""
+    return str(parsed.get("digest") or ""), prov.receipt_digest(parsed)
 
 
 def _attest_org_state(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
@@ -1413,7 +1644,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     try:
         cfg = build_config(parse_args(argv))
-    except BirthError as exc:
+    except (BirthError, prov.ProvenanceError) as exc:
         print(f"BIRTH FAIL (preflight): {exc}", file=sys.stderr)
         return 2
 
@@ -1427,7 +1658,10 @@ def main(argv: list[str] | None = None) -> int:
         born_at=datetime.now(UTC).isoformat(timespec="seconds"),
     )
     receipt.template_sha = git_head(cfg.template_src)
-    version_file = cfg.template_src / ".l9-template-version"
+    # What the template CHECKOUT says, recorded so a failure before stage 5 still
+    # reports something. Stage 5 replaces it with the version the recorded commit
+    # actually carries, and refuses the birth when the two disagree.
+    version_file = cfg.template_src / prov.TEMPLATE_VERSION_PATH
     if version_file.is_file():
         receipt.template_version = version_file.read_text(encoding="utf-8").strip()
 
@@ -1437,6 +1671,7 @@ def main(argv: list[str] | None = None) -> int:
         stage_assemble(cfg, receipt)
         stage_finalize(cfg, receipt)
         profile = stage_apply_org_profile(cfg, receipt)
+        stage_stamp_provenance(cfg, receipt, profile)
         stage_validate(cfg, receipt)
         if cfg.remote:
             stage_create(cfg, receipt)
@@ -1444,7 +1679,7 @@ def main(argv: list[str] | None = None) -> int:
             stage_attest(cfg, receipt, profile)
         else:
             receipt.record("github.create", "repository created", "SKIP", "--no-remote")
-    except BirthError as exc:
+    except (BirthError, prov.ProvenanceError) as exc:
         receipt.record("birth.error", "birth", "FAIL", str(exc).splitlines()[0][:120])
         print(render_receipt(receipt))
         print(f"BIRTH FAIL: {exc}", file=sys.stderr)

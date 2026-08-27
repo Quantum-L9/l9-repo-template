@@ -17,17 +17,20 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+BIRTH_RUNNER = REPO / "scripts" / "birth-runner"
 # scripts/birth-runner is not an importable package name, so load by path. The
 # module must be in sys.modules *before* exec_module: @dataclass resolves
 # annotations through sys.modules[cls.__module__].
-_SPEC = importlib.util.spec_from_file_location(
-    "l9_birth_new_repo", REPO / "scripts" / "birth-runner" / "new_repo.py"
-)
+_SPEC = importlib.util.spec_from_file_location("l9_birth_new_repo", BIRTH_RUNNER / "new_repo.py")
 assert _SPEC is not None
 assert _SPEC.loader is not None
 new_repo = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = new_repo
 _SPEC.loader.exec_module(new_repo)
+# The engine locates its provenance module relative to its own file, so reading
+# it back off the loaded engine is what guarantees the test and the birth are
+# talking about the same module rather than two copies that agree for now.
+prov = new_repo.prov
 
 # The template's own DENY_CI_DISTRIBUTION, transcribed. A class that stops
 # forbidding one of these while inventory_check still denies it recreates the
@@ -160,12 +163,48 @@ class TestMarker:
             profile_name="non_constellation_python",
             repository="Quantum-L9/l9-observability-core",
             template_sha="a" * 40,
+            template_version="2.1.0",
             org_profile_sha="b" * 40,
             born_at="2026-08-26T00:00:00+00:00",
         )
         assert new_repo.parse_marker_profile(text) == "non_constellation_python"
         assert "a" * 40 in text
         assert "b" * 40 in text
+
+    def test_the_org_contract_keys_stay_flat(self) -> None:
+        """Quantum-L9/.github parses this file with one regex on `profile:`.
+
+        Birth provenance is an additive nested block; the three keys the
+        organization's contract names must stay at the top level or an org-wide
+        sweep silently resolves every born repository to the default class.
+        """
+        text = new_repo.render_marker(
+            profile_name="non_constellation_python",
+            repository="Quantum-L9/x",
+            template_sha="a" * 40,
+            template_version="2.1.0",
+            org_profile_sha="b" * 40,
+            born_at="2026-08-26T00:00:00+00:00",
+        )
+        doc = prov.parse_flat_yaml(text)
+        assert doc["schema"] == prov.MARKER_SCHEMA
+        assert doc["profile"] == "non_constellation_python"
+        assert doc["authority"] == "Quantum-L9/.github"
+
+    def test_provenance_lives_under_the_birth_block(self) -> None:
+        text = new_repo.render_marker(
+            profile_name="non_constellation_python",
+            repository="Quantum-L9/x",
+            template_sha="a" * 40,
+            template_version="2.1.0",
+            org_profile_sha="b" * 40,
+            born_at="2026-08-26T00:00:00+00:00",
+        )
+        birth = prov.birth_block(text)
+        assert birth["template_sha"] == "a" * 40
+        assert birth["template_version"] == "2.1.0"
+        assert birth["org_policy_sha"] == "b" * 40
+        assert birth["born_at"] == "2026-08-26T00:00:00+00:00"
 
     def test_committed_marker_declares_the_expected_class(self) -> None:
         text = (REPO / ".l9" / "org-birth-profile.yaml").read_text(encoding="utf-8")

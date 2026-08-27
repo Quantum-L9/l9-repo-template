@@ -31,15 +31,19 @@ make new-repo
 [4] APPLY ORG BIRTH        current Quantum-L9/.github · only applicable
     PROFILE                non-inheritable controls · current org SHA recorded
       ▼
-[5] VALIDATE BEFORE        inventory · hygiene · rules · lint · format
-    CREATION               · typecheck · tests · uv lock --check
+[5] STAMP BIRTH            .l9-template-version · .l9/org-birth-profile.yaml
+    PROVENANCE             · .l9/birth-receipt.json · .l9/template-state.yaml
       ▼
-[6] CREATE GITHUB REPO     create remote · push finalized initial repository
+[6] VALIDATE BEFORE        inventory · hygiene · birth integrity · rules · lint
+    CREATION               · format · typecheck · tests · uv lock --check
       ▼
-[7] REMOTE ORG BOOTSTRAP   labels · repo settings · applicable seeding
+[7] CREATE GITHUB REPO     commit with provenance trailers · prove the commit
+                           · create remote · push finalized initial repository
       ▼
-[8] REMOTE ATTESTATION     read the actual remote back · verify org profile
-                           · verify required files · verify HEAD
+[8] REMOTE ORG BOOTSTRAP   labels · repo settings · applicable seeding
+      ▼
+[9] REMOTE ATTESTATION     read the actual remote back · verify org profile
+                           · verify the birth receipt · verify HEAD
       ▼
 BIRTH: PASS
 ```
@@ -48,8 +52,12 @@ BIRTH: PASS
 remember; it is a birth invariant, and a birth invariant belongs to the birth
 engine.
 
-**Nothing is created until stage 5 is green.** A failed test does not leave a
+**Nothing is created until stage 6 is green.** A failed test does not leave a
 half-born repository on GitHub — it leaves a work directory and a receipt.
+
+Stage 5 is where **order is the contract**. Provenance is generated output, so it
+is stamped *after* the product payload has been overlaid and *after* the
+organization has had its say — never copied in with the template and hoped over.
 
 ## Parameters
 
@@ -63,7 +71,7 @@ half-born repository on GitHub — it leaves a work directory and a receipt.
 | `WORK_DIR` | no | where the repository is assembled (default `/tmp/l9-births`) |
 | `CLASS` | no | org repo class (default `non_constellation_python`) |
 | `ORG_PROFILE_SRC` | no | local `Quantum-L9/.github` checkout — skips the `gh` read, enables an offline birth |
-| `RECEIPT` | no | where to write the birth receipt JSON |
+| `RECEIPT` | no | where to write the run's operator receipt JSON |
 | `PRIVATE` | no | create the repository private |
 | `NO_REMOTE` | no | stop after stage 5 — assemble, finalize, and validate only |
 
@@ -141,12 +149,156 @@ all files.
 
 See `docs/REPO_BIRTH_PROFILES.md` in `Quantum-L9/.github` for the contract.
 
+## Two records, two questions
+
+A repository has two different relationships with the template that made it, and
+collapsing them into one file is why *"which template made this?"* and *"is this
+repository up to date?"* kept answering each other's question.
+
+| File | Lifetime | Answers |
+|------|----------|---------|
+| `.l9-template-version` | **immutable** | the template version this repository was BORN from |
+| `.l9/org-birth-profile.yaml` | **immutable** | its class, and the exact pair of commits it was born from |
+| `.l9/birth-receipt.json` | **immutable** | the whole birth record, plus a digest over it |
+| `.l9/template-state.yaml` | **mutable** | what it is expected to conform to **today** |
+
+```
+BIRTH INTEGRITY      "Is this repository genuinely what it claims it was born from?"
+CURRENT CONFORMANCE  "Has it drifted from today's required org/template state?"
+```
+
+Reconciliation moves `.l9/template-state.yaml` and nothing else, so the history
+reads `born from template@496fa88 -> reconciled to template@812bc11 -> reconciled
+to template@e784b31` while the birth record keeps saying `496fa88` forever.
+
+### Protected birth paths
+
+A product payload owns its product. It never owns the record of its own birth:
+
+```python
+BIRTH_OWNED_PATHS = {
+    ".l9-template-version",
+    ".l9/org-birth-profile.yaml",
+    ".l9/birth-receipt.json",
+}
+```
+
+Those, plus `.l9/template-state.yaml`, are rejected in stage 1 when a payload
+supplies one — fail closed, not silently overwritten. The failure this removes is
+specific: a payload copied out of an older repository carries that repository's
+`.l9-template-version`, the overlay wins on collision, and the newborn is born
+claiming a provenance that belongs to somebody else.
+
+### The version must be the version at the pinned SHA
+
+The record pins a template commit, so the version it records is read **from that
+commit**, not from the template working tree the birth ran out of:
+
+```bash
+git -C <template> show "$TEMPLATE_SHA:.l9-template-version"
+```
+
+If that disagrees with the assembled repository, the birth stops. Without it a
+repository is stamped `template_version: 2.1.0` beside a `template_sha` whose
+tree says `2.0.0` — a claim nothing downstream can ever check, discovered only
+when someone finally reads both.
+
 ## The birth receipt
 
-Every run writes `<WORK_DIR>/<REPO>-birth-receipt.json` — the two provenance
-SHAs (template and organization), the resolved class, and per-stage results.
-The same two SHAs are committed into the newborn's `.l9/org-birth-profile.yaml`,
-so a repository can always answer *which pair of commits was I born from*.
+Every run writes an operator report to `<WORK_DIR>/<REPO>-birth-receipt.json`:
+the two provenance SHAs, the resolved class, and per-stage results.
+
+The repository's own permanent record is committed as `.l9/birth-receipt.json`:
+
+```json
+{
+  "schema": "l9.birth-receipt/v1",
+  "repository": "Quantum-L9/l9-observability-core",
+  "repo_class": "non_constellation_python",
+  "template": { "repository": "Quantum-L9/l9-repo-template",
+                "sha": "496fa88ef517...", "version": "2.1.0" },
+  "org_policy": { "repository": "Quantum-L9/.github", "sha": "01b8531f122..." },
+  "payload_mode": "authoritative",
+  "manifest_sha256": "...",
+  "born_at": "2026-08-26T...",
+  "digest": "sha256 over the above, canonical JSON, sorted keys"
+}
+```
+
+and the root commit carries the same record in its trailers:
+
+```
+chore: birth Quantum-L9/l9-observability-core from l9-repo-template@496fa88ef517
+
+L9-Birth-Receipt: sha256:ece28ca3bc69...
+L9-Template: 496fa88ef517eb73d096c02f81dde088a0442b59
+L9-Template-Version: 2.1.0
+L9-Policy: 01b8531f122fee6b39876a6752e3fe4ce6a61674
+L9-Class: non_constellation_python
+```
+
+Three independently comparable things come out of one birth:
+
+```
+root commit  ──────────  birth receipt  ──────────  repository contents
+   trailers                  digest                    manifest_sha256
+```
+
+Mismatch anywhere = invalid birth.
+
+## Proving it, later
+
+Every repository born from this template carries the checker:
+
+```bash
+make birth-check                                    # in the verify ladder
+python3 scripts/birth-runner/verify_birth_integrity.py --json
+```
+
+It reads the **root commit**, never `HEAD`, which is why its answer survives
+years of ordinary development on top:
+
+| Check | Proves |
+|-------|--------|
+| `receipt digest` | the receipt still hashes to the digest it claims |
+| `template version` | `.l9-template-version` is the version the receipt records |
+| `birth marker` | the `birth:` block agrees with the receipt |
+| `conformance state` | a legible `.l9/template-state.yaml` exists (says nothing about drift) |
+| `root commit` | exactly one root — no grafted unrelated history |
+| `commit trailers` | the root commit carries the receipt's digest, SHAs, and class |
+| `birth record intact` | the three birth-owned files are byte-identical to the root commit |
+| `contents digest` | `manifest_sha256` covers what the root commit actually contains |
+
+A repository with no `.l9/birth-receipt.json` reports **UNBORN** and passes:
+this template was not born from itself, and repositories that predate the receipt
+have nothing to attest. `--require-receipt` turns that into a failure, which is
+what stage 6 uses on a newborn it has just stamped.
+
+## What this repository does NOT own
+
+Birth integrity is a **P0** — provenance corruption, unreconcilable, because
+there is nothing trustworthy left to reconcile toward. Current conformance is
+everything below it:
+
+| Severity | Drift |
+|----------|-------|
+| **P0** | provenance corruption — receipt, trailers, or contents disagree |
+| **P1** | security / policy — branch protection removed, required workflow bypassed, CODEOWNERS absent |
+| **P2** | platform — CI reusable workflow behind the required revision, stale chassis files |
+| **P3** | informational — a newer template version exists |
+
+P1–P3 are answered by a **central drift engine** that enumerates managed
+repositories, reads each `.l9/org-birth-profile.yaml` for its class, resolves the
+desired state for that class, and opens reconciliation pull requests. That engine
+does not live here, and neither does the per-class desired-state contract it
+compares against: `Quantum-L9/.github` owns what the organization requires, and a
+scheduled workflow copied into every repository is the duplication the whole
+ownership split exists to prevent. What this template owns is the marker that
+makes a repository discoverable, the class it declares, and the P0 proof above —
+which the drift engine calls rather than reimplements.
+
+Reconciliation is `detect -> classify -> propose patch -> open PR -> CI -> approve
+-> merge -> re-attest`, never `detect drift -> push to main`.
 
 ## Ownership
 
