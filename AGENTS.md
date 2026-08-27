@@ -45,6 +45,7 @@ See [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md).
 ```bash
 make inventory-check
 make hygiene-check
+make check-config
 make check-rules
 make lint
 make typecheck

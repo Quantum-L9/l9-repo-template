@@ -10,7 +10,8 @@ What green means for this non-Constellation Python template.
 | Pre-commit | `pre-commit run --all-files` | Generic file hygiene plus Ruff/mypy and local L9 checks |
 | Gitleaks policy | `gitleaks git --config .gitleaks.toml --no-banner --redact .` | Gitleaks default detection corpus is active with repo-local configuration when the scanner is available |
 | Semgrep policy | `semgrep --config .semgrep/semgrep-rules.yaml .` | Generic repo-local high-signal Python security rules |
-| Cursor rules | `make check-rules` | Rendered `.mdc` matches templates + `plugin-config.yaml` |
+| Config semantics | `make check-config` | `plugin-config.yaml` describes THIS repository: identity from `.l9/architecture.yaml`, entrypoint and capabilities proved against the tree |
+| Cursor rules | `make check-rules` | Rendered `.mdc` matches templates + `plugin-config.yaml`, and no rule is rendered for a surface this repository does not have |
 | Lint / types | `make lint` / `make typecheck` | Ruff + mypy |
 | Tests | `make test` | Unit + integration |
 | Product | `make verify` / `make pr-check` | Full local ladder (`OPEN_PR=0`) |

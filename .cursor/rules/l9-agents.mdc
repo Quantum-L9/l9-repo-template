@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/l9-agents.mdc.template
 template_sha256: e7354122352ae6fd05ca2071664edf9dbe87c55352ba91b6d485001e5f67dd03
 config: plugin-config.yaml
-config_sha256: 5cdec002775f484fe40289b4af6f1f8d676128cd45efa05563f9fdda02f0f13a
-render_id: 0e6073b55f7803eca2805e0928f51c1f29b5f055d67a1a297addcfafa548191d
+config_sha256: 60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46
+render_id: c9eb4792f6b193244b08bb2561aff240acb47f89f42ed818512e43f0b9a83be3
 /L9_RENDERED -->
 ---
 description: "l9-repo-template autonomous agent guardrails — generated from domain cartridge"
 globs: ["AGENTS.md", "scripts/**", "Makefile", "Repo.mk"]
 alwaysApply: false
 ---
-<!-- L9_META role: cursor_rule tags: [agents, generated, l9-python-museum] version: 1.2.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [agents, generated, quantum-l9-python-museum] version: 1.2.0 /L9_META -->
 
 # Agent Guardrails — l9-repo-template
 
@@ -41,6 +41,7 @@ alwaysApply: false
 ## CI Gates
 
 - `make verify`
+- `make check-config`
 - `make check-rules`
 - `make hygiene-check`
 

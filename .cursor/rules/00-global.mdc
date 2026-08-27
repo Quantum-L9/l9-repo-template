@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/00-global.mdc.template
 template_sha256: d2d7516dc8afaacc58264108e72221f74ebc6139e948c55a8eaf7b49097c9eb8
 config: plugin-config.yaml
-config_sha256: 5cdec002775f484fe40289b4af6f1f8d676128cd45efa05563f9fdda02f0f13a
-render_id: 98376c2424bc3d50495f47f86f6da05eab35d9ebc7999303d1828a7ed049891b
+config_sha256: 60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46
+render_id: ba7c586d3b9c3df6b7ea76ba216e0b107aaae05689d4ca9d1d4842160a40c6d4
 /L9_RENDERED -->
 ---
 description: "l9-repo-template global conventions — generated from domain cartridge"
 globs: ["**/*"]
 alwaysApply: true
 ---
-<!-- L9_META role: cursor_rule tags: [global, generated, l9-python-museum] version: 1.2.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [global, generated, quantum-l9-python-museum] version: 1.2.0 /L9_META -->
 
 # l9-repo-template Global Agent Conventions
 
@@ -44,13 +44,14 @@ alwaysApply: true
 Run in this order:
 
 - `make verify`
+- `make check-config`
 - `make check-rules`
 - `make hygiene-check`
 
 ## Repo Cartridge
 
 - Repo: `l9-repo-template`
-- Domain: `l9-python-museum`
+- Domain: `quantum-l9-python-museum`
 - Package: `l9_example_pkg`
 - App entrypoint: `l9_example_pkg.app:app`
 - Python: `3.12`

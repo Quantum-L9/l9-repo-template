@@ -609,3 +609,166 @@ def test_a_partial_overlay_is_still_purely_additive(tmp_path: Path) -> None:
     for kept in ("Dockerfile", "docker-compose.yml", "observability", ".env.example"):
         assert (dest / kept).exists(), f"a partial overlay removed {kept}"
     assert (dest / "src" / "l9_birth_acceptance" / "app.py").is_file()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Semantic identity: what the newborn's generated metadata is allowed to claim
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The template's own product vocabulary. None of it may appear as an ACTIVE
+# claim in a repository that never asked for the example product. Provenance —
+# `template_repo`, the birth marker's `template_sha` — is a different thing and
+# is deliberately preserved.
+TEMPLATE_PRODUCT_CLAIMS = (
+    "l9-repo-template",
+    "l9-python-museum",
+    "l9_example_pkg",
+    "obs-optional",
+)
+
+
+def _generated_metadata(dest: Path) -> dict[str, str]:
+    """Every active generated agent-facing surface, by repository-relative path."""
+    found = {"plugin-config.yaml": (dest / "plugin-config.yaml").read_text(encoding="utf-8")}
+    for path in sorted((dest / ".cursor" / "rules").glob("*.mdc")):
+        found[path.relative_to(dest).as_posix()] = path.read_text(encoding="utf-8")
+    return found
+
+
+class TestGeneratedMetadataDescribesTheNewborn:
+    """A plain birth: the example product IS this repository's product."""
+
+    def test_repo_identity_is_the_newborns_own(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        _, dest = born
+        config = (dest / "plugin-config.yaml").read_text(encoding="utf-8")
+        assert 'repo_name: "l9-birth-acceptance"' in config
+        assert "l9-repo-template" not in config
+
+    def test_a_kept_claim_is_one_the_tree_proves(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """Reconciliation removes false claims; it never removes true ones."""
+        _, dest = born
+        config = (dest / "plugin-config.yaml").read_text(encoding="utf-8")
+        assert 'app_entrypoint: "l9_birth_acceptance.app:app"' in config
+        assert (dest / "src" / "l9_birth_acceptance" / "app.py").is_file()
+        assert '- "obs-optional"' in config
+        assert (dest / "observability").is_dir()
+        assert (dest / ".cursor" / "rules" / "fastapi.mdc").is_file()
+
+    def test_the_birth_receipt_records_the_reconciliation(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        proc, dest = born
+        receipt = json.loads(
+            (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+        )
+        stages = {s["key"]: s for s in receipt["stages"]}
+        assert stages["finalize.config"]["status"] == "PASS"
+        assert "repo_name -> l9-birth-acceptance" in stages["finalize.config"]["detail"]
+        assert "config reconciled" in proc.stdout
+
+    def test_the_newborn_passes_its_own_semantic_gate(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        _, dest = born
+        for check in ("scripts/reconcile_plugin_config.py", "scripts/render_cursor_rules.py"):
+            proc = subprocess.run(
+                [str(dest / ".venv" / "bin" / "python"), check, "--check"],
+                cwd=dest,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert proc.returncode == 0, f"{check}: {proc.stderr or proc.stdout}"
+
+
+class TestAnAuthoritativePayloadInheritsNoProductClaims:
+    """The defect the first real offspring found.
+
+    Birth returned PASS and the product tree was correct, while the agent-facing
+    chassis metadata still described the template's FastAPI demo. Every
+    assertion below failed before the reconciler existed.
+    """
+
+    def test_no_template_product_claim_survives_anywhere(
+        self, born_from_repository_payload: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        _, dest = born_from_repository_payload
+        offences = [
+            f"{rel}: {claim}"
+            for rel, text in _generated_metadata(dest).items()
+            for claim in TEMPLATE_PRODUCT_CLAIMS
+            if claim in text
+        ]
+        assert offences == [], (
+            f"the template's example product leaked as an active claim: {offences}"
+        )
+
+    def test_identity_is_the_products_own(
+        self, born_from_repository_payload: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        _, dest = born_from_repository_payload
+        config = (dest / "plugin-config.yaml").read_text(encoding="utf-8")
+        assert f'repo_name: "{PAYLOAD_REPO}"' in config
+        assert f'package_name: "{PAYLOAD_PKG}"' in config
+        for text in _generated_metadata(dest).values():
+            assert PAYLOAD_REPO in text or "Repo:" not in text
+
+    def test_no_entrypoint_is_claimed_for_a_module_that_does_not_exist(
+        self, born_from_repository_payload: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        _, dest = born_from_repository_payload
+        assert not (dest / "src" / PAYLOAD_PKG / "app.py").exists()
+        config = (dest / "plugin-config.yaml").read_text(encoding="utf-8")
+        assert "app_entrypoint:" not in config
+        for rel, text in _generated_metadata(dest).items():
+            assert f"{PAYLOAD_PKG}.app:app" not in text, f"{rel} claims a module nothing ships"
+
+    def test_the_fastapi_rule_is_not_rendered_for_a_library(
+        self, born_from_repository_payload: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """A rule is an instruction. This repository hosts nothing."""
+        _, dest = born_from_repository_payload
+        assert not (dest / ".cursor" / "rules" / "fastapi.mdc").exists()
+        manifest = json.loads(
+            (dest / ".cursor" / "rules" / ".render-manifest.json").read_text(encoding="utf-8")
+        )
+        skipped = {Path(entry["template"]).name for entry in manifest["skipped"]}
+        assert "fastapi.mdc.template" in skipped
+        assert manifest["rules"], "reconciliation removed every rule, not only the false one"
+
+    def test_an_optional_stack_that_was_never_born_is_not_a_capability(
+        self, born_from_repository_payload: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        _, dest = born_from_repository_payload
+        assert not (dest / "observability").exists()
+        config = (dest / "plugin-config.yaml").read_text(encoding="utf-8")
+        assert "obs-optional" not in config
+        assert '- "verify"' in config, "a chassis capability was collateral damage"
+
+    def test_provenance_is_not_mistaken_for_a_claim(
+        self, born_from_repository_payload: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """Where the repository came from stays recorded; what it IS is corrected."""
+        _, dest = born_from_repository_payload
+        marker = (dest / ".l9" / "org-birth-profile.yaml").read_text(encoding="utf-8")
+        assert "template_sha:" in marker
+        assert f"Quantum-L9/{PAYLOAD_REPO}" in marker
+
+    def test_the_newborn_passes_its_own_semantic_gate(
+        self, born_from_repository_payload: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """Not just correct at birth — provably correct by the newborn's own gate."""
+        _, dest = born_from_repository_payload
+        for check in ("scripts/reconcile_plugin_config.py", "scripts/render_cursor_rules.py"):
+            proc = subprocess.run(
+                [str(dest / ".venv" / "bin" / "python"), check, "--check"],
+                cwd=dest,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert proc.returncode == 0, f"{check}: {proc.stderr or proc.stdout}"

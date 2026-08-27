@@ -1,6 +1,6 @@
 plugin_version: "1.2.0"
 repo_name: "l9-repo-template"
-domain: "l9-python-museum"
+domain: "quantum-l9-python-museum"
 
 protected_paths:
   - "uv.lock"
@@ -20,6 +20,7 @@ external_endpoint_policy: "STDIO_MCP_ONLY"
 
 ci_gates:
   - "make verify"
+  - "make check-config"
   - "make check-rules"
   - "make hygiene-check"
 
@@ -39,5 +40,16 @@ graph_record:
     - "hygiene-check"
     - "birth-runner"
     - "obs-optional"
+  # What each capability's presence is evidence OF, in this repository. A
+  # capability listed here survives `scripts/reconcile_plugin_config.py` only
+  # while its path exists, so a repository born without the optional stack does
+  # not inherit a claim to it. A capability with no entry is unconditional.
+  capability_evidence:
+    verify: "Repo.mk"
+    rename: "scripts/bootstrap_rename.py"
+    render-rules: "scripts/render_cursor_rules.py"
+    hygiene-check: "scripts/repo_hygiene_audit.py"
+    birth-runner: "scripts/birth-runner/new_repo.py"
+    obs-optional: "observability"
   data_governance_class: "internal"
   maintenance_owner: "Quantum-L9/platform"

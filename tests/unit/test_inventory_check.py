@@ -64,12 +64,12 @@ def test_legacy_ci_surface_rejected(tmp_path: Path, surface: str) -> None:
         env=env,
     )
     assert proc.returncode == 1, proc.stderr + proc.stdout
-    # Assert on the surface and on the reason, not on a wording. The wording
-    # this asserted was replaced when the message started naming where CI
-    # execution actually belongs, and the test kept failing on prose while the
-    # behaviour it exists to protect had never changed.
-    assert "repository-local CI/control surface present" in proc.stderr
-    assert surface.rstrip("/") in proc.stderr
+    # Assert the denial NAMES the surface and gives the ownership reason, rather
+    # than an exact phrase: `dea22b4` reworded this message and left the old
+    # wording asserted here, which failed every plain birth in stage 5.
+    assert surface in proc.stderr
+    assert "CI/control surface present" in proc.stderr
+    assert "l9-ci-core" in proc.stderr
 
 
 def test_repo_mk_ci_facade_required(tmp_path: Path) -> None:

@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/10-domain-cartridge.mdc.template
 template_sha256: 9eb1c85dbfa2d44905e1b0cc73c5ab54bb2e0df2b2f4dd386a7e491944406a52
 config: plugin-config.yaml
-config_sha256: 5cdec002775f484fe40289b4af6f1f8d676128cd45efa05563f9fdda02f0f13a
-render_id: aa45ace5e84693cbb970e2cd5f96c9ae8ce616148d4d0a6c6869e5f2ff78c1fe
+config_sha256: 60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46
+render_id: e1a4d7833a6bd27b3a6ca75a773435fcf1b339296f0e9d700d950d52599312ce
 /L9_RENDERED -->
 ---
 description: "Domain cartridge rule — generated from plugin-config.yaml"
 globs: [".cursor/rules/**", "plugin-config.yaml", "scripts/render_cursor_rules.py"]
 alwaysApply: false
 ---
-<!-- L9_META role: cursor_rule tags: [domain-cartridge, generated, l9-python-museum] version: 1.2.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [domain-cartridge, generated, quantum-l9-python-museum] version: 1.2.0 /L9_META -->
 
 # Domain Cartridge Convention
 
@@ -23,9 +23,9 @@ Rules must be reusable across repos. Repo-specific values belong in `plugin-conf
 ## Current Cartridge
 
 - Repo: `l9-repo-template`
-- Domain: `l9-python-museum`
+- Domain: `quantum-l9-python-museum`
 - Plugin version: `1.2.0`
-- Config SHA: `5cdec002775f`
+- Config SHA: `60bf21dd6142`
 
 ## Template Variables
 
@@ -62,11 +62,14 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
   "rm -rf .venv"
 ]`
 - `- `make verify`
+- `make check-config`
 - `make check-rules`
 - `make hygiene-check`` / `- `make verify`
+- `make check-config`
 - `make check-rules`
-- `make hygiene-check`` / ``make verify`, `make check-rules`, `make hygiene-check`` / `[
+- `make hygiene-check`` / ``make verify`, `make check-config`, `make check-rules`, `make hygiene-check`` / `[
   "make verify",
+  "make check-config",
   "make check-rules",
   "make hygiene-check"
 ]`
@@ -83,6 +86,14 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
     "birth-runner",
     "obs-optional"
   ],
+  "capability_evidence": {
+    "birth-runner": "scripts/birth-runner/new_repo.py",
+    "hygiene-check": "scripts/repo_hygiene_audit.py",
+    "obs-optional": "observability",
+    "rename": "scripts/bootstrap_rename.py",
+    "render-rules": "scripts/render_cursor_rules.py",
+    "verify": "Repo.mk"
+  },
   "data_governance_class": "internal",
   "maintenance_owner": "Quantum-L9/platform",
   "node_type": "plugin_install"
