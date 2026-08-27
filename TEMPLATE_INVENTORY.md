@@ -37,6 +37,7 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 | `scripts/birth-runner/birth_provenance.py` | Birth-record shapes + digests, shared by engine and checker | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/verify_birth_integrity.py` | P0 proof that a repo is what its birth record claims | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/payload-ownership.yaml` | Authoritative-vs-additive product/chassis ownership | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/canonical_ci.py` | Birth state machine + canonical-CI correlation (BIRTH-CI-001..005) | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/0*.sh` | Staged debugging surfaces | PORT_SURGICAL | PackageTemplate dep-build-runner mechanics |
 | `.l9/org-birth-profile.yaml` | Declares the org repo class; carries the immutable `birth:` record in a newborn | ALREADY_HAVE | Quantum-L9/.github contract |
 | `src/*/settings|errors|health|retry.py` | Optional package helpers | PORT_SURGICAL | PackageTemplate concepts |

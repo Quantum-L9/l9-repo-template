@@ -34,19 +34,125 @@ make new-repo
 [5] STAMP BIRTH            .l9-template-version · .l9/org-birth-profile.yaml
     PROVENANCE             · .l9/birth-receipt.json · .l9/template-state.yaml
       ▼
-[6] VALIDATE BEFORE        inventory · hygiene · birth integrity · rules · lint
-    CREATION               · format · typecheck · tests · uv lock --check
+[6] VALIDATE BEFORE        inventory · hygiene · birth integrity · ci binding
+    CREATION               · rules · lint · format · typecheck · tests · lock
       ▼
-[7] CREATE GITHUB REPO     commit with provenance trailers · prove the commit
+[7] PUBLISH ROOT COMMIT    commit with provenance trailers · prove the commit
                            · create remote · push finalized initial repository
+                           → repository becomes PROVISIONAL
       ▼
 [8] REMOTE ORG BOOTSTRAP   labels · repo settings · applicable seeding
       ▼
-[9] REMOTE ATTESTATION     read the actual remote back · verify org profile
-                           · verify the birth receipt · verify HEAD
+[9] CANONICAL CI           await l9-ci-core's verdict on the exact root SHA
+                           · bounded timeout · never an unrelated run
+      ▼
+[10] REMOTE ATTESTATION    read the actual remote back · verify org profile
+                           · verify the birth receipt · verify HEAD · verify CI
       ▼
 BIRTH: PASS
+STATE: BORN
 ```
+
+## Creation is not birth
+
+A repository that exists is not a repository that is born. Creating the remote,
+pushing the root commit and applying organization settings prove that GitHub
+accepted some bytes; none of it proves the code was ever evaluated.
+`Quantum-L9/l9-observability-core` is the case that made this concrete — created,
+pushed, attested, reported successful, with zero workflows and no canonical CI
+run of any kind.
+
+Birth therefore has four states, and the receipt names the one that happened:
+
+| State | Meaning |
+|---|---|
+| `LOCAL` | assembled and locally validated; nothing published (`--no-remote`) |
+| `PROVISIONAL` | root commit published; canonical CI not yet proven |
+| `BORN` | canonical CI evaluated **this** root commit and succeeded |
+| `QUARANTINED` | published, and canonical CI is missing, failed, or timed out |
+
+Only `BORN` prints `BORN`. Publication and successful birth are separate
+lifecycle events, which is also what keeps the model acyclic: CI cannot evaluate
+a commit that does not exist, so birth waits **after** publishing rather than
+gating the commit on CI.
+
+A `QUARANTINED` repository is **preserved**, never auto-deleted. It is the
+evidence.
+
+## Invariants
+
+| ID | Invariant |
+|---|---|
+| `BIRTH-CI-001` | Every governed newborn has an effective binding to the canonical CI authority. |
+| `BIRTH-CI-002` | The newborn root commit is evaluated by canonical CI before birth is declared successful. |
+| `BIRTH-CI-003` | Canonical CI concludes `success` for the newborn root SHA. |
+| `BIRTH-CI-004` | Product payload materialization cannot silently disable or replace the binding. |
+| `BIRTH-CI-005` | Birth completion relies on remotely observed CI state, never on local assumption. |
+
+Enforced by `scripts/birth-runner/canonical_ci.py`; covered by
+`tests/unit/test_canonical_ci.py` and `tests/integration/test_new_repo_local_birth.py`.
+
+## The CI ownership boundary
+
+    l9-ci-core        owns CI implementation and execution semantics
+    the newborn       owns only the minimal binding that invokes it
+    l9-repo-template  owns birth orchestration and this verification
+
+Nothing in birth copies, reimplements, or second-guesses CI. `canonical_ci.py`
+answers three questions about somebody else's CI: is this repository bound to
+it, did it run for **this** commit, and did it succeed.
+
+The accepted run must correlate to the root SHA. "Some run passed recently" is
+not evidence — a stale success, a run on another branch, a run for another
+commit and a run that reports no SHA at all are all rejected. Binding discovery
+parses each workflow and reads `jobs.*.uses`; a `uses:` in a comment is not
+enrollment.
+
+A binding that points at a **Quantum-L9 CI workflow which is not the canonical
+entrypoint** fails closed rather than being ignored. That is worse than no
+binding: it looks like enrollment and evaluates something else.
+
+## Current limitation — read this before running a real birth
+
+There is no sanctioned mechanism that installs the binding yet.
+`l9-ci-core/.l9/org-runtime-contract.yaml` sets `consumer_copy_required: false`
+and `consumer_core_pin_allowed: false`, and expects a GitHub **organization
+required-workflow ruleset** to reach the repository instead. Birth cannot
+observe a ruleset from the client side, and the ruleset's live status is
+unverified upstream: `organization-ruleset-live-enforcement` is recorded as
+`status: UNKNOWN, evidence: []`.
+
+So by default `make new-repo` now **stops at local validation** with a precise
+diagnostic rather than producing another repository nothing evaluates. That is
+deliberate: the gap is made loud instead of silent.
+
+To publish anyway — knowing enrollment is unproven:
+
+```bash
+L9_BIRTH_CI_UNVERIFIED='ruleset enrollment applied out of band, ticket L9-1234' \
+  make new-repo REPO=... PKG=... DESC=...
+```
+
+The reason is mandatory; a blank value is not an authorization. The breakglass
+downgrades the missing-binding refusal to a recorded `WARN` and the repository
+is left `PROVISIONAL` — it is never reported `BORN`. It does **not** excuse a
+*wrong* binding, which still fails closed.
+
+## Failure semantics
+
+| Situation | Result |
+|---|---|
+| No binding, no breakglass | `BIRTH: FAIL` at local validation — nothing is created |
+| Binding names a non-canonical authority | `BIRTH: FAIL` at local validation — nothing is created |
+| CI never starts for the root SHA | `QUARANTINED` — "not enrolled, or the authority never triggered" |
+| CI starts and does not conclude in `--ci-timeout` | `QUARANTINED` — "binding is live, the run is slow or stuck" |
+| CI concludes anything other than `success` | `QUARANTINED`, with the run id and URL |
+| Actions API unreadable past its retry budget | `QUARANTINED` — undeterminable is not success |
+
+The two timeout diagnoses are deliberately distinct: "never started" and
+"started but stuck" have different causes and different fixes.
+
+`--ci-timeout` (default 900s) bounds the wait. Birth never polls forever.
 
 `uv lock` is stage 3. It is not something a product author is asked to
 remember; it is a birth invariant, and a birth invariant belongs to the birth
@@ -91,7 +197,7 @@ organization has had its say — never copied in with the template and hoped ove
 | `ORG_PROFILE_SRC` | no | local `Quantum-L9/.github` checkout — skips the `gh` read, enables an offline birth |
 | `RECEIPT` | no | where to write the run's operator receipt JSON |
 | `PRIVATE` | no | create the repository private |
-| `NO_REMOTE` | no | stop after stage 5 — assemble, finalize, and validate only |
+| `NO_REMOTE` | no | stop after stage 5 — assemble, finalize, and validate only (final state `LOCAL`) |
 
 ## What a PAYLOAD owns
 

@@ -101,6 +101,13 @@ def _birth(
     env = os.environ.copy()
     env.pop("VIRTUAL_ENV", None)
     env["L9_SKIP_BIRTH_ACCEPTANCE"] = "1"
+    # Birth now REFUSES to assemble a repository with no canonical CI binding,
+    # and no sanctioned mechanism installs one yet (see docs/ops/REPO_BIRTH.md).
+    # These fixtures assert assembly, so they take the documented operator
+    # breakglass — which downgrades the refusal to a recorded WARN and, on a real
+    # remote birth, caps the result at PROVISIONAL. `test_ci_binding_is_required`
+    # holds the default behavior.
+    env.setdefault("L9_BIRTH_CI_UNVERIFIED", "birth acceptance fixture: assembly under test")
     return subprocess.run(
         [
             sys.executable,
@@ -772,3 +779,139 @@ class TestAnAuthoritativePayloadInheritsNoProductClaims:
                 check=False,
             )
             assert proc.returncode == 0, f"{check}: {proc.stderr or proc.stdout}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical CI is part of birth, not an afterthought
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCanonicalCIIsRequired:
+    """A repository that no CI evaluates cannot be born.
+
+    `l9-observability-core` — the first real offspring — was created, pushed,
+    attested, and reported successful with ZERO workflows and no canonical CI
+    run of any kind. These tests make that outcome unreachable.
+    """
+
+    def test_ci_binding_is_required_by_default(self, tmp_path: Path) -> None:
+        """No breakglass: assembly stops before anything is created."""
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)
+        env.pop("L9_BIRTH_CI_UNVERIFIED", None)
+        env["L9_SKIP_BIRTH_ACCEPTANCE"] = "1"
+        assert ORG_SRC is not None
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(RUNNER),
+                "--repo",
+                "l9-birth-ci-required",
+                "--pkg",
+                "l9_birth_ci_required",
+                "--desc",
+                "CI binding requirement fixture",
+                "--work-dir",
+                str(tmp_path / "work"),
+                "--org-profile-src",
+                str(ORG_SRC),
+                "--no-remote",
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        assert proc.returncode == 1
+        assert "BIRTH: FAIL" in proc.stdout
+        assert "declares no binding" in proc.stderr
+        assert "l9-ci-core" in proc.stderr
+        # Fail closed BEFORE creation — the invariant the old flow lacked.
+        assert "repository created" not in proc.stdout
+
+    def test_the_breakglass_requires_a_reason(self, tmp_path: Path) -> None:
+        """An empty value is not an authorization."""
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)
+        env["L9_SKIP_BIRTH_ACCEPTANCE"] = "1"
+        env["L9_BIRTH_CI_UNVERIFIED"] = "   "
+        assert ORG_SRC is not None
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(RUNNER),
+                "--repo",
+                "l9-birth-ci-blank",
+                "--pkg",
+                "l9_birth_ci_blank",
+                "--desc",
+                "blank breakglass fixture",
+                "--work-dir",
+                str(tmp_path / "work"),
+                "--org-profile-src",
+                str(ORG_SRC),
+                "--no-remote",
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        assert proc.returncode == 1
+        assert "declares no binding" in proc.stderr
+
+    def test_a_local_birth_is_LOCAL_and_never_claims_BORN(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """`--no-remote` publishes nothing, so it cannot be born."""
+        proc, dest = born
+        assert "STATE: LOCAL" in proc.stdout
+        assert "BORN " not in proc.stdout
+        receipt = json.loads(
+            (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+        )
+        assert receipt["state"] == "LOCAL"
+        assert receipt["born"] is False
+
+    def test_the_receipt_records_the_unverified_binding(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """The breakglass leaves a trace a later reader can act on."""
+        _, dest = born
+        receipt = json.loads(
+            (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+        )
+        stage = {s["key"]: s for s in receipt["stages"]}["validate.ci_binding"]
+        assert stage["status"] == "WARN"
+        assert "unverified by operator" in stage["detail"]
+
+    def test_an_authoritative_payload_cannot_supply_its_own_ci(self, tmp_path: Path) -> None:
+        """BIRTH-CI-004 end to end.
+
+        The payload ships a workflow that looks like enrollment and is not: it
+        calls a Quantum-L9 CI workflow that is not the canonical entrypoint.
+        Assembly must refuse it — and refuse it even though the operator
+        breakglass is set, because the breakglass excuses a MISSING binding, not
+        a wrong one.
+        """
+        payload = _write_repository_payload(tmp_path / "payload")
+        wf = payload / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "l9-ci.yml").write_text(
+            "name: L9 CI\non: push\njobs:\n"
+            "  l9-ci:\n"
+            "    uses: Quantum-L9/l9-ci-core/.github/workflows/self-ci.yml@" + "d" * 40 + "\n",
+            encoding="utf-8",
+        )
+        proc = _birth(
+            tmp_path,
+            "--payload",
+            str(payload),
+            repo=PAYLOAD_REPO,
+            pkg=PAYLOAD_PKG,
+        )
+        assert proc.returncode == 1
+        assert "not the canonical authority" in proc.stderr
+        assert "repository created" not in proc.stdout

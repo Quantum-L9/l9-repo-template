@@ -101,6 +101,7 @@ REQUIRED = (
     "scripts/birth-runner/new_repo.py",
     "scripts/birth-runner/birth_provenance.py",
     "scripts/birth-runner/verify_birth_integrity.py",
+    "scripts/birth-runner/canonical_ci.py",
     "scripts/birth-runner/payload-ownership.yaml",
     "scripts/birth-runner/01_preflight.sh",
     "scripts/birth-runner/02_bootstrap.sh",

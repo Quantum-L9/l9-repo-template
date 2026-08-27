@@ -14,6 +14,7 @@ What green means for this non-Constellation Python template.
 | Cursor rules | `make check-rules` | Rendered `.mdc` matches templates + `plugin-config.yaml`, and no rule is rendered for a surface this repository does not have |
 | Lint / types | `make lint` / `make typecheck` | Ruff + mypy |
 | Tests | `make test` | Unit + integration |
+| Canonical CI binding | `make new-repo` stage 5 | The assembled newborn is bound to `l9-ci-core/org-ci.yml`; a non-canonical authority fails closed |
 | Product | `make verify` / `make pr-check` | Full local ladder (`OPEN_PR=0`) |
 | Core facade | `make agent-check` | Vendored `tools.l9_repo` completion proof |
 | Governance | `make gov-pr-check` | Cursor-Governance against `WS=$(pwd)` when wired |
@@ -23,6 +24,11 @@ it does not create a second bootstrap implementation. Repo-local security
 configuration does not imply repo-local CI ownership.
 
 ## What green does **not** prove
+
+- That a repository born from this template is `BORN`. `make verify` is the
+  local ladder; birth additionally requires canonical CI to evaluate the root
+  commit remotely (`docs/ops/REPO_BIRTH.md`). A repository can be published and
+  still be `PROVISIONAL` or `QUARANTINED`.
 
 - Constellation transport / Gate routing correctness (belongs to L9-Node-Template / Gate_SDK)
 - `constellation_*` dependency birth (belongs to PackageTemplate)
