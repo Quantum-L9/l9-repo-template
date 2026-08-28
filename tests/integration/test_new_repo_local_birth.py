@@ -101,13 +101,6 @@ def _birth(
     env = os.environ.copy()
     env.pop("VIRTUAL_ENV", None)
     env["L9_SKIP_BIRTH_ACCEPTANCE"] = "1"
-    # Birth now REFUSES to assemble a repository with no canonical CI binding,
-    # and no sanctioned mechanism installs one yet (see docs/ops/REPO_BIRTH.md).
-    # These fixtures assert assembly, so they take the documented operator
-    # breakglass — which downgrades the refusal to a recorded WARN and, on a real
-    # remote birth, caps the result at PROVISIONAL. `test_ci_binding_is_required`
-    # holds the default behavior.
-    env.setdefault("L9_BIRTH_CI_UNVERIFIED", "birth acceptance fixture: assembly under test")
     return subprocess.run(
         [
             sys.executable,
@@ -791,76 +784,30 @@ class TestCanonicalCIIsRequired:
 
     `l9-observability-core` — the first real offspring — was created, pushed,
     attested, and reported successful with ZERO workflows and no canonical CI
-    run of any kind. These tests make that outcome unreachable.
+    run of any kind. These tests make that outcome unreachable, WITHOUT
+    demanding a consumer workflow file: `l9-ci-core` prohibits that shape.
     """
 
-    def test_ci_binding_is_required_by_default(self, tmp_path: Path) -> None:
-        """No breakglass: assembly stops before anything is created."""
-        env = os.environ.copy()
-        env.pop("VIRTUAL_ENV", None)
-        env.pop("L9_BIRTH_CI_UNVERIFIED", None)
-        env["L9_SKIP_BIRTH_ACCEPTANCE"] = "1"
-        assert ORG_SRC is not None
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(RUNNER),
-                "--repo",
-                "l9-birth-ci-required",
-                "--pkg",
-                "l9_birth_ci_required",
-                "--desc",
-                "CI binding requirement fixture",
-                "--work-dir",
-                str(tmp_path / "work"),
-                "--org-profile-src",
-                str(ORG_SRC),
-                "--no-remote",
-            ],
-            cwd=REPO,
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-        )
-        assert proc.returncode == 1
-        assert "BIRTH: FAIL" in proc.stdout
-        assert "declares no binding" in proc.stderr
-        assert "l9-ci-core" in proc.stderr
-        # Fail closed BEFORE creation — the invariant the old flow lacked.
-        assert "repository created" not in proc.stdout
+    def test_a_newborn_ships_no_ci_workflow_and_that_is_correct(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """`consumer_copy_required: false` — absence is the intended shape.
 
-    def test_the_breakglass_requires_a_reason(self, tmp_path: Path) -> None:
-        """An empty value is not an authorization."""
-        env = os.environ.copy()
-        env.pop("VIRTUAL_ENV", None)
-        env["L9_SKIP_BIRTH_ACCEPTANCE"] = "1"
-        env["L9_BIRTH_CI_UNVERIFIED"] = "   "
-        assert ORG_SRC is not None
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(RUNNER),
-                "--repo",
-                "l9-birth-ci-blank",
-                "--pkg",
-                "l9_birth_ci_blank",
-                "--desc",
-                "blank breakglass fixture",
-                "--work-dir",
-                str(tmp_path / "work"),
-                "--org-profile-src",
-                str(ORG_SRC),
-                "--no-remote",
-            ],
-            cwd=REPO,
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
+        Canonical CI reaches a repository through an organisation
+        required-workflow ruleset. A consumer workflow calling Core at a
+        consumer-chosen pin is the prohibited shape, not the goal.
+        """
+        proc, dest = born
+        assert not (dest / ".github" / "workflows").exists() or not list(
+            (dest / ".github" / "workflows").glob("*.yml")
         )
-        assert proc.returncode == 1
-        assert "declares no binding" in proc.stderr
+        receipt = json.loads(
+            (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+        )
+        stage = {s["key"]: s for s in receipt["stages"]}["validate.ci_binding"]
+        assert stage["status"] == "PASS"
+        assert "enrolment is an organisation ruleset" in stage["detail"]
+        assert "BIRTH: PASS" in proc.stdout
 
     def test_a_local_birth_is_LOCAL_and_never_claims_BORN(
         self, born: tuple[subprocess.CompletedProcess[str], Path]
@@ -875,26 +822,27 @@ class TestCanonicalCIIsRequired:
         assert receipt["state"] == "LOCAL"
         assert receipt["born"] is False
 
-    def test_the_receipt_records_the_unverified_binding(
-        self, born: tuple[subprocess.CompletedProcess[str], Path]
-    ) -> None:
-        """The breakglass leaves a trace a later reader can act on."""
-        _, dest = born
-        receipt = json.loads(
-            (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+    def test_birth_never_reports_BORN_at_creation(self) -> None:
+        """The arithmetic, asserted at its source.
+
+        GitHub required workflows run on pull_request / pull_request_target /
+        merge_group, never on push; and a root commit has no base branch to be a
+        pull request against. So nothing can have evaluated the root commit by
+        the time birth ends, and no code path may set BORN there.
+        """
+        source = (RUNNER).read_text(encoding="utf-8")
+        remote_tail = source[source.index("if cfg.remote:") :]
+        assert "canonical_ci.PROVISIONAL if not receipt.failed" in remote_tail
+        assert "= canonical_ci.BORN" not in remote_tail, (
+            "birth must not assign BORN — it is earned by the first pull request"
         )
-        stage = {s["key"]: s for s in receipt["stages"]}["validate.ci_binding"]
-        assert stage["status"] == "WARN"
-        assert "unverified by operator" in stage["detail"]
 
     def test_an_authoritative_payload_cannot_supply_its_own_ci(self, tmp_path: Path) -> None:
         """BIRTH-CI-004 end to end.
 
-        The payload ships a workflow that looks like enrollment and is not: it
+        The payload ships a workflow that looks like enrolment and is not: it
         calls a Quantum-L9 CI workflow that is not the canonical entrypoint.
-        Assembly must refuse it — and refuse it even though the operator
-        breakglass is set, because the breakglass excuses a MISSING binding, not
-        a wrong one.
+        Assembly must refuse it before anything is created.
         """
         payload = _write_repository_payload(tmp_path / "payload")
         wf = payload / ".github" / "workflows"

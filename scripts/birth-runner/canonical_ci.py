@@ -7,15 +7,21 @@ accepted some bytes — none of it proves the code was ever evaluated. This modu
 holds the part that does.
 
     LOCAL        assembled and locally validated; nothing published
-    PROVISIONAL  root commit published; canonical CI not yet proven
-    BORN         canonical CI evaluated THIS root commit and succeeded
-    QUARANTINED  published, and canonical CI is missing, failed, or timed out
+    PROVISIONAL  published and enrolled with the canonical authority
+    BORN         canonical CI evaluated a commit of this repository and succeeded
+    QUARANTINED  published, and enrolment is missing or canonical CI failed
 
-The transition PROVISIONAL -> BORN is the only one that may print BORN, and it
-requires a remotely observed run correlated to the exact root SHA. Publication
-and successful birth are separate events, which is also what keeps the model
-acyclic: CI cannot run before a commit exists, so birth waits after publishing
-rather than gating the commit itself.
+Birth ends at PROVISIONAL, never BORN. That is not caution, it is arithmetic:
+
+  * GitHub required workflows run on `pull_request`, `pull_request_target` and
+    `merge_group`. They never run on `push`.
+  * A pull request needs a base branch, and at birth the root commit is the only
+    commit that exists — there is nothing for it to be a pull request against.
+
+So a newborn's root commit cannot be evaluated before it lands, by this mechanism
+or any other. Claiming otherwise would make every real birth QUARANTINED. Birth
+therefore proves ENROLMENT — that the organisation ruleset requires the canonical
+workflow for this repository — and the first real pull request earns BORN.
 
 Ownership, unchanged by this module:
 
@@ -24,8 +30,16 @@ Ownership, unchanged by this module:
     l9-repo-template     owns birth orchestration and this verification
 
 Nothing here copies, reimplements, or second-guesses CI. It answers three
-questions about someone else's CI: is this repository bound to it, did it run
-for this exact commit, and did it succeed.
+questions about someone else's CI: is this repository reachable by it, did it
+run for this exact commit, and did it succeed.
+
+Birth uses the first question only — `enrollment_from_rulesets`. The run
+correlation below (`select_birth_run`, `verdict_for_run`, `timeout_verdict`) is
+for the PROVISIONAL -> BORN transition, which birth cannot perform: it needs a
+pull request, and at birth none exists. It is kept here, tested, because the
+rule it encodes is the easy thing to get wrong — a stale success, a run on
+another branch, or a run for another commit must never be accepted as evidence
+for this one.
 """
 
 from __future__ import annotations
@@ -164,6 +178,49 @@ def discover_bindings(root: Path) -> list[Binding]:
 
 def canonical_bindings(root: Path) -> list[Binding]:
     return [b for b in discover_bindings(root) if b.is_canonical]
+
+
+def enrollment_from_rulesets(rulesets: Any) -> Binding | None:
+    """The organisation ruleset that requires canonical CI for a repository.
+
+    Input is `repos/{slug}/rulesets?includes_parents=true`. A repository is
+    enrolled when an ORGANISATION-sourced ruleset carries a `workflows` rule
+    naming the canonical authority.
+
+    `source_type` matters: a repository-sourced ruleset is the repository
+    enrolling itself, which is exactly the consumer-owned enforcement
+    `l9-ci-core/.l9/org-runtime-contract.yaml` prohibits. Only the organisation
+    can enrol a repository, so only an Organization source counts.
+
+    Returned as a `Binding` so enrolment and a workflow-file binding are the same
+    shape to every caller — one thing means "canonical CI reaches this code".
+    """
+    if not isinstance(rulesets, list):
+        return None
+    for entry in rulesets:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("source_type") or "") != "Organization":
+            continue
+        for rule in entry.get("rules") or []:
+            if not isinstance(rule, dict) or rule.get("type") != "workflows":
+                continue
+            params = rule.get("parameters")
+            if not isinstance(params, dict):
+                continue
+            for workflow in params.get("workflows") or []:
+                if not isinstance(workflow, dict):
+                    continue
+                if str(workflow.get("path") or "") != CI_AUTHORITY_WORKFLOW:
+                    continue
+                return Binding(
+                    workflow_file=f"org-ruleset:{entry.get('name') or entry.get('id')}",
+                    job="required-workflow",
+                    owner_repo=CI_AUTHORITY_REPO,
+                    path=CI_AUTHORITY_WORKFLOW,
+                    ref=str(workflow.get("ref") or ""),
+                )
+    return None
 
 
 def assert_binding_authorized(root: Path) -> list[Binding]:

@@ -252,3 +252,72 @@ class TestAuthorityIsNotGuessed:
             "BORN",
             "QUARANTINED",
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Enrolment — the claim birth can actually prove
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _org_ruleset(**over: object) -> dict:
+    base = {
+        "id": 42,
+        "name": "L9 canonical CI required",
+        "source_type": "Organization",
+        "enforcement": "active",
+        "rules": [
+            {
+                "type": "workflows",
+                "parameters": {
+                    "do_not_enforce_on_create": True,
+                    "workflows": [{"path": ORG_CI, "ref": "refs/heads/main"}],
+                },
+            }
+        ],
+    }
+    base.update(over)
+    return base
+
+
+class TestEnrollment:
+    def test_an_organisation_ruleset_requiring_org_ci_is_enrolment(self) -> None:
+        found = cci.enrollment_from_rulesets([_org_ruleset()])
+        assert found is not None
+        assert found.is_canonical
+        assert "org-ruleset:" in found.workflow_file
+
+    def test_a_repository_sourced_ruleset_is_not_enrolment(self) -> None:
+        """Only the organisation can enrol a repository.
+
+        A repo-sourced ruleset is the repository enrolling itself — the
+        consumer-owned enforcement `org-runtime-contract.yaml` prohibits.
+        """
+        assert cci.enrollment_from_rulesets([_org_ruleset(source_type="Repository")]) is None
+
+    def test_a_ruleset_requiring_a_different_workflow_is_not_enrolment(self) -> None:
+        other = _org_ruleset()
+        other["rules"][0]["parameters"]["workflows"][0]["path"] = ".github/workflows/self-ci.yml"
+        assert cci.enrollment_from_rulesets([other]) is None
+
+    def test_a_non_workflows_rule_is_not_enrolment(self) -> None:
+        """A required STATUS CHECK is not a required WORKFLOW.
+
+        A status check blocks a merge; it does not make anything run. A repo
+        with no workflow would block forever on a check that never appears.
+        """
+        checks = _org_ruleset()
+        checks["rules"] = [
+            {"type": "required_status_checks", "parameters": {"required_status_checks": []}}
+        ]
+        assert cci.enrollment_from_rulesets([checks]) is None
+
+    @pytest.mark.parametrize("bad", [None, "not-a-list", 42, {}, []])
+    def test_unreadable_input_is_never_enrolment(self, bad: object) -> None:
+        assert cci.enrollment_from_rulesets(bad) is None
+
+    def test_enrolment_is_found_among_unrelated_rulesets(self) -> None:
+        noise = [
+            {"source_type": "Repository", "name": "Code Quality Copilot review", "rules": []},
+            _org_ruleset(),
+        ]
+        assert cci.enrollment_from_rulesets(noise) is not None

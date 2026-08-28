@@ -13,8 +13,8 @@ machine, and every one of them either passes or stops the birth.
     [6] VALIDATE BEFORE CREATION  the full product gate, on the newborn
     [7] PUBLISH ROOT COMMIT       provenance trailers, create, push -> PROVISIONAL
     [8] REMOTE ORG BOOTSTRAP      labels, settings, applicable seeding
-    [9] CANONICAL CI              await l9-ci-core's verdict on the root SHA
-   [10] REMOTE ATTESTATION        read the remote back and prove it -> BORN
+    [9] CANONICAL CI              prove l9-ci-core's ruleset enrols this repo
+   [10] REMOTE ATTESTATION        read the remote back and prove it
 
 `uv lock` is stage 3, not something a product author is asked to remember. A
 birth invariant belongs to the birth engine.
@@ -148,10 +148,6 @@ BIRTH_PROFILE_CLASS = "non_constellation_python"
 # later reader can act on, and this is the switch that turns "no CI" from a
 # stop into a downgrade.
 CI_UNVERIFIED_ENV = "L9_BIRTH_CI_UNVERIFIED"
-# Bounded, explicit, and never infinite. Polling forever on a stuck run is a
-# hang, not a gate.
-CI_POLL_SECONDS = 10
-CI_API_FAILURE_BUDGET = 5
 CANONICAL_LICENSE = "LICENSE"
 
 # Directories never carried from the template into a newborn. `.git` would make
@@ -701,7 +697,6 @@ class BirthConfig:
     keep: bool
     receipt_path: Path | None
     bootstrap_timeout: int
-    ci_timeout: int
 
     @property
     def slug(self) -> str:
@@ -1346,16 +1341,25 @@ def stage_validate(cfg: BirthConfig, receipt: BirthReceipt) -> None:
 
 
 def _validate_ci_binding(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """BIRTH-CI-001 and BIRTH-CI-004, proved locally before anything is created.
+    """BIRTH-CI-004, proved locally before anything is created.
+
+    Absence of a CI workflow in the newborn is CORRECT, not a defect.
+    `l9-ci-core/.l9/org-runtime-contract.yaml` sets `consumer_copy_required:
+    false` and `consumer_core_pin_allowed: false`, and prohibits "copied L9
+    workflows in consumer repositories as an enforcement mechanism". Canonical CI
+    reaches the repository through an organisation required-workflow ruleset, so
+    a consumer that ships no workflow is the intended shape. Enrolment is proved
+    remotely after publication, by `stage_verify_ci_enrollment`.
+
+    What this stage catches is the opposite failure: a payload that ships a
+    binding to something that is NOT the canonical authority. That is worse than
+    none, because it looks like enrolment and evaluates something else.
 
     Structural, not textual: `canonical_ci` parses each workflow and reads
-    `jobs.*.uses`, so a `uses:` in a comment does not count as enrollment and a
-    reformatted-but-equivalent workflow does not read as drift.
-
-    A payload cannot silently remove the binding, because this check runs on the
+    `jobs.*.uses`, so a `uses:` in a comment is not enrolment. It runs on the
     ASSEMBLED tree — after the payload overlay and after ownership
-    reconciliation. Whatever the payload did or did not supply, what is measured
-    is what the newborn will actually carry.
+    reconciliation — so "the payload omitted it" and "the payload replaced it"
+    are the same observable fact.
     """
     try:
         bindings = canonical_ci.assert_binding_authorized(cfg.dest)
@@ -1364,34 +1368,17 @@ def _validate_ci_binding(cfg: BirthConfig, receipt: BirthReceipt) -> None:
         raise BirthError(str(exc)) from exc
 
     if bindings:
+        # Legal but unusual: a repository may call the canonical workflow itself.
+        # Named rather than silently blessed — the ruleset is the sanctioned path.
         detail = "; ".join(b.describe() for b in bindings)
         receipt.record("validate.ci_binding", "ci binding", "PASS", detail)
         return
 
-    # No binding. Today no sanctioned mechanism installs one — `l9-ci-core`
-    # sets `consumer_copy_required: false` and expects a GitHub organization
-    # required-workflow ruleset to reach the repository instead. Birth cannot
-    # verify a ruleset from here, so it does the honest thing: it records that
-    # enrollment is unproven and refuses to call the result BORN.
-    reason = (os.environ.get(CI_UNVERIFIED_ENV) or "").strip()
-    if not reason:
-        receipt.record(
-            "validate.ci_binding", "ci binding", "FAIL", "no canonical CI binding in the newborn"
-        )
-        raise BirthError(
-            "the assembled repository declares no binding to "
-            f"{canonical_ci.CI_AUTHORITY_REPO}/{canonical_ci.CI_AUTHORITY_WORKFLOW}.\n"
-            "A repository that no CI evaluates cannot be born.\n\n"
-            "If enrollment is supplied out-of-band (a GitHub organization "
-            "required-workflow ruleset), birth cannot see it from here. Re-run with "
-            f"{CI_UNVERIFIED_ENV}='<why>' to proceed: the repository will be published "
-            "and left PROVISIONAL rather than reported BORN."
-        )
     receipt.record(
         "validate.ci_binding",
         "ci binding",
-        "WARN",
-        f"unverified by operator: {reason}",
+        "PASS",
+        "no consumer CI workflow (correct — enrolment is an organisation ruleset)",
     )
 
 
@@ -1539,17 +1526,13 @@ def stage_remote_bootstrap(cfg: BirthConfig, receipt: BirthReceipt, profile: dic
         receipt.record(key, label, "PASS" if state == "PASS" else "FAIL", detail)
 
 
-def _actions_runs(slug: str) -> object:
-    """The repository's recent Actions runs, or None when unreadable.
+def _repo_rulesets(slug: str) -> object:
+    """The rulesets that apply to a repository, org-inherited included.
 
-    None means "could not determine", which is NOT the same as "no run". A
-    transient API failure must never read as a clean absence, so the caller
-    keeps polling rather than concluding.
+    None means "could not determine", which is NOT "not enrolled". A transient
+    API failure must never read as a clean absence.
     """
-    proc = run(
-        ["gh", "api", f"repos/{slug}/actions/runs?per_page=50", "--jq", ".workflow_runs"],
-        check=False,
-    )
+    proc = run(["gh", "api", f"repos/{slug}/rulesets?includes_parents=true"], check=False)
     if proc.returncode != 0:
         return None
     try:
@@ -1558,78 +1541,72 @@ def _actions_runs(slug: str) -> object:
         return None
 
 
-def stage_verify_ci(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """BIRTH-CI-002, 003 and 005: canonical CI evaluated THIS root commit.
+def stage_verify_ci_enrollment(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """BIRTH-CI-001 and BIRTH-CI-005: canonical CI reaches this repository.
 
-    Runs after publication, never before — CI cannot evaluate a commit that does
-    not exist yet, so gating the commit on CI would be a cycle. The repository is
-    PROVISIONAL from the push until this stage says otherwise.
+    Enrolment, not root-commit evaluation. GitHub required workflows run on
+    `pull_request`, `pull_request_target` and `merge_group` — never on `push` —
+    and a root commit has no base branch to be a pull request against. Waiting
+    here for a run against the root SHA would wait forever and QUARANTINE every
+    real birth, which is exactly what the first shape of this stage did.
 
-    Evidence is remote (BIRTH-CI-005): the local workspace is not consulted, and
-    a run is accepted only when its head SHA is the root commit.
+    What birth CAN prove is that the organisation ruleset requires the canonical
+    workflow for this repository, so the first pull request will be evaluated.
+    That is the honest claim, and it is proved remotely (BIRTH-CI-005): the local
+    workspace is never consulted.
+
+    The repository ends PROVISIONAL either way. BORN is earned later, by a real
+    pull request that canonical CI passes.
     """
-    root = receipt.head_sha
-    deadline = time.monotonic() + cfg.ci_timeout
-    saw_run = False
-    api_failures = 0
-    verdict = canonical_ci.timeout_verdict(root, cfg.ci_timeout, saw_run=False)
+    rulesets = _repo_rulesets(cfg.slug)
+    if rulesets is None:
+        receipt.record(
+            "ci.enrollment",
+            "ci enrollment",
+            "FAIL",
+            "repository rulesets unreadable — enrolment undeterminable",
+        )
+        raise BirthError(
+            f"cannot read the rulesets that apply to {cfg.slug}, so canonical CI "
+            "enrolment is undeterminable. Undeterminable is not enrolled."
+        )
 
-    while time.monotonic() < deadline:
-        runs = _actions_runs(cfg.slug)
-        if runs is None:
-            # Bounded tolerance, then fail closed. An unreadable API is an
-            # undeterminable CI state, and undeterminable is not success.
-            api_failures += 1
-            if api_failures > CI_API_FAILURE_BUDGET:
-                verdict = canonical_ci.CIVerdict(
-                    state=canonical_ci.QUARANTINED,
-                    detail=(
-                        f"GitHub Actions API unreadable {api_failures}x while verifying "
-                        f"{root[:12]} — CI state undeterminable, failing closed"
-                    ),
-                    revision=root,
-                )
-                break
-            time.sleep(CI_POLL_SECONDS)
-            continue
-        api_failures = 0
-        found = canonical_ci.select_birth_run(runs, root_sha=root)
-        if found is not None:
-            saw_run = True
-            verdict = canonical_ci.verdict_for_run(found, root_sha=root)
-            if verdict.state != canonical_ci.PROVISIONAL:
-                break
-        time.sleep(CI_POLL_SECONDS)
-    else:
-        verdict = canonical_ci.timeout_verdict(root, cfg.ci_timeout, saw_run=saw_run)
-
-    if verdict.state == canonical_ci.PROVISIONAL:
-        verdict = canonical_ci.timeout_verdict(root, cfg.ci_timeout, saw_run=True)
-
-    receipt.ci = canonical_ci.ci_provenance(verdict)
-    receipt.record(
-        "ci.enrollment",
-        "ci enrollment",
-        "PASS" if saw_run else "FAIL",
-        "canonical CI observed for the root commit" if saw_run else "no run for the root commit",
+    enrolled = canonical_ci.enrollment_from_rulesets(rulesets)
+    receipt.ci = canonical_ci.ci_provenance(
+        canonical_ci.CIVerdict(
+            state=canonical_ci.PROVISIONAL,
+            detail=enrolled.describe() if enrolled else "not enrolled",
+            revision=receipt.head_sha,
+        )
     )
-    receipt.record(
-        "ci.root_evaluation",
-        "root evaluation",
-        "PASS" if verdict.state == canonical_ci.BORN else "FAIL",
-        verdict.detail,
-    )
-    if verdict.state != canonical_ci.BORN:
+    if enrolled is not None:
+        receipt.record("ci.enrollment", "ci enrollment", "PASS", enrolled.describe())
+        return
+
+    # Not enrolled. The organisation ruleset that is supposed to require
+    # `org-ci.yml` has never been applied — see the activation kit in
+    # Cursor-Governance, WIP/org-ci-ruleset-activation. Until it is, no pull
+    # request in this repository will be evaluated by canonical CI either.
+    reason = (os.environ.get(CI_UNVERIFIED_ENV) or "").strip()
+    if not reason:
+        receipt.record(
+            "ci.enrollment",
+            "ci enrollment",
+            "FAIL",
+            "no organisation ruleset requires canonical CI",
+        )
         receipt.state = canonical_ci.QUARANTINED
         raise BirthError(
-            f"canonical CI did not succeed for the root commit — repository is "
-            f"{canonical_ci.QUARANTINED}, not born.\n"
-            f"  repository: {cfg.slug}\n"
-            f"  root_sha:   {root}\n"
-            f"  authority:  {canonical_ci.CI_AUTHORITY_REPO}/{canonical_ci.CI_AUTHORITY_WORKFLOW}\n"
-            f"  {verdict.detail}\n"
-            "The repository is preserved for diagnosis; birth does not delete it."
+            f"{cfg.slug} is published but NOT enrolled with canonical CI.\n"
+            f"  authority: {canonical_ci.CI_AUTHORITY_REPO}/"
+            f"{canonical_ci.CI_AUTHORITY_WORKFLOW}\n"
+            "  No organisation-sourced ruleset requires that workflow here, so no "
+            "pull request in this repository will ever be evaluated.\n"
+            "  Apply the ruleset (Cursor-Governance WIP/org-ci-ruleset-activation), "
+            f"or re-run with {CI_UNVERIFIED_ENV}='<why>' to accept an unenrolled "
+            "repository. The repository is preserved either way."
         )
+    receipt.record("ci.enrollment", "ci enrollment", "WARN", f"unverified by operator: {reason}")
 
 
 def _remote_has(slug: str, path: str) -> bool:
@@ -1808,28 +1785,24 @@ def stage_attest(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None
 
 
 def _attest_ci(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """BIRTH-CI-005: the CI claim is re-read from GitHub, not from memory.
+    """BIRTH-CI-005: the enrolment claim is re-read from GitHub, not from memory.
 
-    `stage_verify_ci` already watched the run. This asserts the same fact again
-    against the remote at attestation time, so a receipt can never carry a CI
-    conclusion that the repository's own Actions history does not show.
+    `stage_verify_ci_enrollment` already read the rulesets. This asserts the same
+    fact again at attestation time, so a receipt can never carry an enrolment the
+    repository's own ruleset list does not show.
     """
-    runs = _actions_runs(cfg.slug)
-    found = (
-        canonical_ci.select_birth_run(runs, root_sha=receipt.head_sha) if runs is not None else None
-    )
-    conclusion = str((found or {}).get("conclusion") or "")
-    receipt.record(
-        "attest.ci",
-        "ci success attested",
-        "PASS" if conclusion == "success" else "FAIL",
-        f"remote run {(found or {}).get('id')}: {conclusion or 'unreadable'}",
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
+    rulesets = _repo_rulesets(cfg.slug)
+    enrolled = canonical_ci.enrollment_from_rulesets(rulesets) if rulesets is not None else None
+    if enrolled is not None:
+        receipt.record("attest.ci", "ci enrollment attested", "PASS", enrolled.describe())
+    elif (os.environ.get(CI_UNVERIFIED_ENV) or "").strip():
+        receipt.record(
+            "attest.ci", "ci enrollment attested", "WARN", "unenrolled, accepted by operator"
+        )
+    else:
+        receipt.record(
+            "attest.ci", "ci enrollment attested", "FAIL", "no organisation ruleset on the remote"
+        )
 
 
 def build_config(args: argparse.Namespace) -> BirthConfig:
@@ -1850,7 +1823,6 @@ def build_config(args: argparse.Namespace) -> BirthConfig:
         keep=args.keep,
         receipt_path=Path(args.receipt).expanduser().resolve() if args.receipt else None,
         bootstrap_timeout=args.bootstrap_timeout,
-        ci_timeout=args.ci_timeout,
     )
 
 
@@ -1889,15 +1861,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=180,
         help="seconds to wait for the remote to become readable during attestation",
-    )
-    parser.add_argument(
-        "--ci-timeout",
-        type=int,
-        default=900,
-        help=(
-            "seconds to wait for canonical CI to conclude on the root commit "
-            "(bounded; a repository is QUARANTINED, never waited on forever)"
-        ),
     )
     return parser.parse_args(argv)
 
@@ -1939,11 +1902,15 @@ def main(argv: list[str] | None = None) -> int:
             # Published, not born. Everything from here decides which.
             receipt.state = canonical_ci.PROVISIONAL
             stage_remote_bootstrap(cfg, receipt, profile)
-            stage_verify_ci(cfg, receipt)
+            stage_verify_ci_enrollment(cfg, receipt)
             stage_attest(cfg, receipt, profile)
-            # BORN is earned by the attestation too: a failed remote check
-            # leaves the repository PROVISIONAL rather than silently born.
-            receipt.state = canonical_ci.BORN if not receipt.failed else canonical_ci.QUARANTINED
+            # Birth ends PROVISIONAL. Not caution — arithmetic: required
+            # workflows never run on push, and a root commit has no base branch
+            # to be a pull request against, so nothing can have evaluated this
+            # commit yet. BORN is earned by the first pull request that passes.
+            receipt.state = (
+                canonical_ci.PROVISIONAL if not receipt.failed else canonical_ci.QUARANTINED
+            )
             receipt.ci["state"] = receipt.state
         else:
             receipt.record("github.create", "repository created", "SKIP", "--no-remote")
