@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Quantum-L9/l9-repo-template/main/scripts/birth-runner/schemas/birth-payload.schema.json",
+  "title": "l9.birth-payload/v1",
+  "description": "A compiled birth payload: WHICH bytes, from WHICH immutable source snapshot, a birth is authorized to consume. It is a manifest, not a second repository — file contents stay in the source tree and birth copies them from there. It carries evidence (hashes, the shape that was matched, the packages that were found) and never inferred intent: no capabilities, no CI policy, no target-repository identity, no absence declarations, no birth provenance. Those belong to other authorities or are derivable from the files this manifest names.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source",
+    "mode",
+    "repository_shape",
+    "packages",
+    "files",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema": {
+      "const": "l9.birth-payload/v1"
+    },
+    "source": {
+      "description": "The immutable snapshot the payload was compiled from. Describes the SOURCE, never the target repository being born — REPO and DESC are birth-request inputs, not source truth.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "revision", "tree_sha"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "revision": { "$ref": "#/$defs/gitObjectId" },
+        "tree_sha": { "$ref": "#/$defs/gitObjectId" }
+      }
+    },
+    "mode": {
+      "description": "Proposed from evidence by the compiler, re-derived independently by the birth engine from payload-ownership.yaml. An authoritative payload owns its product surfaces, so absence is meaningful; an additive one adds and overrides only.",
+      "enum": ["authoritative", "additive"]
+    },
+    "repository_shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matched"],
+      "properties": {
+        "matched": {
+          "description": "The repository_shape paths found in the source. An authoritative payload matches every one of them.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python"],
+      "properties": {
+        "python": {
+          "description": "Package directories found under src/. Compared against PKG at birth; never a rename instruction.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "files": {
+      "description": "Every file in the source snapshot, path-sorted, with the sha256 of the bytes git stores for it (a symlink hashes its target).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$"
+          },
+          "sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "manifest_sha256": {
+      "description": "sha256 over `<sha256>  <path>` lines, one per file, path-sorted — the same algorithm as MANIFEST.sha256 and the birth receipt, so a human can reproduce it with sha256sum. This is the SOURCE CONTRIBUTION digest; the birth receipt's manifest_sha256 is a different proof over the whole newborn, and the two are never merged.",
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "gitObjectId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

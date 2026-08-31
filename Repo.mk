@@ -12,7 +12,8 @@ PYTHON ?= python3
 .PHONY: help install-dev setup-hooks lint typecheck inventory-check hygiene-check \
 	check-rules render-rules check-config reconcile-config verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
-	new-repo birth-check birth-preflight birth-bootstrap birth-verify \
+	new-repo birth-payload birth-payload-check birth-check birth-preflight \
+	birth-bootstrap birth-verify \
 	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
 
 # Override thin-facade help to list product + governance wrappers.
@@ -101,7 +102,24 @@ obs-ps: ## Show optional local obs stack status
 # product gate are birth invariants, not steps an author remembers.
 #
 # The three targets below stay as debugging surfaces for the individual stages.
-new-repo: ## Birth a repository (REPO= PKG= DESC= [PAYLOAD=] [ORG=] [WORK_DIR=] [NO_REMOTE=1])
+birth-payload: ## Compile a birth payload (SOURCE=<clean checkout> OUT=<payload.json> [MODE=])
+	@test -n "$(SOURCE)" || (echo "usage: make birth-payload SOURCE=<checkout> OUT=<payload.json>" >&2; exit 2)
+	@test -n "$(OUT)"    || (echo "usage: make birth-payload SOURCE=<checkout> OUT=<payload.json>" >&2; exit 2)
+	$(PYTHON) scripts/birth-runner/compile_birth_payload.py \
+		--source "$(SOURCE)" \
+		--out "$(OUT)" \
+		$(if $(SOURCE_REPO),--source-repository "$(SOURCE_REPO)",) \
+		$(if $(MODE),--require-mode "$(MODE)",)
+
+birth-payload-check: ## Reproduce a compiled payload against its source (PAYLOAD_CONTRACT= SOURCE= [PKG=])
+	@test -n "$(PAYLOAD_CONTRACT)" || (echo "usage: make birth-payload-check PAYLOAD_CONTRACT=<payload.json> SOURCE=<checkout>" >&2; exit 2)
+	@test -n "$(SOURCE)"           || (echo "usage: make birth-payload-check PAYLOAD_CONTRACT=<payload.json> SOURCE=<checkout>" >&2; exit 2)
+	$(PYTHON) scripts/birth-runner/verify_birth_payload.py \
+		--payload "$(PAYLOAD_CONTRACT)" \
+		--source "$(SOURCE)" \
+		$(if $(PKG),--pkg "$(PKG)",)
+
+new-repo: ## Birth a repository (REPO= PKG= DESC= [PAYLOAD= PAYLOAD_CONTRACT=] [ORG=] [WORK_DIR=] [NO_REMOTE=1])
 	@test -n "$(REPO)" || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
 	@test -n "$(PKG)"  || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
 	@test -n "$(DESC)" || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
@@ -111,6 +129,7 @@ new-repo: ## Birth a repository (REPO= PKG= DESC= [PAYLOAD=] [ORG=] [WORK_DIR=] 
 		--desc "$(DESC)" \
 		$(if $(ORG),--org "$(ORG)",) \
 		$(if $(PAYLOAD),--payload "$(PAYLOAD)",) \
+		$(if $(PAYLOAD_CONTRACT),--payload-contract "$(PAYLOAD_CONTRACT)",) \
 		$(if $(WORK_DIR),--work-dir "$(WORK_DIR)",) \
 		$(if $(ORG_PROFILE_SRC),--org-profile-src "$(ORG_PROFILE_SRC)",) \
 		$(if $(CLASS),--repo-class "$(CLASS)",) \

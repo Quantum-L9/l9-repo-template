@@ -6,6 +6,7 @@
 machine, and every one of them either passes or stops the birth.
 
     [1] PREFLIGHT              tools, auth, identity validation, name is free
+                               + the compiled payload, reproduced against its source
     [2] ASSEMBLE LOCALLY       template + identity stamp + optional payload
     [3] FINALIZE               LICENSE, uv lock, rules, manifest, metadata
     [4] APPLY ORG BIRTH PROFILE current Quantum-L9/.github, class capabilities
@@ -48,6 +49,17 @@ Ownership, unchanged by this script:
 This script never decides what the organization requires. It reads
 `policies/repo-classes.yml` from Quantum-L9/.github at a recorded SHA and
 applies it.
+
+Nor does it author what a product supplies. A repository-shaped PAYLOAD is
+consumed only under a COMPILED CONTRACT — `l9.birth-payload/v1`, produced by
+`scripts/birth-runner/compile_birth_payload.py` from an immutable, clean git
+snapshot of the actual source repository. Stage 1 recomputes that manifest
+against the source tree and requires every hash to match before a single file is
+copied; a mismatch stops the birth while a work directory is still the only
+thing that exists. The contract is a manifest, not a second repository: the
+bytes still come from the source tree, and the contract only proves which bytes
+were authorized. A fragment payload keeps the original additive-overlay
+semantics and needs no contract.
 
 Nor does it decide what a product owns. A PAYLOAD that is a standalone
 repository is AUTHORITATIVE over its product tree: the template's example
@@ -99,6 +111,11 @@ def _load_sibling(name: str):
 # The engine that WRITES provenance and the checker that VERIFIES it share one
 # module deliberately: two copies of a digest algorithm are two digests.
 prov = _load_sibling("birth_provenance")
+# The ownership contract has three readers now — this engine, the payload
+# compiler, and the payload verifier. One module reads it, so a birth and the
+# payload it consumes cannot disagree about what `authoritative` means.
+ownership_contract = _load_sibling("payload_ownership")
+payload_verifier = _load_sibling("verify_birth_payload")
 
 TEMPLATE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -111,7 +128,7 @@ VERIFY_BIRTH = "scripts/birth-runner/verify_birth_integrity.py"
 # The template's own answer to "what does a product inherit from me?". Read from
 # the template source, never from the payload: a payload does not get to widen
 # the set of template surfaces it silently keeps.
-OWNERSHIP_PATH = "scripts/birth-runner/payload-ownership.yaml"
+OWNERSHIP_PATH = ownership_contract.OWNERSHIP_PATH
 SEED_BRANCH = "chore/auto-seed-governance"
 # A licence that names one repository is wrong in every other repository. The
 # org consumer template carried this notice; birth copies that file in as
@@ -141,26 +158,12 @@ def default_work_dir() -> Path:
 BIRTH_PROFILE_CLASS = "non_constellation_python"
 CANONICAL_LICENSE = "LICENSE"
 
-# Directories never carried from the template into a newborn. `.git` would make
-# the newborn a fork of the template's history; the rest is machine state.
-COPY_EXCLUDE_DIRS = frozenset(
-    {
-        ".git",
-        ".venv",
-        "venv",
-        "__pycache__",
-        ".mypy_cache",
-        ".ruff_cache",
-        ".pytest_cache",
-        ".eggs",
-        "node_modules",
-    }
-)
-
-# Build metadata carries the *template's* package name. Copying it would hand a
-# newborn a stale `l9_example_pkg.egg-info` describing a package it does not
-# have.
-COPY_EXCLUDE_SUFFIXES = (".egg-info",)
+# Machine state never carried from one tree into another — `.git`, caches, build
+# metadata. Defined with the ownership contract because the payload compiler
+# applies exactly the same exclusion: the manifest that authorizes a birth has to
+# equal the bytes the overlay actually copies.
+COPY_EXCLUDE_DIRS = ownership_contract.COPY_EXCLUDE_DIRS
+COPY_EXCLUDE_SUFFIXES = ownership_contract.COPY_EXCLUDE_SUFFIXES
 
 # Agent session scaffolding, projected into whatever checkout the bootstrap ran
 # in. It is not template content and a newborn must not inherit it: `.claude/`
@@ -329,6 +332,12 @@ class BirthReceipt:
     birth_profile: str = ""
     payload: str = ""
     payload_mode: str = "none"
+    # The compiled `l9.birth-payload/v1` this birth was authorized by, and the
+    # source snapshot it pinned. Operator evidence — the SOURCE CONTRIBUTION
+    # proof, kept separate from `manifest_sha256` below, which is the different
+    # proof over what the repository was born containing.
+    payload_contract: str = ""
+    payload_source: dict = field(default_factory=dict)
     workdir: str = ""
     head_sha: str = "unknown"
     born_at: str = ""
@@ -370,6 +379,8 @@ class BirthReceipt:
                 "description": self.description,
                 "payload": self.payload,
                 "payload_mode": self.payload_mode,
+                "payload_contract": self.payload_contract,
+                "payload_source": dict(self.payload_source),
             },
             "birth_receipt": dict(self.birth_receipt),
             "manifest_sha256": self.manifest_sha256,
@@ -488,6 +499,12 @@ def overlay_payload(payload: Path, dest: Path) -> list[str]:
 
     The payload wins on collision — the template is the chassis, the payload is
     the product. Git and machine state are never carried across.
+
+    A symlink is copied AS a symlink, exactly as the template copy does it and
+    exactly as git stores it. Dereferencing one would materialize the target's
+    content under the link's name, which is a different file from the one the
+    compiled payload hashed — and the invariant this overlay has to satisfy is
+    that the bytes it writes are the bytes the manifest authorized.
     """
     written: list[str] = []
     for path in sorted(payload.rglob("*")):
@@ -495,7 +512,13 @@ def overlay_payload(payload: Path, dest: Path) -> list[str]:
         if _is_machine_state(rel):
             continue
         target = dest / rel
-        if path.is_dir():
+        if path.is_symlink():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.is_symlink() or target.exists():
+                target.unlink()
+            shutil.copy2(path, target, follow_symlinks=False)
+            written.append(rel.as_posix())
+        elif path.is_dir():
             target.mkdir(parents=True, exist_ok=True)
         elif path.is_file():
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -505,43 +528,25 @@ def overlay_payload(payload: Path, dest: Path) -> list[str]:
 
 
 def load_ownership(template_src: Path) -> dict:
-    """Read the template's payload-ownership contract.
+    """The template's payload-ownership contract, as a birth-stopping read.
 
-    JSON-in-YAML, exactly like the organization policy, and for the same reason:
-    the file has to explain itself in comments and this script has no YAML
-    dependency. Fails closed — a missing or unreadable contract must stop a
-    birth, not silently fall back to "the template owns everything", which is
-    the defect this contract exists to remove.
+    The contract itself is parsed by `payload_ownership.load_ownership`; this
+    only translates its refusal into the birth engine's own error type, so an
+    unreadable contract stops a birth here exactly as it stops a compilation
+    over there.
     """
-    path = template_src / OWNERSHIP_PATH
-    if not path.is_file():
-        raise BirthError(
-            f"template has no payload ownership contract at {OWNERSHIP_PATH} — "
-            "an authoritative payload cannot be reconciled without it"
-        )
-    stripped = re.sub(r"^[ \t]*#.*$", "", path.read_text(encoding="utf-8"), flags=re.M)
     try:
-        doc = json.loads(stripped)
-    except json.JSONDecodeError as exc:
-        raise BirthError(f"{OWNERSHIP_PATH} is not JSON-in-YAML: {exc}") from exc
-    if not isinstance(doc, dict):
-        raise BirthError(f"{OWNERSHIP_PATH} is not a mapping")
-    for key in ("repository_shape", "product", "chassis"):
-        value = doc.get(key)
-        if not isinstance(value, list) or not value or not all(isinstance(x, str) for x in value):
-            raise BirthError(f"{OWNERSHIP_PATH} has no usable {key!r} list")
-    return doc
+        return ownership_contract.load_ownership(template_src)
+    except ownership_contract.OwnershipContractError as exc:
+        raise BirthError(str(exc)) from exc
 
 
-def is_repository_payload(payload: Path, ownership: dict) -> bool:
-    """Is this payload a standalone repository, or a fragment?
-
-    Positive identification only, against the declared `repository_shape`. Every
-    listed path must be present. A payload that is merely large, or that happens
-    to carry a `src/` directory, stays an additive overlay — the pre-existing
-    behavior, which products already depend on.
-    """
-    return all((payload / rel).exists() for rel in ownership["repository_shape"])
+# Positive identification against the declared `repository_shape`, and the
+# packages a repository-shaped payload ships. Same functions the compiler calls:
+# the classification a compiled payload proposes and the one birth re-derives
+# have to come from one implementation, or "authoritative" means two things.
+is_repository_payload = ownership_contract.is_repository_payload
+payload_package_dirs = ownership_contract.payload_package_dirs
 
 
 def _relative_files(root: Path) -> list[str]:
@@ -554,20 +559,6 @@ def _relative_files(root: Path) -> list[str]:
         if path.is_file() or path.is_symlink():
             found.append(rel.as_posix())
     return sorted(found)
-
-
-def payload_package_dirs(payload: Path) -> list[str]:
-    """The Python packages a repository-shaped payload declares under `src/`."""
-    src = payload / "src"
-    if not src.is_dir():
-        return []
-    return sorted(
-        child.name
-        for child in src.iterdir()
-        if child.is_dir()
-        and child.name not in COPY_EXCLUDE_DIRS
-        and not child.name.endswith(COPY_EXCLUDE_SUFFIXES)
-    )
 
 
 def reconcile_product_ownership(dest: Path, payload: Path, ownership: dict) -> list[str]:
@@ -658,6 +649,7 @@ class BirthConfig:
     desc: str
     work_dir: Path
     payload: Path | None
+    payload_contract: Path | None
     template_src: Path
     org_profile_src: Path | None
     repo_class: str
@@ -666,6 +658,11 @@ class BirthConfig:
     keep: bool
     receipt_path: Path | None
     bootstrap_timeout: int
+    # Set by stage 1 once the compiled payload has been reproduced against the
+    # source tree. Assembly reads THIS rather than re-inferring the mode, so the
+    # classification a birth acts on is one that was verified, not one that was
+    # guessed while files were already being copied.
+    verified_payload_mode: str | None = None
 
     @property
     def slug(self) -> str:
@@ -752,12 +749,92 @@ def _preflight_name_free(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     receipt.record("preflight.name", "name available", "PASS", f"{cfg.slug} is free")
 
 
+def _preflight_payload_contract(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """Stage 1's half of the compilation boundary: reproduce, then classify.
+
+    The birthing agent orchestrates; it never authors payload semantics. What it
+    hands this engine is a compiled `l9.birth-payload/v1`, and the engine's job
+    is to distrust it: the source manifest is recomputed here, immediately before
+    assembly, and must equal the one the contract authorized down to every hash.
+    A byte that changed between compilation and now stops the birth while a work
+    directory is still the only thing that exists.
+
+    An authoritative payload REQUIRES a contract. Before this, repository shape
+    was inferred silently during assembly, which meant a decision that deletes
+    product surfaces was taken while files were already being copied and was
+    visible only afterwards, in a receipt line. Now the compiler proposes the
+    classification from evidence and this verifies it against the same ownership
+    contract.
+
+    A fragment stays what it always was: an additive overlay, no contract
+    required, absence meaning nothing. That mode is unchanged because products
+    already depend on it.
+    """
+    if cfg.payload is None:
+        receipt.record("preflight.payload", "payload contract", "SKIP", "no PAYLOAD given")
+        return
+
+    ownership = load_ownership(cfg.template_src)
+    repository_shaped = is_repository_payload(cfg.payload, ownership)
+
+    if cfg.payload_contract is None:
+        if repository_shaped:
+            raise BirthError(
+                f"PAYLOAD {cfg.payload} is repository-shaped, so it is authoritative over its "
+                "product tree — and an authoritative birth is compiled from an immutable "
+                "source snapshot, never inferred from a directory. Compile it first:\n"
+                "    make birth-payload SOURCE=<source checkout> OUT=<payload.json>\n"
+                "then pass PAYLOAD_CONTRACT=<payload.json>."
+            )
+        receipt.record(
+            "preflight.payload",
+            "payload contract",
+            "SKIP",
+            "additive fragment — no compiled payload required",
+        )
+        cfg.verified_payload_mode = "additive"
+        return
+
+    try:
+        document = payload_verifier.load_payload(cfg.payload_contract)
+    except payload_verifier.PayloadCompileError as exc:
+        raise BirthError(str(exc)) from exc
+
+    report = payload_verifier.verify_payload(
+        document,
+        cfg.payload,
+        template_src=cfg.template_src,
+        pkg=cfg.pkg,
+    )
+    if report.failed:
+        # No fallback to a naked-directory overlay. An invalid compiled payload
+        # is a refusal, not a downgrade: silently birthing the additive way from
+        # a contract that failed to reproduce is exactly the unverified path the
+        # contract exists to close.
+        raise BirthError(f"compiled birth payload did not reproduce: {report.reason}")
+
+    source = document["source"]
+    mode = str(document["mode"])
+    cfg.verified_payload_mode = mode
+    receipt.payload_contract = str(cfg.payload_contract)
+    receipt.payload_source = dict(source)
+    receipt.record(
+        "preflight.payload",
+        "payload contract",
+        "PASS",
+        f"{source['repository']}@{str(source['revision'])[:12]} {mode} — "
+        f"{len(document['files'])} file(s), manifest sha256:"
+        f"{str(document['manifest_sha256'])[:12]} reproduced",
+    )
+
+
 def stage_preflight(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     """Tools, auth, identity, and a target name that is actually free."""
     _preflight_tools(cfg, receipt)
     # Identity was validated when the config was built; record it as evidence.
     receipt.record("preflight.identity", "identity", "PASS", f"{cfg.slug} / {cfg.pkg}")
     _preflight_sources(cfg)
+    _preflight_payload_contract(cfg, receipt)
     receipt.record(
         "preflight.provenance",
         "birth paths free",
@@ -814,7 +891,10 @@ def _assemble_payload(cfg: BirthConfig, receipt: BirthReceipt) -> tuple[str, str
         return "SKIP", "no PAYLOAD given"
 
     ownership = load_ownership(cfg.template_src)
-    authoritative = is_repository_payload(cfg.payload, ownership)
+    # Verified in stage 1 against the compiled payload and the ownership
+    # contract. Assembly does not get a second opinion — a classification
+    # re-derived here could disagree with the one the birth was authorized under.
+    authoritative = cfg.verified_payload_mode == "authoritative"
     receipt.payload_mode = "authoritative" if authoritative else "additive"
     if authoritative:
         _assert_payload_package_matches(cfg)
@@ -1631,6 +1711,14 @@ def stage_attest(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None
 
 
 def build_config(args: argparse.Namespace) -> BirthConfig:
+    if args.payload_contract and not args.payload:
+        # An argument error, not a source-tree condition — so it is caught here,
+        # where the answer does not depend on what is on disk. A compiled payload
+        # AUTHORIZES bytes; it does not carry them.
+        raise BirthError(
+            "PAYLOAD_CONTRACT was given without a PAYLOAD — a compiled payload authorizes "
+            "bytes, it does not carry them. Pass the source tree the contract was compiled from."
+        )
     return BirthConfig(
         org=(args.org or DEFAULT_ORG).strip(),
         repo=validate_repo_name(args.repo),
@@ -1638,6 +1726,9 @@ def build_config(args: argparse.Namespace) -> BirthConfig:
         desc=validate_description(args.desc),
         work_dir=Path(args.work_dir).expanduser().resolve(),
         payload=Path(args.payload).expanduser().resolve() if args.payload else None,
+        payload_contract=(
+            Path(args.payload_contract).expanduser().resolve() if args.payload_contract else None
+        ),
         template_src=Path(args.template_src).expanduser().resolve(),
         org_profile_src=(
             Path(args.org_profile_src).expanduser().resolve() if args.org_profile_src else None
@@ -1661,6 +1752,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--desc", required=True, help="one-line repository description")
     parser.add_argument("--org", default=DEFAULT_ORG)
     parser.add_argument("--payload", default=None, help="product files to overlay on the scaffold")
+    parser.add_argument(
+        "--payload-contract",
+        default=None,
+        help=(
+            "compiled l9.birth-payload/v1 authorizing the payload "
+            "(required when the payload is repository-shaped; see compile_birth_payload.py)"
+        ),
+    )
     parser.add_argument("--work-dir", default=os.environ.get("WORK_DIR") or str(default_work_dir()))
     parser.add_argument("--template-src", default=str(TEMPLATE_ROOT))
     parser.add_argument(

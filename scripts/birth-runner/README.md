@@ -3,11 +3,14 @@
 ## `make new-repo` — the birth primitive
 
 ```bash
+make birth-payload SOURCE=/path/to/l9-observability-core OUT=/tmp/obs.payload.json
+
 make new-repo \
   REPO=l9-observability-core \
   PKG=l9_observability_core \
   DESC="Canonical backend-neutral observability domain contracts" \
-  PAYLOAD=/path/to/l9-observability-core
+  PAYLOAD=/path/to/l9-observability-core \
+  PAYLOAD_CONTRACT=/tmp/obs.payload.json
 ```
 
 `new_repo.py` is the orchestrator: an eight-stage state machine that preflights,
@@ -24,6 +27,22 @@ standalone repository — see
 product inherits from this template and what it does not. Absence is meaningless
 in an overlay and meaningful in a repository: a product that ships no Dockerfile
 is not handed the template's.
+
+An authoritative payload is **compiled**, never inferred.
+[`compile_birth_payload.py`](compile_birth_payload.py) reads a clean git snapshot
+of the actual source repository and emits an `l9.birth-payload/v1` manifest —
+which files, from which revision, at which hashes. Stage 1 recomputes that
+manifest against the source tree and stops the birth on any disagreement
+([`verify_birth_payload.py`](verify_birth_payload.py)). The contract carries
+evidence only: the bytes stay in the source repository, and nothing about CI,
+capabilities, or birth provenance appears in it.
+
+| File | Role |
+|------|------|
+| [`compile_birth_payload.py`](compile_birth_payload.py) | compiler — snapshot to manifest |
+| [`verify_birth_payload.py`](verify_birth_payload.py) | consumer-side reproduction of that manifest |
+| [`schemas/birth-payload.schema.json`](schemas/birth-payload.schema.json) | published `l9.birth-payload/v1` contract |
+| [`payload_ownership.py`](payload_ownership.py) | the one reader of `payload-ownership.yaml` |
 
 Useful flags for local work:
 
