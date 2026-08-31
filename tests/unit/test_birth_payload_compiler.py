@@ -406,17 +406,65 @@ class TestThePublishedSchemaAgreesWithTheGate:
     @pytest.mark.parametrize(
         "mutation",
         [
+            # schema identity
             {"schema": "l9.birth-payload/v2"},
-            {"mode": "authoritative-ish"},
-            {"manifest_sha256": "nope"},
+            {"schema": None},
+            # closed object
             {"capabilities": ["http"]},
+            {"born_at": "2026-08-31T00:00:00Z"},
+            # source
+            {"source": {"repository": "IdeaOS", "revision": "a" * 40, "tree_sha": "b" * 40}},
+            {"source": {"repository": "Q/I", "revision": "short", "tree_sha": "b" * 40}},
+            {"source": {"repository": "Q/I", "revision": "a" * 40, "tree_sha": "NOTHEX" * 6}},
+            {"source": {"repository": "Q/I", "revision": "a" * 40}},
+            {"source": {"repository": "Q/I", "revision": "a" * 40, "tree_sha": "b" * 40, "x": 1}},
+            # mode
+            {"mode": "authoritative-ish"},
+            {"mode": None},
+            # repository_shape / packages
+            {"repository_shape": {}},
+            {"repository_shape": {"matched": [""]}},
+            {"repository_shape": {"matched": ["src", "src"]}},
+            {"packages": {}},
+            {"packages": {"python": [1]}},
+            {"packages": {"python": ["a"], "rust": ["b"]}},
+            # files
             {"files": []},
+            {"files": [{"path": "ok.py"}]},
+            {"files": [{"path": "ok.py", "sha256": "nope"}]},
+            {"files": [{"path": "", "sha256": "0" * 64}]},
+            {"files": [{"path": "/etc/passwd", "sha256": "0" * 64}]},
+            {"files": [{"path": "../out.py", "sha256": "0" * 64}]},
+            {"files": [{"path": "ok.py", "sha256": "0" * 64, "mode": "100644"}]},
+            # digest
+            {"manifest_sha256": "nope"},
+            {"manifest_sha256": "0" * 63},
         ],
     )
     def test_both_readers_reject_the_same_documents(self, payload: dict, mutation: dict) -> None:
+        """A rule stated by only one of the two readers is a rule that can drift."""
         broken = dict(payload, **mutation)
-        assert compiler.validate_payload_document(broken)
-        assert list(self._validator().iter_errors(broken))
+        assert compiler.validate_payload_document(broken), "the gate accepted it"
+        assert list(self._validator().iter_errors(broken)), "the published schema accepted it"
+
+    @pytest.mark.parametrize(
+        "mutation",
+        [
+            {"repository_shape": {"matched": []}},
+            {"packages": {"python": []}},
+            {"files": [{"path": "a/b.py", "sha256": "0" * 64}]},
+        ],
+    )
+    def test_both_readers_accept_the_same_documents(self, payload: dict, mutation: dict) -> None:
+        """Agreement has to be checked in both directions.
+
+        A validator that rejected everything would pass the test above while
+        being useless — an empty shape list and a payload shipping no Python
+        package are legal, and both readers have to say so.
+        """
+        allowed = dict(payload, **mutation)
+        assert compiler.validate_payload_document(allowed) == []
+        assert list(self._validator().iter_errors(allowed)) == []
 
 
 class TestBirthReproducesRatherThanTrusts:
@@ -462,6 +510,34 @@ class TestBirthReproducesRatherThanTrusts:
         report = verifier.verify_payload(payload, source, template_src=REPO, pkg="wrong_name")
         assert report.result == "FAIL"
         assert "not a package this payload ships" in report.reason
+
+    def test_a_malformed_document_never_reports_a_passing_contract(
+        self, source: Path, payload: dict
+    ) -> None:
+        """A check that did not run must not report PASS.
+
+        `verify_payload` is reachable with a document that never passed through
+        `load_payload`, so it validates rather than assuming the caller did.
+        """
+        report = verifier.verify_payload(
+            dict(payload, mode="authoritative-ish"), source, template_src=REPO
+        )
+        assert report.result == "FAIL"
+        contract = next(c for c in report.checks if c.key == "payload.schema")
+        assert contract.status == "FAIL"
+
+    def test_an_additive_payload_makes_no_claim_on_pkg(self, tmp_path: Path) -> None:
+        """A fragment does not own src/, so PKG has nothing there to agree with.
+
+        The engine only enforces PKG for an authoritative payload; enforcing it
+        here too would fail a birth the additive contract explicitly allows.
+        """
+        source = make_source(tmp_path / "src", {"src/ideaos/extra.py": "X = 1\n"})
+        document = compile_from(source)
+        report = verifier.verify_payload(document, source, template_src=REPO, pkg="something_else")
+        assert report.result == "PASS", report.render()
+        package = next(c for c in report.checks if c.key == "payload.package")
+        assert package.status == "SKIP"
 
     def test_the_report_names_every_failure(self, source: Path, payload: dict) -> None:
         (source / "src" / "ideaos" / "core.py").write_text("VALUE = 9\n", encoding="utf-8")

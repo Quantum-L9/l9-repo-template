@@ -342,11 +342,18 @@ def _check_str_list(errors: list[str], doc: dict, key: str, where: str) -> None:
         errors.append(f"{where}.{key} contains duplicates")
 
 
-def _check_object(errors: list[str], doc: dict, key: str, allowed: tuple[str, ...]) -> dict:
+def _check_object(errors: list[str], doc: dict, key: str, allowed: tuple[str, ...]) -> dict | None:
+    """The object, or None when it is not one.
+
+    None rather than `{}`, because an EMPTY object is a different answer from a
+    missing one: `{"packages": {}}` is a real document a caller can hand this,
+    and returning a falsy dict for it made the caller skip the required-key check
+    that would have rejected it.
+    """
     value = doc.get(key)
     if not isinstance(value, dict):
         errors.append(f"{key} is not an object")
-        return {}
+        return None
     extra = sorted(set(value) - set(allowed))
     if extra:
         errors.append(f"{key} carries unknown key(s): {', '.join(extra)}")
@@ -414,7 +421,7 @@ def validate_payload_document(document: object) -> list[str]:
         errors.append(f"payload carries unknown key(s): {', '.join(extra)}")
 
     source = _check_object(errors, document, "source", ("repository", "revision", "tree_sha"))
-    if source:
+    if source is not None:
         _check_str(errors, source, "repository", SLUG_RE, "source")
         _check_str(errors, source, "revision", OID_RE, "source")
         _check_str(errors, source, "tree_sha", OID_RE, "source")
@@ -423,11 +430,11 @@ def validate_payload_document(document: object) -> list[str]:
         errors.append(f"mode is not one of {MODES}")
 
     shape = _check_object(errors, document, "repository_shape", ("matched",))
-    if shape:
+    if shape is not None:
         _check_str_list(errors, shape, "matched", "repository_shape")
 
     packages = _check_object(errors, document, "packages", ("python",))
-    if packages:
+    if packages is not None:
         _check_str_list(errors, packages, "python", "packages")
 
     _check_files(errors, document)

@@ -224,15 +224,28 @@ def _check_mode(document: dict, source: Path, template_src: Path, report: Report
 
 
 def _check_package(document: dict, pkg: str | None, report: Report) -> None:
-    """`PKG` must name a package the payload actually ships.
+    """`PKG` must name a package an AUTHORITATIVE payload actually ships.
 
     Checked here rather than deep in assembly: under an authoritative payload the
     renamed template package is replaced by the payload's, so a PKG naming
     neither installs a package nothing points at.
+
+    Scoped to that mode on purpose. A fragment does not own `src/`, so a fragment
+    that happens to add a file under some package directory has no claim on what
+    PKG names — enforcing it there would fail a birth the additive contract
+    explicitly allows.
     """
     packages = [str(name) for name in document["packages"]["python"]]
     if pkg is None:
         report.record("payload.package", "package identity", "SKIP", "no PKG given")
+        return
+    if str(document["mode"]) != "authoritative":
+        report.record(
+            "payload.package",
+            "package identity",
+            "SKIP",
+            "additive payload does not own src/",
+        )
         return
     if not packages:
         report.record(
@@ -264,6 +277,13 @@ def verify_payload(
             f"{declared_source.get('repository')}@{str(declared_source.get('revision'))[:12]}"
         )
 
+    errors = compiler.validate_payload_document(document)
+    if errors:
+        # Not "the caller already validated it". A check that did not run must
+        # not report PASS, and verify_payload is reachable with a document that
+        # never passed through load_payload.
+        report.record("payload.schema", "payload contract", "FAIL", "; ".join(errors)[:200])
+        return report
     report.record("payload.schema", "payload contract", "PASS", compiler.SCHEMA)
     try:
         compiler.assert_immutable_snapshot(source)
