@@ -216,14 +216,16 @@ def test_renamed_orchestrator_still_rejects_the_sentinel(tmp_path: Path) -> None
     rejecting the new package name and accepting `l9_example_pkg` — exactly
     backwards.
     """
-    # The engine loads its siblings from beside itself — provenance, the ownership
-    # contract reader, and the payload compiler/verifier — so the fixture tree
-    # needs the whole engine for the renamed copy to be loadable at all.
+    # The engine loads its siblings from beside itself — provenance, canonical
+    # CI, the ownership contract reader, and the payload compiler/verifier — so
+    # the fixture tree needs the whole engine for the renamed copy to be loadable
+    # at all.
     proc = _rename_tree_containing(
         tmp_path,
         (
             "scripts/birth-runner/new_repo.py",
             "scripts/birth-runner/birth_provenance.py",
+            "scripts/birth-runner/canonical_ci.py",
             "scripts/birth-runner/payload_ownership.py",
             "scripts/birth-runner/compile_birth_payload.py",
             "scripts/birth-runner/verify_birth_payload.py",

@@ -12,9 +12,10 @@ machine, and every one of them either passes or stops the birth.
     [4] APPLY ORG BIRTH PROFILE current Quantum-L9/.github, class capabilities
     [5] STAMP BIRTH PROVENANCE the immutable record, written AFTER the payload
     [6] VALIDATE BEFORE CREATION  the full product gate, on the newborn
-    [7] CREATE GITHUB REPOSITORY  commit with provenance trailers, create, push
+    [7] PUBLISH ROOT COMMIT       provenance trailers, create, push -> PROVISIONAL
     [8] REMOTE ORG BOOTSTRAP      labels, settings, applicable seeding
-    [9] REMOTE ATTESTATION        read the remote back and prove it
+    [9] CANONICAL CI              prove l9-ci-core's ruleset enrols this repo
+   [10] REMOTE ATTESTATION        read the remote back and prove it
 
 `uv lock` is stage 3, not something a product author is asked to remember. A
 birth invariant belongs to the birth engine.
@@ -92,8 +93,8 @@ def _load_sibling(name: str):
 
     Not a bare `import`: that resolves for free when the script is executed
     directly (sys.path[0] is the script's directory) and fails when a fixture,
-    a renamed tree, or a test harness loads this file by path instead. The
-    provenance module is not optional, so it is located relative to THIS file
+    a renamed tree, or a test harness loads this file by path instead. These
+    sibling modules are not optional, so they are located relative to THIS file
     rather than to whatever the interpreter's search path happens to be.
     """
     if name in sys.modules:
@@ -101,7 +102,7 @@ def _load_sibling(name: str):
     path = Path(__file__).resolve().parent / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load the birth provenance module at {path}")
+        raise RuntimeError(f"cannot load the birth module {name} at {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -116,6 +117,10 @@ prov = _load_sibling("birth_provenance")
 # payload it consumes cannot disagree about what `authoritative` means.
 ownership_contract = _load_sibling("payload_ownership")
 payload_verifier = _load_sibling("verify_birth_payload")
+
+# Same reason, same mechanism: the CI verdict logic is loaded by path so a
+# renamed tree or a by-path harness still gets a working engine.
+canonical_ci = _load_sibling("canonical_ci")
 
 TEMPLATE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -156,6 +161,10 @@ def default_work_dir() -> Path:
 
 
 BIRTH_PROFILE_CLASS = "non_constellation_python"
+# Operator breakglass. A reason is mandatory: a bare "1" records nothing a
+# later reader can act on, and this is the switch that turns "no CI" from a
+# stop into a downgrade.
+CI_UNVERIFIED_ENV = "L9_BIRTH_CI_UNVERIFIED"
 CANONICAL_LICENSE = "LICENSE"
 
 # Machine state never carried from one tree into another — `.git`, caches, build
@@ -349,6 +358,8 @@ class BirthReceipt:
     birth_receipt: dict = field(default_factory=dict)
     materialized: list[str] = field(default_factory=list)
     stages: list[StageResult] = field(default_factory=list)
+    state: str = canonical_ci.LOCAL
+    ci: dict = field(default_factory=dict)
 
     def record(self, key: str, label: str, status: str, detail: str = "") -> StageResult:
         result = StageResult(key, label, status, detail)
@@ -386,8 +397,13 @@ class BirthReceipt:
             "manifest_sha256": self.manifest_sha256,
             "workdir": self.workdir,
             "head_sha": self.head_sha,
+            # A repository that exists is not a repository that is born. This is
+            # the field that says which one happened.
+            "state": self.state,
+            "ci": dict(self.ci),
             "materialized": list(self.materialized),
             "result": "PASS" if not self.failed else "FAIL",
+            "born": self.state == canonical_ci.BORN,
             "stages": [
                 {"key": s.key, "label": s.label, "status": s.status, "detail": s.detail}
                 for s in self.stages
@@ -403,6 +419,8 @@ _GROUPS = (
     ("stamp", "Provenance"),
     ("validate", "Validation"),
     ("github", "GitHub"),
+    ("ci", "Canonical CI"),
+    ("attest", "Attestation"),
 )
 
 
@@ -432,6 +450,19 @@ def render_receipt(receipt: BirthReceipt) -> str:
         for stage in group:
             lines.append(f"  {stage.label:<22} {stage.status}")
     lines.append(f"BIRTH: {'PASS' if not receipt.failed else 'FAIL'}")
+    # Publication and birth are different events, so the receipt names both.
+    # `BIRTH: PASS` is the gate ladder; STATE is the lifecycle.
+    lines.append(f"STATE: {receipt.state}")
+    if receipt.state == canonical_ci.BORN:
+        lines.append(f"BORN {receipt.org}/{receipt.repository}")
+        lines.append(f"  root: {receipt.head_sha}")
+    elif receipt.state != canonical_ci.LOCAL:
+        lines.append(
+            f"NOT BORN — repository is {receipt.state}: {receipt.org}/{receipt.repository}"
+        )
+        lines.append(f"  root: {receipt.head_sha}")
+        if receipt.ci.get("birth_run_url"):
+            lines.append(f"  ci_run: {receipt.ci['birth_run_url']}")
     lines.append("")
     return "\n".join(lines)
 
@@ -1386,6 +1417,50 @@ def stage_validate(cfg: BirthConfig, receipt: BirthReceipt) -> None:
             "validation failed before creation — nothing was created:\n\n" + "\n\n".join(failures)
         )
 
+    _validate_ci_binding(cfg, receipt)
+
+
+def _validate_ci_binding(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """BIRTH-CI-004, proved locally before anything is created.
+
+    Absence of a CI workflow in the newborn is CORRECT, not a defect.
+    `l9-ci-core/.l9/org-runtime-contract.yaml` sets `consumer_copy_required:
+    false` and `consumer_core_pin_allowed: false`, and prohibits "copied L9
+    workflows in consumer repositories as an enforcement mechanism". Canonical CI
+    reaches the repository through an organisation required-workflow ruleset, so
+    a consumer that ships no workflow is the intended shape. Enrolment is proved
+    remotely after publication, by `stage_verify_ci_enrollment`.
+
+    What this stage catches is the opposite failure: a payload that ships a
+    binding to something that is NOT the canonical authority. That is worse than
+    none, because it looks like enrolment and evaluates something else.
+
+    Structural, not textual: `canonical_ci` parses each workflow and reads
+    `jobs.*.uses`, so a `uses:` in a comment is not enrolment. It runs on the
+    ASSEMBLED tree — after the payload overlay and after ownership
+    reconciliation — so "the payload omitted it" and "the payload replaced it"
+    are the same observable fact.
+    """
+    try:
+        bindings = canonical_ci.assert_binding_authorized(cfg.dest)
+    except canonical_ci.CanonicalCIError as exc:
+        receipt.record("validate.ci_binding", "ci binding", "FAIL", str(exc))
+        raise BirthError(str(exc)) from exc
+
+    if bindings:
+        # Legal but unusual: a repository may call the canonical workflow itself.
+        # Named rather than silently blessed — the ruleset is the sanctioned path.
+        detail = "; ".join(b.describe() for b in bindings)
+        receipt.record("validate.ci_binding", "ci binding", "PASS", detail)
+        return
+
+    receipt.record(
+        "validate.ci_binding",
+        "ci binding",
+        "PASS",
+        "no consumer CI workflow (correct — enrolment is an organisation ruleset)",
+    )
+
 
 def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     """Create the remote and push the finalized initial repository."""
@@ -1529,6 +1604,89 @@ def stage_remote_bootstrap(cfg: BirthConfig, receipt: BirthReceipt, profile: dic
             continue
         state, detail = _await_workflow(workflow, since, cfg.bootstrap_timeout)
         receipt.record(key, label, "PASS" if state == "PASS" else "FAIL", detail)
+
+
+def _repo_rulesets(slug: str) -> object:
+    """The rulesets that apply to a repository, org-inherited included.
+
+    None means "could not determine", which is NOT "not enrolled". A transient
+    API failure must never read as a clean absence.
+    """
+    proc = run(["gh", "api", f"repos/{slug}/rulesets?includes_parents=true"], check=False)
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError:
+        return None
+
+
+def stage_verify_ci_enrollment(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """BIRTH-CI-001 and BIRTH-CI-005: canonical CI reaches this repository.
+
+    Enrolment, not root-commit evaluation. GitHub required workflows run on
+    `pull_request`, `pull_request_target` and `merge_group` — never on `push` —
+    and a root commit has no base branch to be a pull request against. Waiting
+    here for a run against the root SHA would wait forever and QUARANTINE every
+    real birth, which is exactly what the first shape of this stage did.
+
+    What birth CAN prove is that the organisation ruleset requires the canonical
+    workflow for this repository, so the first pull request will be evaluated.
+    That is the honest claim, and it is proved remotely (BIRTH-CI-005): the local
+    workspace is never consulted.
+
+    The repository ends PROVISIONAL either way. BORN is earned later, by a real
+    pull request that canonical CI passes.
+    """
+    rulesets = _repo_rulesets(cfg.slug)
+    if rulesets is None:
+        receipt.record(
+            "ci.enrollment",
+            "ci enrollment",
+            "FAIL",
+            "repository rulesets unreadable — enrolment undeterminable",
+        )
+        raise BirthError(
+            f"cannot read the rulesets that apply to {cfg.slug}, so canonical CI "
+            "enrolment is undeterminable. Undeterminable is not enrolled."
+        )
+
+    enrolled = canonical_ci.enrollment_from_rulesets(rulesets)
+    receipt.ci = canonical_ci.ci_provenance(
+        canonical_ci.CIVerdict(
+            state=canonical_ci.PROVISIONAL,
+            detail=enrolled.describe() if enrolled else "not enrolled",
+            revision=receipt.head_sha,
+        )
+    )
+    if enrolled is not None:
+        receipt.record("ci.enrollment", "ci enrollment", "PASS", enrolled.describe())
+        return
+
+    # Not enrolled. The organisation ruleset that is supposed to require
+    # `org-ci.yml` has never been applied — see the activation kit in
+    # Cursor-Governance, WIP/org-ci-ruleset-activation. Until it is, no pull
+    # request in this repository will be evaluated by canonical CI either.
+    reason = (os.environ.get(CI_UNVERIFIED_ENV) or "").strip()
+    if not reason:
+        receipt.record(
+            "ci.enrollment",
+            "ci enrollment",
+            "FAIL",
+            "no organisation ruleset requires canonical CI",
+        )
+        receipt.state = canonical_ci.QUARANTINED
+        raise BirthError(
+            f"{cfg.slug} is published but NOT enrolled with canonical CI.\n"
+            f"  authority: {canonical_ci.CI_AUTHORITY_REPO}/"
+            f"{canonical_ci.CI_AUTHORITY_WORKFLOW}\n"
+            "  No organisation-sourced ruleset requires that workflow here, so no "
+            "pull request in this repository will ever be evaluated.\n"
+            "  Apply the ruleset (Cursor-Governance WIP/org-ci-ruleset-activation), "
+            f"or re-run with {CI_UNVERIFIED_ENV}='<why>' to accept an unenrolled "
+            "repository. The repository is preserved either way."
+        )
+    receipt.record("ci.enrollment", "ci enrollment", "WARN", f"unverified by operator: {reason}")
 
 
 def _remote_has(slug: str, path: str) -> bool:
@@ -1703,11 +1861,28 @@ def stage_attest(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None
     _attest_content(cfg, receipt, profile)
     _attest_org_state(cfg, receipt, profile)
     _attest_remote_apply(cfg, receipt, profile)
+    _attest_ci(cfg, receipt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
+def _attest_ci(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """BIRTH-CI-005: the enrolment claim is re-read from GitHub, not from memory.
+
+    `stage_verify_ci_enrollment` already read the rulesets. This asserts the same
+    fact again at attestation time, so a receipt can never carry an enrolment the
+    repository's own ruleset list does not show.
+    """
+    rulesets = _repo_rulesets(cfg.slug)
+    enrolled = canonical_ci.enrollment_from_rulesets(rulesets) if rulesets is not None else None
+    if enrolled is not None:
+        receipt.record("attest.ci", "ci enrollment attested", "PASS", enrolled.describe())
+    elif (os.environ.get(CI_UNVERIFIED_ENV) or "").strip():
+        receipt.record(
+            "attest.ci", "ci enrollment attested", "WARN", "unenrolled, accepted by operator"
+        )
+    else:
+        receipt.record(
+            "attest.ci", "ci enrollment attested", "FAIL", "no organisation ruleset on the remote"
+        )
 
 
 def build_config(args: argparse.Namespace) -> BirthConfig:
@@ -1823,11 +1998,23 @@ def main(argv: list[str] | None = None) -> int:
         stage_validate(cfg, receipt)
         if cfg.remote:
             stage_create(cfg, receipt)
+            # Published, not born. Everything from here decides which.
+            receipt.state = canonical_ci.PROVISIONAL
             stage_remote_bootstrap(cfg, receipt, profile)
+            stage_verify_ci_enrollment(cfg, receipt)
             stage_attest(cfg, receipt, profile)
+            # Birth ends PROVISIONAL. Not caution — arithmetic: required
+            # workflows never run on push, and a root commit has no base branch
+            # to be a pull request against, so nothing can have evaluated this
+            # commit yet. BORN is earned by the first pull request that passes.
+            receipt.state = (
+                canonical_ci.PROVISIONAL if not receipt.failed else canonical_ci.QUARANTINED
+            )
+            receipt.ci["state"] = receipt.state
         else:
             receipt.record("github.create", "repository created", "SKIP", "--no-remote")
-    except (BirthError, prov.ProvenanceError) as exc:
+            receipt.state = canonical_ci.LOCAL
+    except (BirthError, prov.ProvenanceError, canonical_ci.CanonicalCIError) as exc:
         receipt.record("birth.error", "birth", "FAIL", str(exc).splitlines()[0][:120])
         print(render_receipt(receipt))
         print(f"BIRTH FAIL: {exc}", file=sys.stderr)

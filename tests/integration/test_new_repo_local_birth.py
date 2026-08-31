@@ -440,16 +440,21 @@ PAYLOAD_FILES: dict[str, str] = {
 }
 
 
-def _write_repository_payload(root: Path) -> Path:
+def _write_repository_payload(root: Path, extra: dict[str, str] | None = None) -> Path:
     """Materialize the payload as an immutable snapshot of a source repository.
 
     A repository-shaped payload is authoritative over its product tree, and an
     authoritative birth is compiled from a committed, clean git snapshot — never
     inferred from a directory. So the fixture is a real source repository:
     files, one commit, an origin to be named by.
+
+    `extra` belongs IN that snapshot rather than beside it. A file written after
+    the commit is uncommitted dirt, and a payload compiled from a dirty tree is
+    refused for being dirty — which would say nothing about the file a test put
+    there to be judged on its own merits.
     """
     written = []
-    for rel, body in PAYLOAD_FILES.items():
+    for rel, body in {**PAYLOAD_FILES, **(extra or {})}.items():
         relative = rel.replace("PKG", PAYLOAD_PKG)
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -864,3 +869,103 @@ class TestAnAuthoritativePayloadInheritsNoProductClaims:
                 check=False,
             )
             assert proc.returncode == 0, f"{check}: {proc.stderr or proc.stdout}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical CI is part of birth, not an afterthought
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCanonicalCIIsRequired:
+    """A repository that no CI evaluates cannot be born.
+
+    `l9-observability-core` — the first real offspring — was created, pushed,
+    attested, and reported successful with ZERO workflows and no canonical CI
+    run of any kind. These tests make that outcome unreachable, WITHOUT
+    demanding a consumer workflow file: `l9-ci-core` prohibits that shape.
+    """
+
+    def test_a_newborn_ships_no_ci_workflow_and_that_is_correct(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """`consumer_copy_required: false` — absence is the intended shape.
+
+        Canonical CI reaches a repository through an organisation
+        required-workflow ruleset. A consumer workflow calling Core at a
+        consumer-chosen pin is the prohibited shape, not the goal.
+        """
+        proc, dest = born
+        assert not (dest / ".github" / "workflows").exists() or not list(
+            (dest / ".github" / "workflows").glob("*.yml")
+        )
+        receipt = json.loads(
+            (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+        )
+        stage = {s["key"]: s for s in receipt["stages"]}["validate.ci_binding"]
+        assert stage["status"] == "PASS"
+        assert "enrolment is an organisation ruleset" in stage["detail"]
+        assert "BIRTH: PASS" in proc.stdout
+
+    def test_a_local_birth_is_LOCAL_and_never_claims_BORN(
+        self, born: tuple[subprocess.CompletedProcess[str], Path]
+    ) -> None:
+        """`--no-remote` publishes nothing, so it cannot be born."""
+        proc, dest = born
+        assert "STATE: LOCAL" in proc.stdout
+        assert "BORN " not in proc.stdout
+        receipt = json.loads(
+            (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+        )
+        assert receipt["state"] == "LOCAL"
+        assert receipt["born"] is False
+
+    def test_birth_never_reports_BORN_at_creation(self) -> None:
+        """The arithmetic, asserted at its source.
+
+        GitHub required workflows run on pull_request / pull_request_target /
+        merge_group, never on push; and a root commit has no base branch to be a
+        pull request against. So nothing can have evaluated the root commit by
+        the time birth ends, and no code path may set BORN there.
+        """
+        source = (RUNNER).read_text(encoding="utf-8")
+        remote_tail = source[source.index("if cfg.remote:") :]
+        assert "canonical_ci.PROVISIONAL if not receipt.failed" in remote_tail
+        assert "= canonical_ci.BORN" not in remote_tail, (
+            "birth must not assign BORN — it is earned by the first pull request"
+        )
+
+    def test_an_authoritative_payload_cannot_supply_its_own_ci(self, tmp_path: Path) -> None:
+        """BIRTH-CI-004 end to end.
+
+        The payload ships a workflow that looks like enrolment and is not: it
+        calls a Quantum-L9 CI workflow that is not the canonical entrypoint.
+        Assembly must refuse it before anything is created.
+        """
+        payload = _write_repository_payload(
+            tmp_path / "payload",
+            extra={
+                ".github/workflows/l9-ci.yml": (
+                    "name: L9 CI\non: push\njobs:\n"
+                    "  l9-ci:\n"
+                    "    uses: Quantum-L9/l9-ci-core/.github/workflows/self-ci.yml@"
+                    + "d" * 40
+                    + "\n"
+                )
+            },
+        )
+        # Compiled and authorized, so the workflow reaches assembly as bytes the
+        # payload genuinely ships. The refusal has to come from the CI authority
+        # check, not from the payload contract declining to authorize it.
+        contract = _compile_payload(payload, tmp_path / "payload.json")
+        proc = _birth(
+            tmp_path,
+            "--payload",
+            str(payload),
+            "--payload-contract",
+            str(contract),
+            repo=PAYLOAD_REPO,
+            pkg=PAYLOAD_PKG,
+        )
+        assert proc.returncode == 1
+        assert "not the canonical authority" in proc.stderr
+        assert "repository created" not in proc.stdout
