@@ -57,6 +57,7 @@ REQUIRED = (
     ".l9/ownership.yaml",
     ".l9/org-birth-profile.yaml",
     ".l9/sdk-compatibility.yaml",
+    ".l9/ci.json",
     ".l9-template-version",
     ".python-version",
     ".gitattributes",
