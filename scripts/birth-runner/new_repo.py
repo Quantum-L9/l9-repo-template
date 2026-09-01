@@ -1529,6 +1529,11 @@ def stage_remote_bootstrap(cfg: BirthConfig, receipt: BirthReceipt, profile: dic
 def _repo_rulesets(slug: str) -> object:
     """The rulesets that apply to a repository, org-inherited included.
 
+    SUMMARIES. This response says which rulesets apply and whether they are
+    enforced; it does not carry their `rules`. Deciding enrolment from it is the
+    mistake that makes a correctly enrolled repository read as unenrolled — see
+    `_repo_ruleset_detail`, which is where the rules actually come from.
+
     None means "could not determine", which is NOT "not enrolled". A transient
     API failure must never read as a clean absence.
     """
@@ -1539,6 +1544,36 @@ def _repo_rulesets(slug: str) -> object:
         return json.loads(proc.stdout or "[]")
     except json.JSONDecodeError:
         return None
+
+
+def _repo_ruleset_detail(slug: str, ruleset_id: int) -> object | None:
+    """One ruleset's FULL representation, org-inherited included.
+
+    The listing `_repo_rulesets` reads is a summary: it names each ruleset but
+    does not carry its `rules`. This is the only call that answers what a
+    ruleset actually requires.
+
+    `includes_parents=true` is what makes an organisation-owned ruleset
+    readable through the repository's own endpoint. None means "could not
+    determine" — a 404 for a ruleset that was listed a moment ago is a
+    disappearance, not an absence, and neither is "not enrolled".
+    """
+    proc = run(
+        ["gh", "api", f"repos/{slug}/rulesets/{ruleset_id}?includes_parents=true"], check=False
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout or "null")
+    except json.JSONDecodeError:
+        return None
+
+
+def _read_enrollment(slug: str, rulesets: object) -> object | None:
+    """Hydrate the ruleset listing and read enrolment off the full objects."""
+    return canonical_ci.enrollment_from_rulesets(
+        rulesets, fetch_detail=lambda ruleset_id: _repo_ruleset_detail(slug, ruleset_id)
+    )
 
 
 def stage_verify_ci_enrollment(cfg: BirthConfig, receipt: BirthReceipt) -> None:
@@ -1571,7 +1606,21 @@ def stage_verify_ci_enrollment(cfg: BirthConfig, receipt: BirthReceipt) -> None:
             "enrolment is undeterminable. Undeterminable is not enrolled."
         )
 
-    enrolled = canonical_ci.enrollment_from_rulesets(rulesets)
+    try:
+        enrolled = _read_enrollment(cfg.slug, rulesets)
+    except canonical_ci.CanonicalCIError as exc:
+        # Undeterminable, not unenrolled. The breakglass below authorises
+        # publishing a repository KNOWN to be unenrolled; it cannot authorise
+        # publishing one whose enrolment was never established, so this raises
+        # before the reason is ever consulted.
+        receipt.record(
+            "ci.enrollment",
+            "ci enrollment",
+            "FAIL",
+            "organisation ruleset detail unreadable — enrolment undeterminable",
+        )
+        raise BirthError(f"canonical CI enrolment for {cfg.slug} is undeterminable: {exc}") from exc
+
     receipt.ci = canonical_ci.ci_provenance(
         canonical_ci.CIVerdict(
             state=canonical_ci.PROVISIONAL,
@@ -1792,7 +1841,13 @@ def _attest_ci(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     repository's own ruleset list does not show.
     """
     rulesets = _repo_rulesets(cfg.slug)
-    enrolled = canonical_ci.enrollment_from_rulesets(rulesets) if rulesets is not None else None
+    try:
+        enrolled = _read_enrollment(cfg.slug, rulesets) if rulesets is not None else None
+    except canonical_ci.CanonicalCIError as exc:
+        # Not excused by the breakglass: the operator accepted an UNENROLLED
+        # repository, which is not the same claim as one nothing could read.
+        receipt.record("attest.ci", "ci enrollment attested", "FAIL", str(exc))
+        return
     if enrolled is not None:
         receipt.record("attest.ci", "ci enrollment attested", "PASS", enrolled.describe())
     elif (os.environ.get(CI_UNVERIFIED_ENV) or "").strip():

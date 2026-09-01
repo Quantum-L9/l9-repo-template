@@ -258,33 +258,107 @@ class TestAuthorityIsNotGuessed:
 # Enrolment — the claim birth can actually prove
 # ─────────────────────────────────────────────────────────────────────────────
 
+CORE_ID = cci.CI_AUTHORITY_REPOSITORY_ID
+CANON_REF = cci.CI_AUTHORITY_REF
 
-def _org_ruleset(**over: object) -> dict:
+
+def _summary(**over: object) -> dict:
+    """A ruleset exactly as `repos/{slug}/rulesets?includes_parents=true` returns it.
+
+    Note what is absent: `rules`. The listing names each ruleset and says where
+    it comes from and whether it is enforced, and stops there. A decision made
+    from this object alone can only ever be "not enrolled".
+    """
     base = {
         "id": 42,
         "name": "L9 canonical CI required",
+        "target": "branch",
         "source_type": "Organization",
+        "source": "Quantum-L9",
         "enforcement": "active",
-        "rules": [
-            {
-                "type": "workflows",
-                "parameters": {
-                    "do_not_enforce_on_create": True,
-                    "workflows": [{"path": ORG_CI, "ref": "refs/heads/main"}],
-                },
-            }
-        ],
+        "node_id": "RRS_lACkT3Jn",
+        "_links": {"self": {"href": "/orgs/Quantum-L9/rulesets/42"}},
     }
     base.update(over)
     return base
 
 
+def _detail(**over: object) -> dict:
+    """The same ruleset as `repos/{slug}/rulesets/{id}` returns it: `rules` present."""
+    base = dict(_summary())
+    base["rules"] = [
+        {
+            "type": "workflows",
+            "parameters": {
+                "do_not_enforce_on_create": True,
+                "workflows": [
+                    {"path": ORG_CI, "ref": CANON_REF, "repository_id": CORE_ID, "sha": PIN}
+                ],
+            },
+        }
+    ]
+    base.update(over)
+    return base
+
+
+def _only(detail: dict) -> dict:
+    """The single workflow entry of a detail's `workflows` rule."""
+    return detail["rules"][0]["parameters"]["workflows"][0]
+
+
+class _Fetcher:
+    """A detail endpoint. Records what it was asked for; unknown ids are unreadable."""
+
+    def __init__(self, *details: dict) -> None:
+        self.by_id = {d["id"]: d for d in details}
+        self.calls: list[int] = []
+
+    def __call__(self, ruleset_id: int) -> object | None:
+        self.calls.append(ruleset_id)
+        return self.by_id.get(ruleset_id)
+
+
+def _enrolment(summaries: object, *details: dict) -> object | None:
+    return cci.enrollment_from_rulesets(summaries, fetch_detail=_Fetcher(*details))
+
+
+class TestEnrollmentHydration:
+    """The listing is a summary; the decision needs the full object."""
+
+    def test_the_listing_carries_no_rules_to_decide_on(self) -> None:
+        assert "rules" not in _summary()
+        assert "rules" in _detail()
+
+    def test_the_candidate_is_hydrated_by_id(self) -> None:
+        fetch = _Fetcher(_detail())
+        found = cci.enrollment_from_rulesets([_summary()], fetch_detail=fetch)
+        assert found is not None
+        assert fetch.calls == [42]
+
+    def test_a_ruleset_that_could_never_qualify_is_not_hydrated(self) -> None:
+        """No call is worth making for a ruleset whose summary already disqualifies it.
+
+        It also means its detail being unreadable proves nothing, so it must not
+        be allowed to fail the birth closed.
+        """
+        fetch = _Fetcher()
+        cci.enrollment_from_rulesets(
+            [
+                _summary(id=1, source_type="Repository"),
+                _summary(id=2, enforcement="evaluate"),
+            ],
+            fetch_detail=fetch,
+        )
+        assert fetch.calls == []
+
+
 class TestEnrollment:
     def test_an_organisation_ruleset_requiring_org_ci_is_enrolment(self) -> None:
-        found = cci.enrollment_from_rulesets([_org_ruleset()])
+        found = _enrolment([_summary()], _detail())
         assert found is not None
         assert found.is_canonical
         assert "org-ruleset:" in found.workflow_file
+        assert found.ref == CANON_REF
 
     def test_a_repository_sourced_ruleset_is_not_enrolment(self) -> None:
         """Only the organisation can enrol a repository.
@@ -292,12 +366,57 @@ class TestEnrollment:
         A repo-sourced ruleset is the repository enrolling itself — the
         consumer-owned enforcement `org-runtime-contract.yaml` prohibits.
         """
-        assert cci.enrollment_from_rulesets([_org_ruleset(source_type="Repository")]) is None
+        assert _enrolment([_summary(source_type="Repository")]) is None
+
+    def test_a_repository_sourced_detail_is_not_enrolment(self) -> None:
+        """The full object is the authority, not the summary that selected it."""
+        assert _enrolment([_summary()], _detail(source_type="Repository")) is None
+
+    def test_an_evaluate_ruleset_is_not_enrolment(self) -> None:
+        """`evaluate` reports and permits. It makes nothing required."""
+        assert _enrolment([_summary(enforcement="evaluate")]) is None
+
+    def test_an_evaluate_detail_is_not_enrolment(self) -> None:
+        assert _enrolment([_summary()], _detail(enforcement="evaluate")) is None
+
+    def test_the_canonical_path_in_another_repository_is_not_enrolment(self) -> None:
+        """Ownership is the repository id, never the path.
+
+        Any repository in the organisation may keep a file at
+        `.github/workflows/org-ci.yml`. A rule pointing at the wrong one would
+        enforce someone else's CI under the canonical name.
+        """
+        wrong = _detail()
+        _only(wrong)["repository_id"] = CORE_ID + 1
+        assert _enrolment([_summary()], wrong) is None
+
+    @pytest.mark.parametrize("bad", [None, "1285564308", True])
+    def test_a_missing_or_untyped_repository_id_is_not_enrolment(self, bad: object) -> None:
+        wrong = _detail()
+        _only(wrong)["repository_id"] = bad
+        assert _enrolment([_summary()], wrong) is None
 
     def test_a_ruleset_requiring_a_different_workflow_is_not_enrolment(self) -> None:
-        other = _org_ruleset()
-        other["rules"][0]["parameters"]["workflows"][0]["path"] = ".github/workflows/self-ci.yml"
-        assert cci.enrollment_from_rulesets([other]) is None
+        wrong = _detail()
+        _only(wrong)["path"] = ".github/workflows/self-ci.yml"
+        assert _enrolment([_summary()], wrong) is None
+
+    def test_a_ruleset_pinning_a_different_ref_is_not_enrolment(self) -> None:
+        """A different ref resolves a different workflow, whatever its path."""
+        wrong = _detail()
+        _only(wrong)["ref"] = "refs/heads/staging"
+        assert _enrolment([_summary()], wrong) is None
+
+    def test_enforcing_on_create_is_not_enrolment(self) -> None:
+        """A required workflow that fires on create blocks the newborn's own birth."""
+        wrong = _detail()
+        wrong["rules"][0]["parameters"]["do_not_enforce_on_create"] = False
+        assert _enrolment([_summary()], wrong) is None
+
+    def test_an_absent_do_not_enforce_on_create_is_not_enrolment(self) -> None:
+        wrong = _detail()
+        del wrong["rules"][0]["parameters"]["do_not_enforce_on_create"]
+        assert _enrolment([_summary()], wrong) is None
 
     def test_a_non_workflows_rule_is_not_enrolment(self) -> None:
         """A required STATUS CHECK is not a required WORKFLOW.
@@ -305,19 +424,45 @@ class TestEnrollment:
         A status check blocks a merge; it does not make anything run. A repo
         with no workflow would block forever on a check that never appears.
         """
-        checks = _org_ruleset()
+        checks = _detail()
         checks["rules"] = [
             {"type": "required_status_checks", "parameters": {"required_status_checks": []}}
         ]
-        assert cci.enrollment_from_rulesets([checks]) is None
+        assert _enrolment([_summary()], checks) is None
 
     @pytest.mark.parametrize("bad", [None, "not-a-list", 42, {}, []])
     def test_unreadable_input_is_never_enrolment(self, bad: object) -> None:
-        assert cci.enrollment_from_rulesets(bad) is None
+        assert _enrolment(bad) is None
 
     def test_enrolment_is_found_among_unrelated_rulesets(self) -> None:
         noise = [
             {"source_type": "Repository", "name": "Code Quality Copilot review", "rules": []},
-            _org_ruleset(),
+            _summary(id=7, name="Org tag protection"),
+            _summary(),
         ]
-        assert cci.enrollment_from_rulesets(noise) is not None
+        assert _enrolment(noise, _detail(id=7, rules=[]), _detail()) is not None
+
+
+class TestUndeterminableFailsClosed:
+    """A ruleset that applies here and cannot be read is not an absence."""
+
+    def test_an_unreadable_detail_raises_rather_than_reading_as_unenrolled(self) -> None:
+        with pytest.raises(cci.CanonicalCIError, match="undeterminable"):
+            _enrolment([_summary()])
+
+    def test_a_ruleset_that_disappears_between_list_and_fetch_raises(self) -> None:
+        """Listed a moment ago, 404 now. That is a disappearance, not an absence."""
+        with pytest.raises(cci.CanonicalCIError, match="42"):
+            _enrolment([_summary(), _summary(id=99)], _detail(id=99))
+
+    def test_an_unreadable_detail_is_not_masked_by_a_later_enrolment(self) -> None:
+        """Fail closed even when a readable ruleset further down would have passed.
+
+        The unreadable one might have been a stricter rule; nothing here knows.
+        """
+        with pytest.raises(cci.CanonicalCIError):
+            _enrolment([_summary(id=7, name="unreadable"), _summary()], _detail())
+
+    def test_a_summary_without_a_usable_id_raises(self) -> None:
+        with pytest.raises(cci.CanonicalCIError, match="undeterminable"):
+            _enrolment([_summary(id=None)])

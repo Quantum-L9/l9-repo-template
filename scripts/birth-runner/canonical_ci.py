@@ -45,6 +45,7 @@ for this one.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,16 @@ from typing import Any
 # else is not canonical CI, whatever it is called.
 CI_AUTHORITY_REPO = "Quantum-L9/l9-ci-core"
 CI_AUTHORITY_WORKFLOW = ".github/workflows/org-ci.yml"
+
+# A required-workflow rule names the workflow's home by numeric repository id,
+# not by name. The id is what makes the rule point at `l9-ci-core` rather than at
+# any other repository that happens to keep a file at the same path — so it is
+# the field enrolment is decided on. `Quantum-L9/l9-ci-core`, id:
+CI_AUTHORITY_REPOSITORY_ID = 1285564308
+
+# The ref the organisation ruleset must pin. A rule that resolves the canonical
+# workflow from some other branch or tag is a different workflow.
+CI_AUTHORITY_REF = "refs/heads/main"
 
 WORKFLOW_DIR = ".github/workflows"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -180,20 +191,102 @@ def canonical_bindings(root: Path) -> list[Binding]:
     return [b for b in discover_bindings(root) if b.is_canonical]
 
 
-def enrollment_from_rulesets(rulesets: Any) -> Binding | None:
+#: Reads one ruleset's full representation by id, or returns None when it
+#: cannot be read. Injected so this module stays pure and the GitHub call
+#: stays in the orchestrator.
+DetailFetcher = Callable[[int], Any]
+
+
+def workflow_is_canonical(workflow: Any) -> bool:
+    """Does one entry of a `workflows` rule name the canonical CI entrypoint?
+
+    All three fields are load-bearing, and `repository_id` most of all. The path
+    `.github/workflows/org-ci.yml` is not owned by anything — any repository in
+    the organisation may hold a file there, and a rule pointing at that file in
+    the wrong repository would enforce someone else's CI under the canonical
+    name. So ownership is read from the numeric id GitHub records, never
+    synthesised from the path.
+    """
+    if not isinstance(workflow, dict):
+        return False
+    repository_id = workflow.get("repository_id")
+    if isinstance(repository_id, bool) or not isinstance(repository_id, int):
+        return False
+    if repository_id != CI_AUTHORITY_REPOSITORY_ID:
+        return False
+    if str(workflow.get("path") or "") != CI_AUTHORITY_WORKFLOW:
+        return False
+    return str(workflow.get("ref") or "") == CI_AUTHORITY_REF
+
+
+def enrollment_in_ruleset(detail: Any) -> Binding | None:
+    """Enrolment as read from ONE hydrated ruleset, or None.
+
+    `detail` is a full ruleset representation — the shape returned by
+    `repos/{slug}/rulesets/{id}`, which is the only shape that carries `rules`.
+    Every condition is re-read here rather than trusted from the listing that
+    selected this ruleset, because the listing is a summary and the full
+    representation is the authority.
+
+    Enrolment requires all of:
+
+      * `source_type` Organization — a repository-sourced ruleset is the
+        repository enrolling itself, which is the consumer-owned enforcement
+        `l9-ci-core/.l9/org-runtime-contract.yaml` prohibits;
+      * `enforcement` active — an `evaluate` ruleset reports and permits, so it
+        makes nothing required;
+      * a `workflows` rule whose `do_not_enforce_on_create` is true, without
+        which the required workflow blocks the newborn's own creation;
+      * an entry in that rule naming the canonical authority by repository id,
+        path, and ref.
+    """
+    if not isinstance(detail, dict):
+        return None
+    if str(detail.get("source_type") or "") != "Organization":
+        return None
+    if str(detail.get("enforcement") or "") != "active":
+        return None
+    for rule in detail.get("rules") or []:
+        if not isinstance(rule, dict) or rule.get("type") != "workflows":
+            continue
+        params = rule.get("parameters")
+        if not isinstance(params, dict):
+            continue
+        if params.get("do_not_enforce_on_create") is not True:
+            continue
+        for workflow in params.get("workflows") or []:
+            if not workflow_is_canonical(workflow):
+                continue
+            return Binding(
+                workflow_file=f"org-ruleset:{detail.get('name') or detail.get('id')}",
+                job="required-workflow",
+                owner_repo=CI_AUTHORITY_REPO,
+                path=CI_AUTHORITY_WORKFLOW,
+                ref=CI_AUTHORITY_REF,
+            )
+    return None
+
+
+def enrollment_from_rulesets(rulesets: Any, *, fetch_detail: DetailFetcher) -> Binding | None:
     """The organisation ruleset that requires canonical CI for a repository.
 
-    Input is `repos/{slug}/rulesets?includes_parents=true`. A repository is
-    enrolled when an ORGANISATION-sourced ruleset carries a `workflows` rule
-    naming the canonical authority.
+    `rulesets` is `repos/{slug}/rulesets?includes_parents=true`. That response is
+    a list of SUMMARIES: it carries `id`, `name`, `source_type` and `enforcement`
+    but not `rules`. Deciding enrolment from it alone can only ever answer "no",
+    which is how a correctly enrolled repository reads as unenrolled. So each
+    candidate is hydrated by id, and the decision is made on the full
+    representation.
 
-    `source_type` matters: a repository-sourced ruleset is the repository
-    enrolling itself, which is exactly the consumer-owned enforcement
-    `l9-ci-core/.l9/org-runtime-contract.yaml` prohibits. Only the organisation
-    can enrol a repository, so only an Organization source counts.
+    Only Organization-sourced, actively enforced summaries are hydrated: a
+    repository-sourced or `evaluate` ruleset could not be enrolment whatever its
+    rules say, so its detail is never needed and its unreadability proves
+    nothing.
 
-    Returned as a `Binding` so enrolment and a workflow-file binding are the same
-    shape to every caller — one thing means "canonical CI reaches this code".
+    Raises `CanonicalCIError` when a candidate's detail cannot be read or has
+    disappeared between the listing and the fetch. A ruleset that applies to this
+    repository and whose rules are unknown leaves enrolment UNDETERMINABLE, and
+    undeterminable is not enrolled — it is not "no" either, so it is never
+    quietly reported as one.
     """
     if not isinstance(rulesets, list):
         return None
@@ -202,24 +295,26 @@ def enrollment_from_rulesets(rulesets: Any) -> Binding | None:
             continue
         if str(entry.get("source_type") or "") != "Organization":
             continue
-        for rule in entry.get("rules") or []:
-            if not isinstance(rule, dict) or rule.get("type") != "workflows":
-                continue
-            params = rule.get("parameters")
-            if not isinstance(params, dict):
-                continue
-            for workflow in params.get("workflows") or []:
-                if not isinstance(workflow, dict):
-                    continue
-                if str(workflow.get("path") or "") != CI_AUTHORITY_WORKFLOW:
-                    continue
-                return Binding(
-                    workflow_file=f"org-ruleset:{entry.get('name') or entry.get('id')}",
-                    job="required-workflow",
-                    owner_repo=CI_AUTHORITY_REPO,
-                    path=CI_AUTHORITY_WORKFLOW,
-                    ref=str(workflow.get("ref") or ""),
-                )
+        if str(entry.get("enforcement") or "") != "active":
+            continue
+        ruleset_id = entry.get("id")
+        name = str(entry.get("name") or "unnamed")
+        if isinstance(ruleset_id, bool) or not isinstance(ruleset_id, int):
+            raise CanonicalCIError(
+                f"organisation ruleset {name!r} applies to this repository but carries no "
+                f"usable id ({ruleset_id!r}), so its rules cannot be read. "
+                "Enrolment is undeterminable."
+            )
+        detail = fetch_detail(ruleset_id)
+        if detail is None:
+            raise CanonicalCIError(
+                f"organisation ruleset {ruleset_id} ({name!r}) is listed for this repository "
+                "but its detail could not be read, so its rules are unknown. "
+                "Enrolment is undeterminable."
+            )
+        found = enrollment_in_ruleset(detail)
+        if found is not None:
+            return found
     return None
 
 
