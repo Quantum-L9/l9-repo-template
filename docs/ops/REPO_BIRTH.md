@@ -34,19 +34,153 @@ make new-repo
 [5] STAMP BIRTH            .l9-template-version · .l9/org-birth-profile.yaml
     PROVENANCE             · .l9/birth-receipt.json · .l9/template-state.yaml
       ▼
-[6] VALIDATE BEFORE        inventory · hygiene · birth integrity · rules · lint
-    CREATION               · format · typecheck · tests · uv lock --check
+[6] VALIDATE BEFORE        inventory · hygiene · birth integrity · ci binding
+    CREATION               · rules · lint · format · typecheck · tests · lock
       ▼
-[7] CREATE GITHUB REPO     commit with provenance trailers · prove the commit
+[7] PUBLISH ROOT COMMIT    commit with provenance trailers · prove the commit
                            · create remote · push finalized initial repository
+                           → repository becomes PROVISIONAL
       ▼
 [8] REMOTE ORG BOOTSTRAP   labels · repo settings · applicable seeding
       ▼
-[9] REMOTE ATTESTATION     read the actual remote back · verify org profile
-                           · verify the birth receipt · verify HEAD
+[9] CANONICAL CI           prove the organisation ruleset enrols this repo
+                           → the first pull request will be evaluated
+      ▼
+[10] REMOTE ATTESTATION    read the actual remote back · verify org profile
+                           · verify the birth receipt · verify HEAD · verify CI
       ▼
 BIRTH: PASS
+STATE: PROVISIONAL
 ```
+
+## Creation is not birth
+
+A repository that exists is not a repository that is born. Creating the remote,
+pushing the root commit and applying organization settings prove that GitHub
+accepted some bytes; none of it proves the code was ever evaluated.
+`Quantum-L9/l9-observability-core` is the case that made this concrete — created,
+pushed, attested, reported successful, with zero workflows and no canonical CI
+run of any kind.
+
+Birth therefore has four states, and the receipt names the one that happened:
+
+| State | Meaning |
+|---|---|
+| `LOCAL` | assembled and locally validated; nothing published (`--no-remote`) |
+| `PROVISIONAL` | published and enrolled; the first pull request will be evaluated |
+| `BORN` | canonical CI evaluated a pull request of this repository and succeeded |
+| `QUARANTINED` | published, and enrolment is missing or canonical CI failed |
+
+**Birth ends at `PROVISIONAL`, never `BORN`.** That is not caution, it is
+arithmetic:
+
+- GitHub required workflows run on `pull_request`, `pull_request_target` and
+  `merge_group`. They **never** run on `push`.
+- A pull request needs a base branch, and at birth the root commit is the only
+  commit that exists — there is nothing for it to be a pull request against.
+
+So a newborn's root commit cannot be evaluated before it lands, by this mechanism
+or any other. A birth stage that waited for a run against the root SHA would wait
+forever and `QUARANTINE` every real birth. `BORN` is earned later, by the first
+real pull request that canonical CI passes.
+
+A `QUARANTINED` repository is **preserved**, never auto-deleted. It is the
+evidence.
+
+## Invariants
+
+| ID | Invariant |
+|---|---|
+| `BIRTH-CI-001` | Every governed newborn is reachable by the canonical CI authority — through an organisation required-workflow ruleset, never a copied workflow. |
+| `BIRTH-CI-002` | The repository is enrolled with the canonical authority at birth; the **first pull request** is evaluated. The root commit itself cannot be — see the arithmetic above. |
+| `BIRTH-CI-003` | Canonical CI concludes `success` for the newborn root SHA. |
+| `BIRTH-CI-004` | Product payload materialization cannot silently disable or replace the binding. |
+| `BIRTH-CI-005` | Birth completion relies on remotely observed CI state, never on local assumption. |
+
+Enforced by `scripts/birth-runner/canonical_ci.py`; covered by
+`tests/unit/test_canonical_ci.py` and `tests/integration/test_new_repo_local_birth.py`.
+
+## The CI ownership boundary
+
+    l9-ci-core        owns CI implementation and execution semantics
+    the newborn       owns only the minimal binding that invokes it
+    l9-repo-template  owns birth orchestration and this verification
+
+Nothing in birth copies, reimplements, or second-guesses CI. `canonical_ci.py`
+answers three questions about somebody else's CI: is this repository bound to
+it, did it run for **this** commit, and did it succeed.
+
+The accepted run must correlate to the root SHA. "Some run passed recently" is
+not evidence — a stale success, a run on another branch, a run for another
+commit and a run that reports no SHA at all are all rejected. Binding discovery
+parses each workflow and reads `jobs.*.uses`; a `uses:` in a comment is not
+enrollment.
+
+A binding that points at a **Quantum-L9 CI workflow which is not the canonical
+entrypoint** fails closed rather than being ignored. That is worse than no
+binding: it looks like enrollment and evaluates something else.
+
+## A newborn ships no CI workflow, and that is correct
+
+`l9-ci-core/.l9/org-runtime-contract.yaml`:
+
+```yaml
+consumer_copy_required: false
+consumer_core_pin_allowed: false
+ownership.prohibited:
+  - copied L9 workflows in consumer repositories as an enforcement mechanism
+  - consumer-owned Core or SDK pins for organization enforcement
+```
+
+Canonical CI reaches a repository through an **organisation required-workflow
+ruleset**. A consumer workflow calling Core at a consumer-chosen pin is the
+prohibited shape, not the goal. Local validation therefore passes on an absent
+workflow and fails only on a binding to something that is *not* the canonical
+authority — worse than none, because it looks like enrolment and evaluates
+something else.
+
+## Current limitation — read this before running a real birth
+
+**No organisation ruleset exists yet.** Verifiable:
+
+```bash
+gh api "repos/Quantum-L9/<repo>/rulesets?includes_parents=true" \
+  --jq '[.[] | {name, source_type, enforcement}]'
+```
+
+Every entry across the organisation comes back `source_type: "Repository"`.
+`l9-ci-core` records the same about itself —
+`organization-ruleset-live-enforcement` is `status: UNKNOWN, evidence: []`.
+
+So stage 9 fails closed: the repository is published, left `QUARANTINED`, and
+preserved. Apply the ruleset with the activation kit
+(`Cursor-Governance`, `WIP/org-ci-ruleset-activation`), or accept an unenrolled
+repository explicitly:
+
+```bash
+L9_BIRTH_CI_UNVERIFIED='ruleset not yet applied, ticket L9-1234' \
+  make new-repo REPO=... PKG=... DESC=...
+```
+
+The reason is mandatory; a blank value is not an authorization. It downgrades
+the enrolment failure to a recorded `WARN` and leaves the repository
+`PROVISIONAL`. It does **not** excuse a *wrong* binding, which still fails
+closed at local validation.
+
+## Failure semantics
+
+| Situation | Result |
+|---|---|
+| Binding names a non-canonical authority | `BIRTH: FAIL` at local validation — nothing is created |
+| No consumer workflow at all | `PASS` — that is the intended shape |
+| No organisation ruleset enrols the repo | `QUARANTINED` — published and preserved, not born |
+| Repository rulesets unreadable | `QUARANTINED` — undeterminable is not enrolled |
+| Enrolled | `PROVISIONAL` — the first pull request earns `BORN` |
+
+Stage 9 makes one API call and decides. There is nothing to wait for: the run
+that would prove evaluation cannot exist yet. `--ci-timeout` survives for the
+post-birth transition, where `canonical_ci.select_birth_run` correlates a real
+pull request's run to its exact head SHA.
 
 `uv lock` is stage 3. It is not something a product author is asked to
 remember; it is a birth invariant, and a birth invariant belongs to the birth
@@ -91,7 +225,7 @@ organization has had its say — never copied in with the template and hoped ove
 | `ORG_PROFILE_SRC` | no | local `Quantum-L9/.github` checkout — skips the `gh` read, enables an offline birth |
 | `RECEIPT` | no | where to write the run's operator receipt JSON |
 | `PRIVATE` | no | create the repository private |
-| `NO_REMOTE` | no | stop after stage 5 — assemble, finalize, and validate only |
+| `NO_REMOTE` | no | stop after stage 5 — assemble, finalize, and validate only (final state `LOCAL`) |
 
 ## What a PAYLOAD owns
 

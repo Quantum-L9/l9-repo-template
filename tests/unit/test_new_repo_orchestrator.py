@@ -643,3 +643,176 @@ class TestPayloadPackageDirs:
 
     def test_a_payload_without_src_lists_nothing(self, tmp_path: Path) -> None:
         assert new_repo.payload_package_dirs(tmp_path) == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical CI enrolment — the ruleset listing is a summary
+# ─────────────────────────────────────────────────────────────────────────────
+
+CORE_ID = new_repo.canonical_ci.CI_AUTHORITY_REPOSITORY_ID
+ORG_CI = new_repo.canonical_ci.CI_AUTHORITY_WORKFLOW
+CANON_REF = new_repo.canonical_ci.CI_AUTHORITY_REF
+SLUG = "Quantum-L9/l9-observability-core"
+
+LIST_ENDPOINT = f"repos/{SLUG}/rulesets?includes_parents=true"
+DETAIL_ENDPOINT = f"repos/{SLUG}/rulesets/42?includes_parents=true"
+
+
+def _ruleset_summary() -> dict:
+    """As the LIST endpoint returns it: named and sourced, but carrying no rules."""
+    return {
+        "id": 42,
+        "name": "L9 canonical CI required",
+        "source_type": "Organization",
+        "enforcement": "active",
+    }
+
+
+def _ruleset_detail(**over: object) -> dict:
+    """As the DETAIL endpoint returns it: the rules the listing omits."""
+    base = dict(_ruleset_summary())
+    base["rules"] = [
+        {
+            "type": "workflows",
+            "parameters": {
+                "do_not_enforce_on_create": True,
+                "workflows": [
+                    {"path": ORG_CI, "ref": CANON_REF, "repository_id": CORE_ID, "sha": "d" * 40}
+                ],
+            },
+        }
+    ]
+    base.update(over)
+    return base
+
+
+class _Gh:
+    """A `gh api` boundary. Anything not answered here exits non-zero."""
+
+    def __init__(self, responses: dict[str, object]) -> None:
+        self.responses = responses
+        self.endpoints: list[str] = []
+
+    def __call__(self, cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        endpoint = cmd[-1]
+        self.endpoints.append(endpoint)
+        if endpoint not in self.responses:
+            return subprocess.CompletedProcess(cmd, 1, "", "gh: Not Found (HTTP 404)")
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(self.responses[endpoint]), "")
+
+
+def _ci_config() -> object:
+    return new_repo.BirthConfig(
+        org="Quantum-L9",
+        repo="l9-observability-core",
+        pkg="l9_observability_core",
+        desc="observability",
+        work_dir=Path("/nonexistent"),
+        payload=None,
+        template_src=Path("/nonexistent"),
+        org_profile_src=None,
+        repo_class="non_constellation_python",
+        remote=True,
+        private=False,
+        keep=False,
+        receipt_path=None,
+        bootstrap_timeout=1,
+    )
+
+
+def _ci_receipt() -> object:
+    return new_repo.BirthReceipt(
+        org="Quantum-L9",
+        repository="l9-observability-core",
+        package="l9_observability_core",
+        head_sha="e" * 40,
+    )
+
+
+def _verify(monkeypatch: pytest.MonkeyPatch, gh: _Gh) -> object:
+    monkeypatch.setattr(new_repo, "run", gh)
+    receipt = _ci_receipt()
+    new_repo.stage_verify_ci_enrollment(_ci_config(), receipt)
+    return receipt
+
+
+def _stage(receipt: object, key: str) -> object:
+    return next(s for s in receipt.stages if s.key == key)
+
+
+class TestEnrollmentIsHydratedFromTheDetailEndpoint:
+    """`repos/{slug}/rulesets` answers *which* rulesets, never *what they require*.
+
+    Reading enrolment off the listing alone can only ever answer "not enrolled",
+    which is how a correctly enrolled repository reads as unenrolled and every
+    real birth QUARANTINEs.
+    """
+
+    def test_a_real_org_ruleset_is_recognised_as_enrolment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gh = _Gh({LIST_ENDPOINT: [_ruleset_summary()], DETAIL_ENDPOINT: _ruleset_detail()})
+        receipt = _verify(monkeypatch, gh)
+        assert _stage(receipt, "ci.enrollment").status == "PASS"
+        assert DETAIL_ENDPOINT in gh.endpoints
+
+    def test_enrolment_leaves_the_repository_provisional_never_born(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Enrolment is not evaluation. BORN is earned by a real pull request."""
+        gh = _Gh({LIST_ENDPOINT: [_ruleset_summary()], DETAIL_ENDPOINT: _ruleset_detail()})
+        receipt = _verify(monkeypatch, gh)
+        assert receipt.ci["state"] == new_repo.canonical_ci.PROVISIONAL
+        assert receipt.state != new_repo.canonical_ci.BORN
+
+    def test_the_summary_alone_is_never_treated_as_enrolment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The listing is hydrated, not believed — even when it looks complete."""
+        gh = _Gh({LIST_ENDPOINT: [_ruleset_detail()]})  # detail-shaped, but from the LIST
+        monkeypatch.setattr(new_repo, "run", gh)
+        monkeypatch.delenv(new_repo.CI_UNVERIFIED_ENV, raising=False)
+        with pytest.raises(new_repo.BirthError, match="undeterminable"):
+            new_repo.stage_verify_ci_enrollment(_ci_config(), _ci_receipt())
+
+
+class TestUndeterminableEnrollmentFailsClosed:
+    def test_an_unreadable_detail_stops_the_birth(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gh = _Gh({LIST_ENDPOINT: [_ruleset_summary()]})  # detail 404s
+        monkeypatch.setattr(new_repo, "run", gh)
+        monkeypatch.delenv(new_repo.CI_UNVERIFIED_ENV, raising=False)
+        with pytest.raises(new_repo.BirthError, match="undeterminable"):
+            new_repo.stage_verify_ci_enrollment(_ci_config(), _ci_receipt())
+
+    def test_the_breakglass_does_not_excuse_an_undeterminable_enrolment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The operator may accept a repository KNOWN to be unenrolled.
+
+        That is a different claim from one whose enrolment nothing could read,
+        so the reason is never consulted on this path.
+        """
+        gh = _Gh({LIST_ENDPOINT: [_ruleset_summary()]})
+        monkeypatch.setattr(new_repo, "run", gh)
+        monkeypatch.setenv(new_repo.CI_UNVERIFIED_ENV, "ruleset not applied yet")
+        with pytest.raises(new_repo.BirthError, match="undeterminable"):
+            new_repo.stage_verify_ci_enrollment(_ci_config(), _ci_receipt())
+
+    def test_a_genuinely_absent_ruleset_is_still_breakglassable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unenrolled stays a WARN with a reason. Only undeterminable is absolute."""
+        gh = _Gh({LIST_ENDPOINT: []})
+        monkeypatch.setenv(new_repo.CI_UNVERIFIED_ENV, "ruleset not applied yet")
+        receipt = _verify(monkeypatch, gh)
+        assert _stage(receipt, "ci.enrollment").status == "WARN"
+
+    def test_a_wrong_owner_ruleset_is_not_enrolment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The canonical path in the wrong repository is not canonical CI."""
+        wrong = _ruleset_detail()
+        wrong["rules"][0]["parameters"]["workflows"][0]["repository_id"] = CORE_ID + 1
+        gh = _Gh({LIST_ENDPOINT: [_ruleset_summary()], DETAIL_ENDPOINT: wrong})
+        monkeypatch.setattr(new_repo, "run", gh)
+        monkeypatch.delenv(new_repo.CI_UNVERIFIED_ENV, raising=False)
+        with pytest.raises(new_repo.BirthError, match="NOT enrolled"):
+            new_repo.stage_verify_ci_enrollment(_ci_config(), _ci_receipt())
