@@ -36,6 +36,7 @@ repository-local workflow caller to compensate for a central CI gap.
 
 - [docs/ops/REPO_BIRTH.md](docs/ops/REPO_BIRTH.md): one-command birth contract
 - [scripts/birth-runner/payload-ownership.yaml](scripts/birth-runner/payload-ownership.yaml): authoritative-vs-additive payload ownership
+- [scripts/birth-runner/schemas/birth-payload.schema.json](scripts/birth-runner/schemas/birth-payload.schema.json): compiled `l9.birth-payload/v1` source contract
 
 Use `Quantum-L9/L9-Node-Template` for Constellation nodes and
 `Quantum-L9/Constellation.PackageTemplate` for `constellation_*` dependency

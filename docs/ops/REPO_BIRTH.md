@@ -1,12 +1,21 @@
 # Repo birth (non-Constellation)
 
 ```bash
+# [0] compile the payload from a clean checkout of the actual source repository
+make birth-payload \
+  SOURCE=/path/to/l9-observability-core \
+  OUT=/tmp/l9-observability-core.payload.json
+
+# [1..9] birth, authorized by that compiled payload
 make new-repo \
   REPO=l9-observability-core \
   PKG=l9_observability_core \
   DESC="Canonical backend-neutral observability domain contracts" \
-  PAYLOAD=/path/to/l9-observability-core
+  PAYLOAD=/path/to/l9-observability-core \
+  PAYLOAD_CONTRACT=/tmp/l9-observability-core.payload.json
 ```
+
+A fragment payload needs no contract — see [What a PAYLOAD owns](#what-a-payload-owns).
 
 When that returns **PASS** the repository is born. Not "created, now go do
 seven other things".
@@ -16,11 +25,21 @@ seven other things".
 One command executes one state machine. Every stage passes or the birth stops.
 
 ```
+make birth-payload
+      │
+      ▼
+[0] COMPILE PAYLOAD        clean git source · pin source SHA + tree · inventory
+                           actual files · reject engine-owned paths · derive
+                           repository shape and package identity · hash every
+                           file · emit l9.birth-payload/v1
+      │
+      ▼
 make new-repo
       │
       ▼
 [1] PREFLIGHT              git / gh / uv · auth · repo-name + package validation
-                           · target repo does not already exist
+                           · target repo does not already exist · recompute the
+                           source manifest and require the compiled digest
       ▼
 [2] ASSEMBLE LOCALLY       current l9-repo-template · rename/stamp identity
                            · optional product PAYLOAD · payload ownership
@@ -219,6 +238,7 @@ organization has had its say — never copied in with the template and hoped ove
 | `PKG` | yes | snake_case Python package name |
 | `DESC` | yes | one-line description |
 | `PAYLOAD` | no | product files. A fragment is overlaid (payload wins on collision); a whole repository is **authoritative** — see below |
+| `PAYLOAD_CONTRACT` | for an authoritative payload | the compiled `l9.birth-payload/v1` authorizing those bytes |
 | `ORG` | no | GitHub owner (default `Quantum-L9`) |
 | `WORK_DIR` | no | where the repository is assembled (default `/tmp/l9-births`) |
 | `CLASS` | no | org repo class (default `non_constellation_python`) |
@@ -232,15 +252,23 @@ organization has had its say — never copied in with the template and hoped ove
 `PAYLOAD` has two modes, and which one applies is decided by the payload's
 shape, never by a flag.
 
-| Payload | Mode | Absence means |
-|---------|------|---------------|
-| a fragment — some files, part of a tree | **additive overlay** | nothing. The template keeps everything the payload does not mention. |
-| a standalone repository | **authoritative** | the product does not own that surface. It is removed. |
+| Payload | Mode | Contract | Absence means |
+|---------|------|----------|---------------|
+| a fragment — some files, part of a tree | **additive overlay** | not required | nothing. The template keeps everything the payload does not mention. |
+| a standalone repository | **authoritative** | **required** | the product does not own that surface. It is removed. |
 
 A payload is repository-shaped when it carries every path in
 `repository_shape` — today `pyproject.toml`, `.l9/architecture.yaml`, `src/`,
 `tests/`, and `scripts/inventory_check.py`. Identification is positive: a large
 payload, or one that merely happens to have a `src/` directory, stays additive.
+
+Shape is what the compiler reads to PROPOSE a classification. It is not what
+birth acts on: stage 1 re-derives the classification from the same ownership
+contract, so a hand-edited `"mode": "authoritative"` cannot promote a fragment
+into a payload that deletes surfaces it never owned. A repository-shaped
+directory with **no** compiled contract stops the birth — a decision that
+removes product surfaces is not one to infer from a directory listing while
+files are already being copied.
 
 This exists because an overlay can only ever *overwrite*. It cannot say "this
 product has no Dockerfile", because there is no file in the payload with which
@@ -273,6 +301,143 @@ Two consequences worth stating plainly:
 Every path this template tracks must appear in one of the two lists; a unit test
 enforces it. Adding a file to this template therefore forces an answer to "does
 a product inherit this?" instead of defaulting to yes.
+
+## The compiled payload
+
+The birthing agent does not author the payload. It invokes a deterministic
+compiler owned by this template, against an immutable snapshot of the actual
+source repository.
+
+```
+ACTUAL SOURCE REPOSITORY          clean checkout @ immutable commit
+        │
+        ▼
+Birth Agent                       orchestration only
+        │
+        ▼
+BirthPayloadCompiler              reads actual files · computes hashes
+(this template)                   classifies repository shape · rejects
+        │                         engine-owned paths
+        ▼
+CompiledBirthPayload              l9.birth-payload/v1
+        │
+        ├──────────────┐
+        ▼              ▼
+source tree       payload-ownership.yaml
+still supplies    template-owned policy
+actual bytes      product/chassis split
+        └──────┬───────┘
+               ▼
+        Birth stages 1-9
+```
+
+That dependency direction is the point. The compiler belongs to this template
+because this template owns HOW A REPO IS BORN; the source repository owns its
+product files; the agent owns neither.
+
+### The contract
+
+| Surface | Path |
+|---------|------|
+| schema | `scripts/birth-runner/schemas/birth-payload.schema.json` |
+| compiler | `scripts/birth-runner/compile_birth_payload.py` |
+| verifier | `scripts/birth-runner/verify_birth_payload.py` |
+| ownership reader | `scripts/birth-runner/payload_ownership.py` |
+
+The schema lives with the birth engine rather than under `.l9/` because it is
+part of the engine's implementation contract — not something every newborn
+should inherit a copy of.
+
+```json
+{
+  "schema": "l9.birth-payload/v1",
+  "source": {
+    "repository": "Quantum-L9/IdeaOS",
+    "revision": "<40-char sha>",
+    "tree_sha": "<git tree sha>"
+  },
+  "mode": "authoritative",
+  "repository_shape": { "matched": ["pyproject.toml", ".l9/architecture.yaml", "src", "tests", "scripts/inventory_check.py"] },
+  "packages": { "python": ["ideaos"] },
+  "files": [
+    { "path": "pyproject.toml", "sha256": "<sha256>" },
+    { "path": "src/ideaos/__init__.py", "sha256": "<sha256>" }
+  ],
+  "manifest_sha256": "<canonical manifest digest>"
+}
+```
+
+**It is a manifest, not a second repository.** File contents stay in the source
+tree and birth copies them from there; the contract only proves which bytes it
+authorized.
+
+**It carries evidence, not intent.** Deliberately absent: capabilities, desired
+CI, repo class, template version, organization policy, the target repository's
+name, a birth timestamp, absence declarations, per-file ownership, generated
+files, future conformance state. Every one of those belongs to another authority
+or is derivable from the files this manifest names, and duplicating it here
+would create two truths for one question.
+
+Absence needs no declaration either. Under an authoritative payload,
+`payload-ownership.yaml` already makes a `product` surface the source does not
+supply mean *this product does not have one* — so a `"Dockerfile": absent` entry
+would be a second way to say what the manifest says by omission.
+
+The digest is `birth_provenance.manifest_digest`, the same algorithm as
+`MANIFEST.sha256` and the birth receipt: `sha256` over `<sha256>  <path>` lines,
+path-sorted. One algorithm, three callers, and a human with `sha256sum` can
+reproduce it without trusting any of them.
+
+### The invariant
+
+```
+CompiledBirthPayload.files  ==  actual source snapshot  ==  bytes copied into assembly
+```
+
+Not approximately, and not "the same paths" — the same hashes. Stage 1
+recomputes the manifest against the source tree immediately before assembly and
+compares every one. Compilation and consumption are time-of-check/time-of-use
+bound: if one byte changed in between, the birth stops while a work directory is
+still the only thing that exists.
+
+Two proofs come out of one birth, and they are never merged:
+
+| Digest | Answers |
+|--------|---------|
+| payload `manifest_sha256` | what exactly did the product **source** contribute? |
+| receipt `manifest_sha256` | what exactly was the repository **born** containing? |
+
+### Failure semantics
+
+Fail closed, always before the GitHub repository is created:
+
+- a dirty authoritative source tree, or one with untracked files;
+- a source that is not a git checkout, or has no commits;
+- the source SHA or tree SHA moving after compilation;
+- any file's hash changing, any authorized path disappearing, any unauthorized
+  path appearing;
+- a malformed contract, or an unrecognized schema version;
+- an engine-owned provenance path present in the source;
+- `PKG` naming a package the payload does not ship;
+- a payload claiming `authoritative` that the ownership contract does not derive;
+- duplicate or case-colliding paths — one of the two would be lost on a
+  case-insensitive filesystem, and not the one the digest names;
+- a symlink escaping the source root;
+- a special filesystem object (device, socket, fifo) among the tracked files.
+
+There is **no fallback** from an invalid compiled authoritative payload to a
+naked-directory overlay. Silently birthing the additive way from a contract that
+failed to reproduce is exactly the unverified path the contract exists to close.
+
+### Checking a payload on its own
+
+```bash
+make birth-payload-check PAYLOAD_CONTRACT=/tmp/product.payload.json \
+                         SOURCE=/path/to/product PKG=product_pkg
+```
+
+Same checks stage 1 runs, as a standalone report — `--json` for a machine
+reader.
 
 ## The org birth profile
 

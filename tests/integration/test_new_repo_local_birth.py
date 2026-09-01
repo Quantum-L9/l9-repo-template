@@ -440,10 +440,23 @@ PAYLOAD_FILES: dict[str, str] = {
 }
 
 
-def _write_repository_payload(root: Path) -> Path:
-    """Materialize the payload, substituting the fixture's package identity."""
-    for rel, body in PAYLOAD_FILES.items():
-        target = root / rel.replace("PKG", PAYLOAD_PKG)
+def _write_repository_payload(root: Path, extra: dict[str, str] | None = None) -> Path:
+    """Materialize the payload as an immutable snapshot of a source repository.
+
+    A repository-shaped payload is authoritative over its product tree, and an
+    authoritative birth is compiled from a committed, clean git snapshot — never
+    inferred from a directory. So the fixture is a real source repository:
+    files, one commit, an origin to be named by.
+
+    `extra` belongs IN that snapshot rather than beside it. A file written after
+    the commit is uncommitted dirt, and a payload compiled from a dirty tree is
+    refused for being dirty — which would say nothing about the file a test put
+    there to be judged on its own merits.
+    """
+    written = []
+    for rel, body in {**PAYLOAD_FILES, **(extra or {})}.items():
+        relative = rel.replace("PKG", PAYLOAD_PKG)
+        target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
             body.replace("PKG_KEBAB", PAYLOAD_PKG.replace("_", "-"))
@@ -451,7 +464,48 @@ def _write_repository_payload(root: Path) -> Path:
             .replace("PKG", PAYLOAD_PKG),
             encoding="utf-8",
         )
+        written.append(relative)
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("remote", "add", "origin", f"git@github.com:Quantum-L9/{PAYLOAD_REPO}.git")
+    git("add", "--", *sorted(written))
+    git(
+        "-c",
+        "user.email=birth@l9.invalid",
+        "-c",
+        "user.name=birth",
+        "commit",
+        "-q",
+        "-m",
+        "source snapshot",
+    )
     return root
+
+
+def _compile_payload(source: Path, out: Path) -> Path:
+    """Stage 0: the birthing agent invokes the template's compiler. It does not
+    author the payload."""
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(BIRTH_RUNNER / "compile_birth_payload.py"),
+            "--source",
+            str(source),
+            "--out",
+            str(out),
+            "--require-mode",
+            "authoritative",
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return out
 
 
 @pytest.fixture(scope="module")
@@ -460,10 +514,13 @@ def born_from_repository_payload(
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     tmp_path = tmp_path_factory.mktemp("birth-repo-payload")
     payload = _write_repository_payload(tmp_path / "payload")
+    contract = _compile_payload(payload, tmp_path / "payload.json")
     proc = _birth(
         tmp_path,
         "--payload",
         str(payload),
+        "--payload-contract",
+        str(contract),
         repo=PAYLOAD_REPO,
         pkg=PAYLOAD_PKG,
     )
@@ -571,18 +628,58 @@ def test_receipt_records_the_ownership_decision(
 
 
 def test_pkg_must_name_the_package_the_payload_ships(tmp_path: Path) -> None:
-    """A mismatch is caught in stage 2, not as an import error in stage 5."""
+    """A mismatch is caught in stage 1, not as an import error in stage 5."""
     payload = _write_repository_payload(tmp_path / "payload")
+    contract = _compile_payload(payload, tmp_path / "payload.json")
     proc = _birth(
         tmp_path,
         "--payload",
         str(payload),
+        "--payload-contract",
+        str(contract),
         repo=PAYLOAD_REPO,
         pkg="l9_wrong_name",
     )
     assert proc.returncode == 1
-    assert "is not the package this repository payload ships" in proc.stderr
+    assert "not a package this payload ships" in proc.stderr
     assert "repository created" not in proc.stdout
+
+
+def test_a_repository_shaped_payload_without_a_contract_stops_the_birth(tmp_path: Path) -> None:
+    """Authoritative mode is compiled, never inferred.
+
+    Before the compilation boundary this birth silently succeeded: the engine
+    read repository shape off a directory and started deleting product surfaces
+    on the strength of it. Now the classification has to arrive as evidence — and
+    an unauthorized authoritative payload is a refusal, not a quiet downgrade to
+    an additive overlay.
+    """
+    payload = _write_repository_payload(tmp_path / "payload")
+    proc = _birth(tmp_path, "--payload", str(payload), repo=PAYLOAD_REPO, pkg=PAYLOAD_PKG)
+    assert proc.returncode == 1
+    assert "repository-shaped" in proc.stderr
+    assert "make birth-payload" in proc.stderr
+    assert not (tmp_path / "work" / PAYLOAD_REPO / "pyproject.toml").exists()
+
+
+def test_a_payload_that_drifts_after_compilation_stops_the_birth(tmp_path: Path) -> None:
+    """The invariant, end to end: compiled manifest == source snapshot == bytes copied."""
+    payload = _write_repository_payload(tmp_path / "payload")
+    contract = _compile_payload(payload, tmp_path / "payload.json")
+    (payload / "src" / PAYLOAD_PKG / "canonical.py").write_text(
+        'CANONICAL_VERSION = "v2"\n', encoding="utf-8"
+    )
+    proc = _birth(
+        tmp_path,
+        "--payload",
+        str(payload),
+        "--payload-contract",
+        str(contract),
+        repo=PAYLOAD_REPO,
+        pkg=PAYLOAD_PKG,
+    )
+    assert proc.returncode == 1
+    assert "did not reproduce" in proc.stderr
 
 
 def test_a_partial_overlay_is_still_purely_additive(tmp_path: Path) -> None:
@@ -844,19 +941,28 @@ class TestCanonicalCIIsRequired:
         calls a Quantum-L9 CI workflow that is not the canonical entrypoint.
         Assembly must refuse it before anything is created.
         """
-        payload = _write_repository_payload(tmp_path / "payload")
-        wf = payload / ".github" / "workflows"
-        wf.mkdir(parents=True)
-        (wf / "l9-ci.yml").write_text(
-            "name: L9 CI\non: push\njobs:\n"
-            "  l9-ci:\n"
-            "    uses: Quantum-L9/l9-ci-core/.github/workflows/self-ci.yml@" + "d" * 40 + "\n",
-            encoding="utf-8",
+        payload = _write_repository_payload(
+            tmp_path / "payload",
+            extra={
+                ".github/workflows/l9-ci.yml": (
+                    "name: L9 CI\non: push\njobs:\n"
+                    "  l9-ci:\n"
+                    "    uses: Quantum-L9/l9-ci-core/.github/workflows/self-ci.yml@"
+                    + "d" * 40
+                    + "\n"
+                )
+            },
         )
+        # Compiled and authorized, so the workflow reaches assembly as bytes the
+        # payload genuinely ships. The refusal has to come from the CI authority
+        # check, not from the payload contract declining to authorize it.
+        contract = _compile_payload(payload, tmp_path / "payload.json")
         proc = _birth(
             tmp_path,
             "--payload",
             str(payload),
+            "--payload-contract",
+            str(contract),
             repo=PAYLOAD_REPO,
             pkg=PAYLOAD_PKG,
         )

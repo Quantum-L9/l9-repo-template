@@ -21,9 +21,13 @@ This is a thin Claude-specific overlay. It does not replace or duplicate
    `.l9/repo-workflow.json`, and `.l9/sdk-compatibility.yaml`.
 3. Read `docs/WHEN_TO_USE.md` before changing product boundaries.
 4. Read `docs/ops/REPO_BIRTH.md`,
-   `scripts/birth-runner/payload-ownership.yaml`, and
-   `scripts/birth-runner/birth_provenance.py` before changing birth behavior.
-   Birth provenance is immutable; only `.l9/template-state.yaml` is reconciled.
+   `scripts/birth-runner/payload-ownership.yaml`,
+   `scripts/birth-runner/birth_provenance.py`,
+   `scripts/birth-runner/compile_birth_payload.py`, and
+   `scripts/birth-runner/schemas/birth-payload.schema.json` before changing birth
+   behavior. Birth provenance is immutable; only `.l9/template-state.yaml` is
+   reconciled. A product payload is compiled from an immutable source snapshot,
+   never authored by an agent.
 5. Read `Repo.mk` and `pyproject.toml` before changing execution or dependency
    surfaces.
 

@@ -522,6 +522,114 @@ def _repository_payload(root: Path, pkg: str = "l9_product") -> Path:
     return root
 
 
+class TestAnAuthoritativePayloadMustBeCompiled:
+    """The classification a birth acts on is verified, never inferred.
+
+    Repository shape used to be read off a directory during assembly, so the
+    decision that DELETES product surfaces was taken while files were already
+    being copied. Now the compiler proposes it from an immutable snapshot and
+    the engine verifies it — which means a repository-shaped directory with no
+    compiled payload is a refusal.
+    """
+
+    @staticmethod
+    def _config(tmp_path: Path, payload: Path, contract: Path | None = None) -> object:
+        argv = [
+            "--repo",
+            "l9-newborn",
+            "--pkg",
+            "l9_newborn",
+            "--desc",
+            "A product",
+            "--work-dir",
+            str(tmp_path / "work"),
+            "--payload",
+            str(payload),
+            "--no-remote",
+        ]
+        if contract is not None:
+            argv += ["--payload-contract", str(contract)]
+        return new_repo.build_config(new_repo.parse_args(argv))
+
+    def test_a_repository_shaped_directory_without_a_contract_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        payload = tmp_path / "payload"
+        for rel in new_repo.load_ownership(REPO)["repository_shape"]:
+            (payload / rel).mkdir(parents=True, exist_ok=True)
+        cfg = self._config(tmp_path, payload)
+        with pytest.raises(new_repo.BirthError) as exc:
+            new_repo._preflight_payload_contract(cfg, new_repo.BirthReceipt())
+        assert "repository-shaped" in str(exc.value)
+        assert "make birth-payload" in str(exc.value)
+
+    def test_a_fragment_still_needs_no_contract(self, tmp_path: Path) -> None:
+        """The pre-existing additive contract, unchanged. Products depend on it."""
+        payload = tmp_path / "payload" / "src" / "l9_newborn"
+        payload.mkdir(parents=True)
+        (payload / "extra.py").write_text("VALUE = 1\n", encoding="utf-8")
+        cfg = self._config(tmp_path, tmp_path / "payload")
+        receipt = new_repo.BirthReceipt()
+        new_repo._preflight_payload_contract(cfg, receipt)
+        assert cfg.verified_payload_mode == "additive"
+        assert receipt.stages[-1].status == "SKIP"
+
+    def test_no_payload_is_not_a_payload_decision(self, tmp_path: Path) -> None:
+        cfg = new_repo.build_config(
+            new_repo.parse_args(
+                [
+                    "--repo",
+                    "l9-newborn",
+                    "--pkg",
+                    "l9_newborn",
+                    "--desc",
+                    "A product",
+                    "--work-dir",
+                    str(tmp_path / "work"),
+                    "--no-remote",
+                ]
+            )
+        )
+        receipt = new_repo.BirthReceipt()
+        new_repo._preflight_payload_contract(cfg, receipt)
+        assert cfg.verified_payload_mode is None
+        assert receipt.stages[-1].detail == "no PAYLOAD given"
+
+    def test_a_contract_without_a_payload_is_a_mistake(self, tmp_path: Path) -> None:
+        """A compiled payload authorizes bytes; it does not carry them."""
+        argv = new_repo.parse_args(
+            [
+                "--repo",
+                "l9-newborn",
+                "--pkg",
+                "l9_newborn",
+                "--desc",
+                "A product",
+                "--work-dir",
+                str(tmp_path / "work"),
+                "--payload-contract",
+                str(tmp_path / "payload.json"),
+                "--no-remote",
+            ]
+        )
+        with pytest.raises(new_repo.BirthError, match="without a PAYLOAD"):
+            new_repo.build_config(argv)
+
+
+class TestOneOwnershipContractReader:
+    """The engine and the compiler must not hold two readings of one contract."""
+
+    def test_the_engine_delegates_to_the_shared_reader(self) -> None:
+        assert new_repo.is_repository_payload is new_repo.ownership_contract.is_repository_payload
+        assert new_repo.payload_package_dirs is new_repo.ownership_contract.payload_package_dirs
+        assert new_repo.OWNERSHIP_PATH == new_repo.ownership_contract.OWNERSHIP_PATH
+
+    def test_an_unreadable_contract_still_stops_the_birth_here(self, tmp_path: Path) -> None:
+        """Delegation must not turn a fail-closed read into an unhandled error."""
+        with pytest.raises(new_repo.BirthError):
+            new_repo.load_ownership(tmp_path)
+
+
 class TestRepositoryPayloadDetection:
     def test_a_standalone_repository_is_identified(self, tmp_path: Path) -> None:
         payload = _repository_payload(tmp_path / "payload")
