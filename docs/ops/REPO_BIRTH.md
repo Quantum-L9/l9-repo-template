@@ -44,8 +44,9 @@ make new-repo
 [2] ASSEMBLE LOCALLY       current l9-repo-template · rename/stamp identity
                            · optional product PAYLOAD · payload ownership
       ▼
-[3] FINALIZE               canonical LICENSE · uv lock · reconcile plugin-config
-   AUTOMATICALLY           · render generated rules · regenerate manifests
+[3] FINALIZE               canonical LICENSE · uv lock · ruff safe autofix +
+   AUTOMATICALLY           format · reconcile plugin-config · render generated
+                           rules · regenerate manifests
       ▼
 [4] APPLY ORG BIRTH        current Quantum-L9/.github · only applicable
     PROFILE                non-inheritable controls · current org SHA recorded
@@ -71,6 +72,33 @@ make new-repo
 BIRTH: PASS
 STATE: PROVISIONAL
 ```
+
+## Formatting is a birth invariant
+
+An assembled tree is the template plus a payload — two products whose authors
+never agreed on import order or line width. Stage 5 runs `ruff check` and
+`ruff format --check`, so that disagreement used to destroy an entire birth over
+whitespace: `12 files would be reformatted` and nothing was created.
+
+Stage 3 now runs the writing half first — `ruff check --fix` then `ruff format`
+— and records what it changed (`finalize.autofix`, e.g. `12 file(s)
+reformatted`). Locally the same pair is `make lint-fix`, the writing twin of
+`make lint`.
+
+Two properties make this a fix rather than a loophole:
+
+- **It runs before the manifest, the version stamp and the receipt digest.**
+  Those describe the newborn's bytes; normalising after them would leave the
+  root commit's own attestation describing a tree that no longer exists.
+- **It only applies what ruff marks safely fixable, and stage 5 still checks
+  afterwards.** `--unsafe-fixes` is never passed. A lint error ruff cannot fix
+  still fails the birth closed — the mechanical half is done, the judgement half
+  is not delegated.
+
+What this does not do is make an unready product birthable. A payload whose own
+code fails mypy, whose tests do not import, or which trips a rule ruff will not
+auto-fix (`E402` after a `sys.path` bootstrap is the common one) still stops at
+stage 5, and should.
 
 ## Creation is not birth
 

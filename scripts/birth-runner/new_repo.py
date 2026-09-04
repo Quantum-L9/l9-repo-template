@@ -1160,6 +1160,41 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     run(["uv", "sync", "--extra", "dev"], cwd=cfg.dest)
     receipt.record("finalize.lock", "uv.lock generated", "PASS", "uv lock + sync")
 
+    # Formatting is a birth invariant, not a product author's chore. An assembled
+    # tree is template plus payload, written by two parties that never agreed on
+    # import order or line width, so a mechanically fixable diff between them was
+    # failing stage 5 and destroying the whole birth — for whitespace.
+    #
+    # This runs BEFORE the manifest, the version stamp and the receipt digest, so
+    # every one of those describes the bytes the newborn actually ships. Fixing
+    # after them would leave the root commit's own attestation describing a tree
+    # that no longer exists.
+    #
+    # It fixes; it does not decide. `ruff check --fix` applies only the rules
+    # ruff itself marks safely fixable, and stage 5 still runs `ruff check` and
+    # `ruff format --check` afterwards, so anything left — a real lint error, a
+    # rule needing --unsafe-fixes — still fails the birth closed. Nothing is
+    # suppressed and no gate is loosened; the mechanical half is simply done
+    # rather than reported.
+    autofix_python = str(_venv_python(cfg.dest))
+    fixed = run(
+        [autofix_python, "-m", "ruff", "check", "--fix", "."],
+        cwd=cfg.dest,
+        check=False,
+    )
+    formatted = run([autofix_python, "-m", "ruff", "format", "."], cwd=cfg.dest, check=False)
+    if formatted.returncode != 0:
+        raise BirthError(
+            "ruff format failed on the assembled tree — the newborn cannot be "
+            "normalised: " + ((formatted.stderr or formatted.stdout).strip() or "no output")
+        )
+    receipt.record(
+        "finalize.autofix",
+        "ruff autofix",
+        "PASS",
+        _autofix_detail(fixed.stdout + fixed.stderr, formatted.stdout + formatted.stderr),
+    )
+
     # BEFORE the rules are rendered, not after. Every generated rule is rendered
     # FROM this config, so a config that still describes the template produces
     # rules that are internally consistent and semantically false: an app
@@ -1195,6 +1230,32 @@ def _reconcile_detail(stdout: str) -> str:
     """The reconciler's own account of what it changed, as one receipt line."""
     changes = [line.strip() for line in stdout.splitlines() if line.startswith("  ")]
     return "; ".join(changes) if changes else "already describes this repository"
+
+
+# Ruff prints each of these as its own line, so both are anchored to a line
+# start and both counts are bounded. An unanchored leading `\d+` is retried at
+# every offset of the output when there is no match, which is quadratic in the
+# length of a run's stdout rather than linear (Sonar python:S8786).
+_FIXED_RE = re.compile(r"^Fixed (\d{1,9}) error", re.MULTILINE)
+_REFORMATTED_RE = re.compile(r"^(\d{1,9}) files? reformatted", re.MULTILINE)
+
+
+def _autofix_detail(check_output: str, format_output: str) -> str:
+    """What ruff actually changed, as one receipt line.
+
+    Reported rather than merely done: a birth that silently rewrites the tree it
+    is about to attest is worse than one that leaves it alone. The numbers are
+    the difference between "the payload arrived clean" and "the payload needed
+    twenty fixes", and only the receipt will remember which.
+    """
+    fixed = _FIXED_RE.search(check_output)
+    reformatted = _REFORMATTED_RE.search(format_output)
+    parts = []
+    if fixed:
+        parts.append(f"{fixed.group(1)} lint fix(es)")
+    if reformatted:
+        parts.append(f"{reformatted.group(1)} file(s) reformatted")
+    return ", ".join(parts) if parts else "already clean"
 
 
 def _venv_python(root: Path) -> Path:
