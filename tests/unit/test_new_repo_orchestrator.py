@@ -268,6 +268,57 @@ class TestCopyExclusions:
         assert not new_repo._is_machine_state(Path(rel))
 
 
+class TestBirthNormalisesBeforeItAttests:
+    """Formatting is a birth invariant, and the receipt records what changed.
+
+    An assembled tree is template plus payload, written by two parties that
+    never agreed on import order. A mechanically fixable diff between them was
+    destroying whole births over whitespace.
+    """
+
+    def test_the_detail_names_what_ruff_changed(self) -> None:
+        detail = new_repo._autofix_detail(
+            "Found 20 errors (20 fixed, 0 remaining).\nFixed 20 errors.",
+            "12 files reformatted, 123 files left unchanged",
+        )
+        assert "20 lint fix(es)" in detail
+        assert "12 file(s) reformatted" in detail
+
+    def test_a_clean_payload_says_so_rather_than_nothing(self) -> None:
+        # A blank detail reads as "the step did not run". It ran; it found none.
+        assert new_repo._autofix_detail("All checks passed!", "5 files left unchanged") == (
+            "already clean"
+        )
+
+    def test_autofix_runs_before_the_manifest_and_the_stamp(self) -> None:
+        """Order is the whole point, so it is asserted rather than assumed.
+
+        The manifest digest, the version stamp and the receipt digest all
+        describe the newborn's bytes. Fixing after any of them would leave the
+        root commit's own attestation describing a tree that no longer exists.
+        """
+        source = Path(new_repo.__file__).read_text(encoding="utf-8")
+        autofix = source.index('"finalize.autofix"')
+        manifest = source.index('"finalize.manifest"')
+        assert autofix < manifest
+
+    def test_the_fix_stays_safe_and_the_gate_stays_closed(self) -> None:
+        """`--unsafe-fixes` would let birth rewrite semantics, not whitespace.
+
+        And stage 5 must still *check* after the fix: without that, a lint error
+        ruff cannot fix would sail into a published repository.
+        """
+        source = Path(new_repo.__file__).read_text(encoding="utf-8")
+        # The quoted form is the argument; the bare word appears in the comment
+        # explaining why it is not passed, so matching that would be self-tripping.
+        assert '"--unsafe-fixes"' not in source
+        assert '("validate.lint", "lint", [str(python), "-m", "ruff", "check", "."])' in source
+        assert (
+            '("validate.format", "format", [str(python), "-m", "ruff", "format", "--check", "."])'
+            in source
+        )
+
+
 class TestSessionScaffoldingIsNeverBorn:
     """Agent session bootstrap is this machine's, not the template's.
 

@@ -9,7 +9,7 @@ PYTHON := $(CURDIR)/.venv/bin/python
 endif
 PYTHON ?= python3
 
-.PHONY: help install-dev setup-hooks lint typecheck inventory-check hygiene-check \
+.PHONY: help install-dev setup-hooks lint lint-fix typecheck inventory-check hygiene-check \
 	check-rules render-rules check-config reconcile-config verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
 	new-repo birth-payload birth-payload-check birth-check birth-preflight \
@@ -42,6 +42,10 @@ setup-hooks: ## Install pre-commit hooks when available
 lint: ## Ruff check + format check
 	$(PYTHON) -m ruff check .
 	$(PYTHON) -m ruff format --check .
+
+lint-fix: ## Ruff safe autofix + format (the writing half of `lint`)
+	$(PYTHON) -m ruff check --fix .
+	$(PYTHON) -m ruff format .
 
 typecheck: ## mypy on src/
 	$(PYTHON) -m mypy src
