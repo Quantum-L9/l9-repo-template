@@ -1195,6 +1195,24 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
         _autofix_detail(fixed.stdout + fixed.stderr, formatted.stdout + formatted.stderr),
     )
 
+    # There is deliberately no mypy autofix here, and the reason is worth
+    # recording so it is not re-attempted.
+    #
+    # mypy has no `--fix`. Its one automatic remedy, `--install-types`, cannot
+    # work in a newborn: the environment is uv-managed and has no `pip`, so mypy
+    # shells out to an interpreter that cannot install anything and silently
+    # changes nothing. A stage wrapping it reports PASS for work that never
+    # happened — which is worse than the failure it was meant to fix.
+    #
+    # Even where it could install, the stub would exist only in that venv, absent
+    # from `pyproject.toml` and `uv.lock`, so the newborn's own CI would fail
+    # identically on day one. Declaring a dependency is a product decision.
+    #
+    # Everything else mypy reports — an unannotated signature, a call into one, a
+    # module that does not exist — is a statement about the product. Inventing an
+    # answer to any of them is precisely what a type checker exists to prevent,
+    # so stage 5 runs mypy and fails closed.
+
     # BEFORE the rules are rendered, not after. Every generated rule is rendered
     # FROM this config, so a config that still describes the template produces
     # rules that are internally consistent and semantically false: an app
@@ -1222,8 +1240,81 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     run([str(_venv_python(cfg.dest)), "scripts/render_cursor_rules.py", "--force"], cwd=cfg.dest)
     receipt.record("finalize.rules", "generated rules", "PASS", "cursor rules rendered")
 
+    _run_governance_docs(cfg, receipt)
+
     run([str(_venv_python(cfg.dest)), "scripts/regenerate_runtime_manifest.py"], cwd=cfg.dest)
     receipt.record("finalize.manifest", "manifest", "PASS", "MANIFEST.sha256 regenerated")
+
+
+# `l9-update-agent-docs` in Quantum-L9/Cursor-Governance owns the root agent-doc
+# pointer stack. Birth INVOKES it from a checkout; it never vendors it. A copy
+# here would be a second source of truth for governance-owned documentation
+# policy, which is the duplication `CLAUDE.md` forbids, and it would be stale the
+# day governance changed.
+GOV_ROOT_ENV = "L9_GOV_ROOT"
+GOV_DOCS_SKILL = Path("skills/l9-update-agent-docs/scripts")
+GOV_DOCS_ENTRYPOINT = "repo_docs.py"
+# One receipt line, three exits from it. Naming the key and label once is what
+# stops a later edit renaming the SKIP path and leaving the PASS path behind,
+# which would read as two different stages in the same receipt.
+GOV_DOCS_KEY = "finalize.docs"
+GOV_DOCS_LABEL = "agent docs"
+
+
+def _run_governance_docs(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """Compile the newborn's documentation obligations, from governance's own code.
+
+    What this does and does not do is worth stating, because the skill's name
+    invites the wrong expectation. It compiles obligations, validates the pointer
+    stack, and can render `llms.txt`. It does NOT author `README.md`,
+    `CLAUDE.md`, or `AGENTS.md` — those it reports on, and their content stays a
+    decision an owner makes.
+
+    Advisory, deliberately. A newborn's documentation debt is a fact worth
+    recording in the birth receipt, but governance being unreachable is not a
+    reason to refuse to create a repository, and this stage must never become a
+    second gate competing with stage 5.
+    """
+    gov_root = (os.environ.get(GOV_ROOT_ENV) or "").strip()
+    if not gov_root:
+        receipt.record(
+            GOV_DOCS_KEY,
+            GOV_DOCS_LABEL,
+            "SKIP",
+            f"no {GOV_ROOT_ENV} — governance skill not reachable",
+        )
+        return
+
+    scripts = Path(gov_root) / GOV_DOCS_SKILL
+    if not (scripts / GOV_DOCS_ENTRYPOINT).is_file():
+        receipt.record(
+            GOV_DOCS_KEY,
+            GOV_DOCS_LABEL,
+            "SKIP",
+            f"{GOV_DOCS_SKILL / GOV_DOCS_ENTRYPOINT} not found under {gov_root}",
+        )
+        return
+
+    # Run from the skill's own directory: its modules import each other by bare
+    # name, so the directory is the package. The newborn is addressed by --root,
+    # which is what keeps this an invocation rather than a copy.
+    proc = run(
+        [
+            str(_venv_python(cfg.dest)),
+            GOV_DOCS_ENTRYPOINT,
+            "--root",
+            str(cfg.dest),
+            "--json",
+        ],
+        cwd=scripts,
+        check=False,
+    )
+    receipt.record(
+        GOV_DOCS_KEY,
+        GOV_DOCS_LABEL,
+        "PASS",
+        _docs_detail(proc.stdout, proc.returncode),
+    )
 
 
 def _reconcile_detail(stdout: str) -> str:
@@ -1256,6 +1347,23 @@ def _autofix_detail(check_output: str, format_output: str) -> str:
     if reformatted:
         parts.append(f"{reformatted.group(1)} file(s) reformatted")
     return ", ".join(parts) if parts else "already clean"
+
+
+def _docs_detail(stdout: str, returncode: int) -> str:
+    """The governance skill's own verdict, as one receipt line.
+
+    Its receipt is the authority on its own result, so the status is read from
+    the JSON rather than inferred from an exit code this stage does not own.
+    """
+    try:
+        payload = json.loads(stdout or "{}")
+    except json.JSONDecodeError:
+        return f"unreadable receipt (exit {returncode})"
+    status = payload.get("final_status") or "UNKNOWN"
+    blockers = payload.get("blockers") or []
+    if blockers:
+        return f"{status}; {len(blockers)} documentation blocker(s)"
+    return str(status)
 
 
 def _venv_python(root: Path) -> Path:

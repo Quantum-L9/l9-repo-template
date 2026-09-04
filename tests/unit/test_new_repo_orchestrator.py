@@ -268,6 +268,72 @@ class TestCopyExclusions:
         assert not new_repo._is_machine_state(Path(rel))
 
 
+class TestGovernanceDocsAreInvokedNotVendored:
+    """`l9-update-agent-docs` is governance's, and stays governance's.
+
+    A copy in this repository would be a second source of truth for
+    documentation policy — the duplication CLAUDE.md forbids — and stale the day
+    governance changed.
+    """
+
+    def test_the_skill_is_not_copied_into_this_repository(self) -> None:
+        assert not (REPO / "skills" / "l9-update-agent-docs").exists()
+        assert not (REPO / "scripts" / "birth-runner" / "repo_docs.py").exists()
+
+    def test_it_reports_the_skills_own_verdict(self) -> None:
+        payload = '{"final_status": "FAIL", "blockers": ["a", "b"]}'
+        assert new_repo._docs_detail(payload, 1) == "FAIL; 2 documentation blocker(s)"
+
+    def test_a_clean_repository_reports_the_status_alone(self) -> None:
+        assert new_repo._docs_detail('{"final_status": "PASS", "blockers": []}', 0) == "PASS"
+
+    def test_unreadable_output_is_named_not_guessed(self) -> None:
+        # Inferring PASS from an exit code this stage does not own is how a
+        # receipt starts lying.
+        assert "unreadable" in new_repo._docs_detail("not json", 2)
+
+    def test_an_unreachable_governance_root_skips_rather_than_stops(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Governance being unreachable is not a reason to refuse a repository.
+
+        This stage is advisory. Stage 5 is the gate.
+        """
+        monkeypatch.setenv(new_repo.GOV_ROOT_ENV, str(tmp_path / "nope"))
+        cfg = _ci_config()
+        receipt = new_repo.BirthReceipt()
+        new_repo._run_governance_docs(cfg, receipt)
+        recorded = [r for r in receipt.stages if r.key == new_repo.GOV_DOCS_KEY]
+        assert recorded
+        assert recorded[0].status == "SKIP"
+
+    def test_no_governance_root_at_all_skips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(new_repo.GOV_ROOT_ENV, raising=False)
+        cfg = _ci_config()
+        receipt = new_repo.BirthReceipt()
+        new_repo._run_governance_docs(cfg, receipt)
+        recorded = [r for r in receipt.stages if r.key == new_repo.GOV_DOCS_KEY]
+        assert recorded
+        assert recorded[0].status == "SKIP"
+
+
+class TestMypyIsNotPretendedToBeAutoFixable:
+    """mypy has no `--fix`, and `--install-types` cannot work in a newborn.
+
+    The environment is uv-managed and has no `pip`, so mypy shells out to an
+    interpreter that installs nothing and changes nothing. A stage wrapping it
+    records PASS for work that never happened. This asserts nobody adds it back.
+    """
+
+    def test_install_types_is_not_invoked(self) -> None:
+        source = Path(new_repo.__file__).read_text(encoding="utf-8")
+        assert '"--install-types"' not in source
+
+    def test_stage_five_still_typechecks(self) -> None:
+        source = Path(new_repo.__file__).read_text(encoding="utf-8")
+        assert '("validate.typecheck", "typecheck", [str(python), "-m", "mypy", "src"])' in source
+
+
 class TestBirthNormalisesBeforeItAttests:
     """Formatting is a birth invariant, and the receipt records what changed.
 
