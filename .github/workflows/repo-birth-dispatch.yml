@@ -89,7 +89,15 @@ jobs:
       - name: Sync locked dependencies
         # canonical_ci.py imports yaml; the rest of the birth runner is stdlib.
         # `uv sync` creates .venv, which Repo.mk then prefers over python3.
-        run: uv sync --extra dev
+        #
+        # `--frozen` installs what uv.lock resolved instead of re-resolving at
+        # run time, and `--no-build` refuses source distributions, so no
+        # dependency's setup script executes on a runner that is holding an
+        # organisation-Administration token. `--no-install-project` because the
+        # birth runner is standalone scripts under scripts/birth-runner: it
+        # imports yaml and its own modules by path, never the example package.
+        # Verified on a real local birth under exactly this venv.
+        run: uv sync --extra dev --frozen --no-install-project --no-build
 
       - name: Mint installation token
         id: app_token
