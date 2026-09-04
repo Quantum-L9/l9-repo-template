@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/idea_decision_packet.schema.json",
+  "title": "IdeaDecisionPacket",
+  "description": "The decide stage's output, produced by modules/idea-expander-decision-node. IdeaOS consumes it; IdeaOS never authors it \u2014 the decision authority is the decision node's alone (expansion.py FORBIDDEN_DECISIONS enforces the reverse direction).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "idea_id",
+    "decision",
+    "produced_at"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ideaos.idea-decision-packet/v1"
+    },
+    "idea_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "GO",
+        "CONDITIONAL_GO",
+        "HOLD",
+        "NO_GO"
+      ]
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "statement",
+          "met"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "met": {
+            "type": "boolean"
+          }
+        }
+      },
+      "description": "Meaningful for CONDITIONAL_GO: promotion waits on every condition being met."
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "produced_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/route_decision.schema.json",
+  "title": "RouteDecision",
+  "description": "The stage an idea belongs in next, with the evidence that placed it there.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "idea_id",
+    "next_stage",
+    "rationale",
+    "input_digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ideaos.route-decision/v1"
+    },
+    "idea_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "next_stage": {
+      "type": "string",
+      "enum": [
+        "create",
+        "expand",
+        "expansion_gate",
+        "decision_handoff",
+        "decide",
+        "execute"
+      ]
+    },
+    "rationale": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "description": "Why this stage and not the next one."
+    },
+    "input_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

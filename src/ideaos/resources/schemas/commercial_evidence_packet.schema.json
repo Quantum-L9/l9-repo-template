@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/commercial_evidence_packet.schema.json",
+  "title": "CommercialEvidencePacket",
+  "description": "Provider findings, bound to the request digest that produced them. Every finding answers exactly one requested question id \u2014 a provider cannot answer a question nobody asked, and cannot silently drop one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "idea_id",
+    "findings",
+    "provider",
+    "input_digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ideaos.commercial-evidence-packet/v1"
+    },
+    "idea_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "question_id",
+          "answer",
+          "sources",
+          "confidence"
+        ],
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answer": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "deterministic"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deterministic": {
+          "type": "boolean"
+        }
+      }
+    },
+    "input_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

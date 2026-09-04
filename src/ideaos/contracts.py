@@ -8,7 +8,7 @@ from referencing import Registry, Resource
 from .errors import ContractValidationError, PolicyError
 _SCHEMA_DIR=Path(__file__).parent/'resources'/'schemas'
 @lru_cache(maxsize=1)
-def _docs():
+def _docs()->dict[str,Any]:
     out={}; ids={}
     for p in sorted(_SCHEMA_DIR.glob('*.json')):
         raw=json.loads(p.read_text())
@@ -17,9 +17,10 @@ def _docs():
         if sid in ids: raise PolicyError(f'duplicate schema id {sid}')
         Draft202012Validator.check_schema(raw); out[p.name]=raw; ids[sid]=p.name
     return out
-def schema_documents(): return json.loads(json.dumps(_docs()))
+def schema_documents()->dict[str,Any]:
+    copied:dict[str,Any]=json.loads(json.dumps(_docs())); return copied
 @lru_cache(maxsize=1)
-def registry():
+def registry()->Registry:
     r=Registry()
     for s in _docs().values(): r=r.with_resource(s['$id'],Resource.from_contents(s))
     return r

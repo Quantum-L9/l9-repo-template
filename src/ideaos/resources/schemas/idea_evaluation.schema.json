@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/idea_evaluation.schema.json",
+  "title": "IdeaEvaluation",
+  "description": "IdeaOS's reading of a decision packet's promotion state. `computed_promotion.state` is the field runtime.py line 81 branches on.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "idea_id",
+    "decision",
+    "computed_promotion",
+    "input_digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ideaos.idea-evaluation/v1"
+    },
+    "idea_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "GO",
+        "CONDITIONAL_GO",
+        "HOLD",
+        "NO_GO"
+      ]
+    },
+    "computed_promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "reasons"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "execution_ready",
+            "conditional",
+            "blocked",
+            "rejected"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "unmet_conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "input_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}
