@@ -303,16 +303,18 @@ class TestGovernanceDocsAreInvokedNotVendored:
         cfg = _ci_config()
         receipt = new_repo.BirthReceipt()
         new_repo._run_governance_docs(cfg, receipt)
-        recorded = [r for r in receipt.stages if r.key == "finalize.docs"]
-        assert recorded and recorded[0].status == "SKIP"
+        recorded = [r for r in receipt.stages if r.key == new_repo.GOV_DOCS_KEY]
+        assert recorded
+        assert recorded[0].status == "SKIP"
 
     def test_no_governance_root_at_all_skips(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(new_repo.GOV_ROOT_ENV, raising=False)
         cfg = _ci_config()
         receipt = new_repo.BirthReceipt()
         new_repo._run_governance_docs(cfg, receipt)
-        recorded = [r for r in receipt.stages if r.key == "finalize.docs"]
-        assert recorded and recorded[0].status == "SKIP"
+        recorded = [r for r in receipt.stages if r.key == new_repo.GOV_DOCS_KEY]
+        assert recorded
+        assert recorded[0].status == "SKIP"
 
 
 class TestMypyIsNotPretendedToBeAutoFixable:

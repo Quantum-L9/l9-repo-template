@@ -1254,6 +1254,11 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
 GOV_ROOT_ENV = "L9_GOV_ROOT"
 GOV_DOCS_SKILL = Path("skills/l9-update-agent-docs/scripts")
 GOV_DOCS_ENTRYPOINT = "repo_docs.py"
+# One receipt line, three exits from it. Naming the key and label once is what
+# stops a later edit renaming the SKIP path and leaving the PASS path behind,
+# which would read as two different stages in the same receipt.
+GOV_DOCS_KEY = "finalize.docs"
+GOV_DOCS_LABEL = "agent docs"
 
 
 def _run_governance_docs(cfg: BirthConfig, receipt: BirthReceipt) -> None:
@@ -1273,8 +1278,8 @@ def _run_governance_docs(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     gov_root = (os.environ.get(GOV_ROOT_ENV) or "").strip()
     if not gov_root:
         receipt.record(
-            "finalize.docs",
-            "agent docs",
+            GOV_DOCS_KEY,
+            GOV_DOCS_LABEL,
             "SKIP",
             f"no {GOV_ROOT_ENV} — governance skill not reachable",
         )
@@ -1283,8 +1288,8 @@ def _run_governance_docs(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     scripts = Path(gov_root) / GOV_DOCS_SKILL
     if not (scripts / GOV_DOCS_ENTRYPOINT).is_file():
         receipt.record(
-            "finalize.docs",
-            "agent docs",
+            GOV_DOCS_KEY,
+            GOV_DOCS_LABEL,
             "SKIP",
             f"{GOV_DOCS_SKILL / GOV_DOCS_ENTRYPOINT} not found under {gov_root}",
         )
@@ -1305,8 +1310,8 @@ def _run_governance_docs(cfg: BirthConfig, receipt: BirthReceipt) -> None:
         check=False,
     )
     receipt.record(
-        "finalize.docs",
-        "agent docs",
+        GOV_DOCS_KEY,
+        GOV_DOCS_LABEL,
         "PASS",
         _docs_detail(proc.stdout, proc.returncode),
     )
