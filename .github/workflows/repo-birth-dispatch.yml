@@ -51,7 +51,32 @@ on:
         description: >-
           Accept an unenrolled repository, with a reason. Blank fails closed at
           stage 9 and leaves the repository QUARANTINED but preserved. See
-          docs/ops/REPO_BIRTH.md, "Current limitation".
+          docs/ops/REPO_BIRTH.md, "Enrolment status".
+        required: false
+        type: string
+      payload_repo:
+        description: >-
+          owner/name of the repository holding the product bytes. Blank births
+          the bare template. Must be in this organisation.
+        required: false
+        type: string
+      payload_ref:
+        description: >-
+          Branch, tag, or commit SHA in payload_repo. Required when payload_repo
+          is set; a SHA is what makes the birth reproducible.
+        required: false
+        type: string
+      payload_subpath:
+        description: >-
+          Directory inside the payload checkout to use as the payload. Blank
+          uses the checkout root.
+        required: false
+        type: string
+      payload_contract_path:
+        description: >-
+          Path inside the payload checkout to a compiled l9.birth-payload/v1.
+          Required only for a repository-shaped payload, which is authoritative
+          over its product tree; an additive fragment needs none.
         required: false
         type: string
 
@@ -107,6 +132,90 @@ jobs:
           private-key: ${{ secrets.BIRTH_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
+      - name: Fetch the payload
+        # A payload is product bytes from somewhere else, so it arrives as a
+        # pinned git checkout rather than an archive URL: that is the shape
+        # compile_birth_payload.py already requires of a source ("clean checkout
+        # of the source repository", identity read from `origin`), and it is the
+        # only shape whose contents are attributable to a commit.
+        #
+        # Same-organisation only. This job holds an organisation-Administration
+        # token, and a birth that could pull an arbitrary third-party tree into
+        # the newborn's root commit under that token is a supply-chain hole, not
+        # a feature. The App is installed on this org, so a foreign repo would
+        # fail to clone anyway — this fails it earlier, and on purpose.
+        id: payload
+        if: inputs.payload_repo != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PAYLOAD_REPO: ${{ inputs.payload_repo }}
+          PAYLOAD_REF: ${{ inputs.payload_ref }}
+          PAYLOAD_SUBPATH: ${{ inputs.payload_subpath }}
+          PAYLOAD_CONTRACT_PATH: ${{ inputs.payload_contract_path }}
+          BIRTH_ORG: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          case "$PAYLOAD_REPO" in
+            */*/*|"") echo "payload_repo must be owner/name" >&2; exit 2 ;;
+            "$BIRTH_ORG"/*) : ;;
+            *) echo "payload_repo must be in $BIRTH_ORG (got $PAYLOAD_REPO)" >&2; exit 2 ;;
+          esac
+          if [ -z "$PAYLOAD_REF" ]; then
+            echo "payload_ref is required when payload_repo is set" >&2
+            exit 2
+          fi
+          # `..` in either path would resolve outside the checkout and hand
+          # `make new-repo` a directory of runner files to copy into the
+          # newborn's root commit. Reject the segment rather than normalising.
+          for p in "$PAYLOAD_SUBPATH" "$PAYLOAD_CONTRACT_PATH"; do
+            case "/$p/" in
+              */../*) echo "payload paths must not contain '..' (got '$p')" >&2; exit 2 ;;
+              //*) : ;;
+            esac
+            case "$p" in
+              /*) echo "payload paths must be relative (got '$p')" >&2; exit 2 ;;
+            esac
+          done
+
+          dest="$RUNNER_TEMP/payload-src"
+          git clone --no-checkout "https://x-access-token:${GH_TOKEN}@github.com/${PAYLOAD_REPO}.git" "$dest"
+          # Drop the credential out of .git/config immediately. `.git` is
+          # excluded from the copy, so this is defence in depth rather than the
+          # only thing standing between the token and the newborn.
+          git -C "$dest" remote set-url origin "https://github.com/${PAYLOAD_REPO}.git"
+          git -C "$dest" -c "http.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            fetch --depth 1 origin "$PAYLOAD_REF"
+          git -C "$dest" checkout --detach FETCH_HEAD
+          sha="$(git -C "$dest" rev-parse HEAD)"
+
+          root="$dest"
+          if [ -n "$PAYLOAD_SUBPATH" ]; then
+            root="$dest/$PAYLOAD_SUBPATH"
+          fi
+          if [ ! -d "$root" ]; then
+            echo "payload_subpath '$PAYLOAD_SUBPATH' is not a directory in $PAYLOAD_REPO@$sha" >&2
+            exit 2
+          fi
+
+          contract=""
+          if [ -n "$PAYLOAD_CONTRACT_PATH" ]; then
+            contract="$dest/$PAYLOAD_CONTRACT_PATH"
+            if [ ! -f "$contract" ]; then
+              echo "payload_contract_path '$PAYLOAD_CONTRACT_PATH' is not a file in $PAYLOAD_REPO@$sha" >&2
+              exit 2
+            fi
+          fi
+
+          # The resolved SHA is the reproducibility record: payload_ref may be a
+          # moving branch, this is what was actually assembled.
+          {
+            echo "root=$root"
+            echo "contract=$contract"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "payload: ${PAYLOAD_REPO}@${sha}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Birth the repository
         # Every dispatch input arrives through `env`, never interpolated into
         # the script body: `${{ inputs.description }}` inside a `run:` is a
@@ -122,6 +231,8 @@ jobs:
           # Empty is not an authorization: new_repo.py strips this and fails
           # closed on a blank value, so exporting it unconditionally is safe.
           L9_BIRTH_CI_UNVERIFIED: ${{ inputs.ci_unverified_reason }}
+          BIRTH_PAYLOAD: ${{ steps.payload.outputs.root }}
+          BIRTH_PAYLOAD_CONTRACT: ${{ steps.payload.outputs.contract }}
         run: |
           set -euo pipefail
 
@@ -132,6 +243,14 @@ jobs:
             ORG="$BIRTH_ORG"
             RECEIPT="$GITHUB_WORKSPACE/birth-receipt.json"
           )
+          # Both empty on a bare birth: the fetch step did not run, so its
+          # outputs are unset and this is the same command as before.
+          if [ -n "${BIRTH_PAYLOAD:-}" ]; then
+            args+=(PAYLOAD="$BIRTH_PAYLOAD")
+          fi
+          if [ -n "${BIRTH_PAYLOAD_CONTRACT:-}" ]; then
+            args+=(PAYLOAD_CONTRACT="$BIRTH_PAYLOAD_CONTRACT")
+          fi
           if [ "$BIRTH_VISIBILITY" = "private" ]; then
             args+=(PRIVATE=1)
           fi

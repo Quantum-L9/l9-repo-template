@@ -682,6 +682,38 @@ carrying organization Administration. The App is installed on **all**
 repositories: a newborn cannot be named in a selected-repositories list before
 it exists.
 
+### Dispatching with a payload
+
+A bare dispatch births the template. To put product bytes in the root commit,
+name where they come from:
+
+| Input | Meaning |
+|-------|---------|
+| `payload_repo` | `owner/name` holding the product bytes. **This organization only.** |
+| `payload_ref` | branch, tag, or commit SHA. Required with `payload_repo`. |
+| `payload_subpath` | directory inside that checkout to use; blank means its root |
+| `payload_contract_path` | compiled `l9.birth-payload/v1` inside that checkout — required only for a repository-shaped payload |
+
+The payload arrives as a **pinned git checkout**, never an archive URL. That is
+the shape `compile_birth_payload.py` already demands of a source — "clean
+checkout of the source repository", identity read from `origin` — and it is the
+only shape whose contents are attributable to a commit. The job resolves
+`payload_ref` to a SHA and prints `owner/name@sha` in the run summary, so a
+moving branch still leaves a record of what was actually assembled.
+
+Same-organization is enforced, not assumed. This job holds an organization
+Administration token; a birth that could pull an arbitrary third-party tree into
+a newborn's root commit under that token is a supply-chain hole. `..` and
+absolute paths are rejected in both path inputs for the same reason — either
+would resolve outside the checkout and hand `make new-repo` a directory of
+runner files to copy.
+
+Which mode applies is decided by the payload's shape, not by these inputs: a
+fragment overlays additively and needs no contract, a repository-shaped payload
+is authoritative and stops the birth without one (`new_repo.py`
+`_preflight_payload_contract`). Passing `payload_contract_path` for a fragment
+is unnecessary; omitting it for a repository-shaped payload fails closed.
+
 The workflow orchestrates birth; it is not CI, and it does not enroll this
 repository in anything. No job declares a `uses:` naming a Quantum-L9 CI
 workflow, so `canonical_ci.discover_bindings()` returns `[]` and the ownership
