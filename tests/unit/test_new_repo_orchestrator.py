@@ -294,6 +294,31 @@ class TestSessionScaffoldingIsNeverBorn:
     def test_template_content_is_untouched(self, rel: str) -> None:
         assert not new_repo._is_session_scaffolding(Path(rel))
 
+    def test_the_birth_dispatch_workflow_is_not_inherited(self) -> None:
+        """A newborn is a product, not a second factory.
+
+        `.github/**` is `chassis`, so CODEOWNERS, labels and dependabot ARE
+        inherited. The birth dispatch workflow must not be: it mints an
+        organisation-Administration token, and a newborn carrying it is inert
+        only for as long as nobody creates a `repo-birth` environment there.
+        """
+        assert new_repo._is_session_scaffolding(Path(".github/workflows/repo-birth-dispatch.yml"))
+
+    def test_copy_tree_keeps_github_but_drops_the_dispatch_workflow(self, tmp_path: Path) -> None:
+        # The exclusion is one file, not the directory. Proving both halves in
+        # one copy is what stops a future widening from passing silently.
+        src = tmp_path / "template"
+        (src / ".github" / "workflows").mkdir(parents=True)
+        (src / ".github" / "CODEOWNERS").write_text("* @owner\n", encoding="utf-8")
+        (src / ".github" / "workflows" / "repo-birth-dispatch.yml").write_text(
+            "name: x\n", encoding="utf-8"
+        )
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        new_repo.copy_tree(src, dest)
+        assert (dest / ".github" / "CODEOWNERS").is_file()
+        assert not (dest / ".github" / "workflows" / "repo-birth-dispatch.yml").exists()
+
     def test_copy_tree_leaves_it_behind(self, tmp_path: Path) -> None:
         src = tmp_path / "template"
         (src / ".claude" / "hooks").mkdir(parents=True)

@@ -672,8 +672,19 @@ it exists.
 The workflow orchestrates birth; it is not CI, and it does not enroll this
 repository in anything. No job declares a `uses:` naming a Quantum-L9 CI
 workflow, so `canonical_ci.discover_bindings()` returns `[]` and the ownership
-boundary above is untouched. It lives in the template and is never inherited by
-a newborn.
+boundary above is untouched.
+
+It lives in the template and is **not** inherited by a newborn. That is not
+automatic: `.github/**` is `chassis`, so CODEOWNERS, labels and dependabot are
+carried into every newborn, and the first version of this workflow was carried
+with them — verified on a real local birth. `TEMPLATE_EXCLUDE_PATHS` in
+`new_repo.py` excludes this one file from the template copy, alongside the
+top-level session-scaffolding exclusion it extends. A repository born from this
+template is a product, not a second factory: inheriting a dispatchable workflow
+that mints an organisation-Administration token would be inert only for as long
+as nobody created a `repo-birth` environment there, and not inert at all had
+those credentials been organisation-level rather than repository-environment
+ones.
 
 Stage 9 still applies. With no organization ruleset in place, a dispatched
 birth is `QUARANTINED` exactly as a local one is, unless the

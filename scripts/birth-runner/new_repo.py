@@ -188,6 +188,19 @@ COPY_EXCLUDE_SUFFIXES = ownership_contract.COPY_EXCLUDE_SUFFIXES
 # machine's.
 TEMPLATE_EXCLUDE_TOP_LEVEL = frozenset({".claude", ".mcp.json"})
 
+# Template-only content at an exact nested path, excluded for the same reason as
+# the top-level set above but not expressible by a first path segment: `.github`
+# IS inherited (`chassis` in payload-ownership.yaml carries CODEOWNERS, labels
+# and dependabot into every newborn), so only the individual file is excluded.
+#
+# `repo-birth-dispatch.yml` is this template's own birth surface. A newborn
+# inheriting it gains a manually-dispatchable workflow that mints an
+# organisation-Administration token — inert only for as long as nobody creates a
+# `repo-birth` environment in that repository, and NOT inert at all had those
+# credentials been organisation-level rather than repository-environment ones.
+# A repository born from this template is a product, not a second factory.
+TEMPLATE_EXCLUDE_PATHS = frozenset({Path(".github/workflows/repo-birth-dispatch.yml")})
+
 REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 PKG_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 MARKER_PROFILE_RE = re.compile(r"^profile:[ \t]*[\"']?([A-Za-z0-9_-]+)[\"']?[ \t]*$", re.M)
@@ -504,7 +517,9 @@ def _is_machine_state(rel: Path) -> bool:
 
 
 def _is_session_scaffolding(rel: Path) -> bool:
-    return bool(rel.parts) and rel.parts[0] in TEMPLATE_EXCLUDE_TOP_LEVEL
+    return (
+        bool(rel.parts) and rel.parts[0] in TEMPLATE_EXCLUDE_TOP_LEVEL
+    ) or rel in TEMPLATE_EXCLUDE_PATHS
 
 
 def copy_tree(src: Path, dest: Path) -> int:
