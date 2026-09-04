@@ -1,0 +1,113 @@
+{
+  "schema": "ideaos.decision-node-input/v3",
+  "expansion_packet": {
+    "schema_version": 1,
+    "idea_id": "fixture-idea",
+    "source_refs": [
+      "source:fixture"
+    ],
+    "original_center": {
+      "dream": "Make X better",
+      "invariant": "Preserve Y",
+      "wedge": "Start with Z",
+      "proof": "Measure delta"
+    },
+    "wide_discoveries": [
+      {
+        "id": "W1",
+        "title": "Adjacent wedge",
+        "claim": "A nearby use case may improve proof speed",
+        "evidence_state": "HYPOTHESIS",
+        "source_refs": []
+      }
+    ],
+    "deep_discoveries": [
+      {
+        "id": "D1",
+        "title": "Learning loop",
+        "claim": "Outcome feedback may compound model quality",
+        "evidence_state": "SUPPORTED_INFERENCE",
+        "source_refs": []
+      }
+    ],
+    "compounding_loops": [
+      {
+        "id": "L1",
+        "title": "Outcome loop",
+        "mechanism": "usage -> evidence -> better decision",
+        "evidence_state": "HYPOTHESIS"
+      }
+    ],
+    "persona_effects": [
+      {
+        "lens": "skeptic",
+        "modification": "Require counterfactual proof",
+        "evidence_state": "SUPPORTED_INFERENCE"
+      }
+    ],
+    "substrate_assessment": null,
+    "candidate_dispositions": [
+      {
+        "candidate_id": "W1",
+        "disposition": "integrate_now",
+        "reason": "improves proof"
+      },
+      {
+        "candidate_id": "D1",
+        "disposition": "sequence_later",
+        "reason": "needs outcome volume"
+      }
+    ],
+    "revised_center": {
+      "dream": "Make X measurably better",
+      "invariant": "Preserve Y",
+      "wedge": "Start with Z and a counterfactual tampered-after-gate",
+      "proof": "Measure attributable delta"
+    },
+    "evidence_register": [
+      {
+        "claim": "Counterfactual proof reduces ambiguity",
+        "evidence_state": "SUPPORTED_INFERENCE",
+        "source_ref": null
+      }
+    ],
+    "unknowns": [
+      {
+        "id": "U1",
+        "question": "What is baseline volume?",
+        "impact": "determines proof speed"
+      }
+    ],
+    "modifications": [
+      {
+        "target": "proof",
+        "change": "add counterfactual",
+        "reason": "skeptic lens"
+      }
+    ],
+    "decision_node_handoff": {
+      "status": "READY",
+      "blockers": [],
+      "notes": [
+        "decision reserved downstream"
+      ]
+    }
+  },
+  "expansion_gate_receipt": {
+    "schema": "ideaos.expansion-gate-receipt/v1",
+    "idea_id": "fixture-idea",
+    "status": "READY",
+    "blockers": [],
+    "input_digest": "sha256:2334a876618316b33883852c249a1fb3a29c370094f8c912d306b98dbcb84921",
+    "decision_node_handoff_allowed": true
+  },
+  "decision_context": {
+    "authority_rules": [
+      "decision authority belongs to decision node"
+    ],
+    "constraints": [
+      "do not invent evidence"
+    ],
+    "capability_refs": []
+  }
+}

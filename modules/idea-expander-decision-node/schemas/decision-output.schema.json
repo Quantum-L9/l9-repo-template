@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/decision_node_output.schema.json",
+  "title": "IdeaExpanderDecisionOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "idea_id",
+    "perspectives",
+    "red_team",
+    "board_votes",
+    "decision",
+    "conditions",
+    "dissent",
+    "evidence_acquisition"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ideaos.decision-node-output/v2"
+    },
+    "idea_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "perspectives": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deployability",
+        "marketability",
+        "economics"
+      ],
+      "properties": {
+        "deployability": {
+          "type": "object",
+          "required": [
+            "score",
+            "findings"
+          ],
+          "properties": {
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "marketability": {
+          "type": "object",
+          "required": [
+            "score",
+            "findings"
+          ],
+          "properties": {
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "economics": {
+          "type": "object",
+          "required": [
+            "score",
+            "findings"
+          ],
+          "properties": {
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "red_team": {
+      "type": "object",
+      "required": [
+        "critical_findings",
+        "dispositions"
+      ],
+      "properties": {
+        "critical_findings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dispositions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "board_votes": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "member",
+          "vote",
+          "reason"
+        ],
+        "properties": {
+          "member": {
+            "type": "string"
+          },
+          "vote": {
+            "enum": [
+              "GO",
+              "CONDITIONAL_GO",
+              "HOLD",
+              "NO_GO"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "decision": {
+      "enum": [
+        "GO",
+        "CONDITIONAL_GO",
+        "HOLD",
+        "NO_GO"
+      ]
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "gate",
+          "owner",
+          "failure_consequence"
+        ],
+        "properties": {
+          "gate": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "failure_consequence": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "dissent": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_acquisition": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/decision_context.schema.json",
+  "title": "DecisionContext",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["authority_rules", "constraints"],
+  "properties": {
+    "authority_rules": {"type": "array", "items": {"type": "string"}},
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "capability_refs": {"type": "array", "items": {"type": "string"}}
+  }
+}

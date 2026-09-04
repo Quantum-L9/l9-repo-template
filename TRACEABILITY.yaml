@@ -1,0 +1,19 @@
+version: 1
+change: idea_expander_first_class_stage
+baseline:
+  doctrine: IdeaOS_Consolidated_System_v11_Polished
+  runtime: IdeaOS 11.2.0
+  git_head: 6b9d4bca34583608cc5deba4f26771dae1263c27
+requirements:
+  standalone_expander_module:
+    evidence: modules/idea-expander/SKILL.md
+  expansion_before_decision:
+    evidence: architecture/01_PIPELINE_STATE_MACHINE.md
+  deterministic_handoff_gate:
+    evidence: runtime_overlay/src/ideaos/expansion.py
+  decision_authority_separation:
+    evidence: architecture/02_AUTHORITY_BOUNDARIES.md
+  decision_node_ready_only:
+    evidence: modules/idea-expander-decision-node/scripts/validate_decision_input.py
+  one_disposition_per_discovery:
+    evidence: modules/idea-expander/scripts/validate_expansion_package.py

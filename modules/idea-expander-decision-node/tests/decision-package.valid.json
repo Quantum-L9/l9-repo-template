@@ -1,0 +1,59 @@
+{
+  "schema": "ideaos.decision-node-output/v2",
+  "idea_id": "fixture-idea",
+  "perspectives": {
+    "deployability": {
+      "score": 8,
+      "findings": [
+        "bounded"
+      ]
+    },
+    "marketability": {
+      "score": 7,
+      "findings": [
+        "testable"
+      ]
+    },
+    "economics": {
+      "score": 7,
+      "findings": [
+        "requires proof"
+      ]
+    }
+  },
+  "red_team": {
+    "critical_findings": [],
+    "dispositions": []
+  },
+  "board_votes": [
+    {
+      "member": "operator",
+      "vote": "CONDITIONAL_GO",
+      "reason": "prove"
+    },
+    {
+      "member": "buyer",
+      "vote": "CONDITIONAL_GO",
+      "reason": "prove demand"
+    },
+    {
+      "member": "skeptic",
+      "vote": "HOLD",
+      "reason": "unknown baseline"
+    }
+  ],
+  "decision": "CONDITIONAL_GO",
+  "conditions": [
+    {
+      "gate": "baseline evidence",
+      "owner": "founder",
+      "failure_consequence": "HOLD"
+    }
+  ],
+  "dissent": [
+    "skeptic prefers HOLD"
+  ],
+  "evidence_acquisition": [
+    "baseline volume"
+  ]
+}

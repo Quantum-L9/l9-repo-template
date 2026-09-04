@@ -1,0 +1,58 @@
+schema: ideaos.lifecycle/v1
+version: 11.4.0
+canonical_flow:
+  - stage: create
+    owner: IdeaOS core
+    output: DevelopedIdeaDossier
+    next: expand
+  - stage: expand
+    owner: modules/idea-expander
+    output: ExpandedIdeaDossierPacket
+    validator: modules/idea-expander/scripts/validate_expansion_package.py
+    next: expansion_gate
+  - stage: expansion_gate
+    owner: IdeaOS runtime
+    operation: expansion_gate
+    input_schema: expansion_packet.schema.json
+    output: ExpansionGateReceipt
+    output_schema: expansion_gate_receipt.schema.json
+    next_when_ready: decision_handoff
+    fail_closed: true
+  - stage: decision_handoff
+    owner: IdeaOS runtime
+    operation: decision_handoff
+    input_schema: decision_handoff_request.schema.json
+    output: IdeaExpanderDecisionNodeInput
+    output_schema: decision_node_input.schema.json
+    invariants:
+      - expansion_gate_receipt.status == READY
+      - expansion_gate_receipt.decision_node_handoff_allowed == true
+      - expansion_gate_receipt.idea_id == expansion_packet.idea_id
+      - expansion_gate_receipt.input_digest == semantic_digest(expansion_packet)
+    next: decide
+  - stage: decide
+    owner: modules/idea-expander-decision-node
+    input: IdeaExpanderDecisionNodeInput
+    output: IdeaDecisionPacket
+    decisions: [GO, CONDITIONAL_GO, HOLD, NO_GO]
+    next_when_authorized: execute
+  - stage: execute
+    owner: IdeaOS execution boundary
+    input: IdeaDecisionPacket
+    output: IdeaExecutionPacket
+    downstream: l9-idea-execute
+
+canonical_shorthand: create -> expand -> decide -> execute
+
+bypass_policy:
+  direct_decide:
+    allowed_only_when:
+      - exact ExpandedIdeaDossierPacket is present
+      - matching READY ExpansionGateReceipt is present
+      - digest binding passes
+    otherwise: BLOCK
+  direct_execute:
+    allowed_only_when:
+      - valid IdeaDecisionPacket authorizes execution
+      - promotion gates pass
+    otherwise: BLOCK

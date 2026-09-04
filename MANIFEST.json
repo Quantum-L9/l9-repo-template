@@ -1,0 +1,502 @@
+{
+  "pack": "IdeaOS_Consolidated_System_v11.4_Lifecycle_Complete",
+  "version": "11.4.0",
+  "file_count": 99,
+  "files": [
+    {
+      "path": "BASELINE_SOURCE.md",
+      "bytes": 693,
+      "sha256": "8d4cf94faa2bd3fc0be59d86ef727ed9ec2d2114f8fa1cc2af652be7803c1f4a"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "bytes": 960,
+      "sha256": "19d0c4f553e22bf7685885117f440b9d984062ccdc5af47e706c0cef4bcd9ccf"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1473,
+      "sha256": "b3517c00ecd36b9e9c3fbe8629ec7a8c70401946299a76d93ae5be3ee1028bd5"
+    },
+    {
+      "path": "RUNBOOK.md",
+      "bytes": 1231,
+      "sha256": "35d69c002328cf081fb2f910a81706296ee1aa368ca5211f89e7fbedbe8e71b5"
+    },
+    {
+      "path": "TRACEABILITY.yaml",
+      "bytes": 756,
+      "sha256": "4f28496b150654b7d590715ee4216e2500c6fcb68ddcd5406596df7ebf936ca6"
+    },
+    {
+      "path": "VALIDATION.md",
+      "bytes": 702,
+      "sha256": "deba13e770a504e1afc28b89be6f230bcd1c959dfb6c703ecac0177e685c5478"
+    },
+    {
+      "path": "VALIDATION_REPORT_11.3.md",
+      "bytes": 165,
+      "sha256": "c760f36b79d0adf5b7a19dfd6ced5b5e50bcdf87f092fe78b7f3ea147b26e27e"
+    },
+    {
+      "path": "VALIDATION_REPORT_11.4.md",
+      "bytes": 2626,
+      "sha256": "376875d1aa60b9f4e18f7b22d27b9027bd5c9196c2797911ee8348cfba297714"
+    },
+    {
+      "path": "VERSION",
+      "bytes": 7,
+      "sha256": "b20e1ce95de64f1c1c82cb20370952326892e0ec8abe6a79e15cfd0184b5cec1"
+    },
+    {
+      "path": "architecture/00_OPERATING_MODEL.md",
+      "bytes": 1454,
+      "sha256": "a3b7cf28dabf474832a70cd73f10d1caddee26f1c9f599316f346facfef41128"
+    },
+    {
+      "path": "architecture/01_PIPELINE_STATE_MACHINE.md",
+      "bytes": 525,
+      "sha256": "a590be088c443195b1bf79132c8b76fe20979800ec356f3e33e2d3fa9b22c567"
+    },
+    {
+      "path": "architecture/02_AUTHORITY_BOUNDARIES.md",
+      "bytes": 832,
+      "sha256": "01d5e561afd7bdacaf4d17fa7bfff19d8db67d3f47d76159d2cec7db8f99b08e"
+    },
+    {
+      "path": "architecture/03_ARTIFACT_MODEL.md",
+      "bytes": 606,
+      "sha256": "97897551a643d048f7c8c87949386eac5a861cf6f736228f9b44b13c8a3fbc3f"
+    },
+    {
+      "path": "architecture/04_MIGRATION_FROM_V10.md",
+      "bytes": 1015,
+      "sha256": "4059f7e692251d57146d63b60fbc3afd28335ffe1173aaae7db708b11f7be830"
+    },
+    {
+      "path": "architecture/05_EXPANSION_STAGE.md",
+      "bytes": 791,
+      "sha256": "81dac517f4b3fe76f9cfe7bfdbbe304a0b0d2e562e41916673085ea892a29b56"
+    },
+    {
+      "path": "architecture/06_CANONICAL_IDEA_LIFECYCLE.md",
+      "bytes": 1409,
+      "sha256": "9aca25b754c1fc1bc1027ec389d7cf9bdca6f2992778254da018ede53ba79c19"
+    },
+    {
+      "path": "benchmarks/README.md",
+      "bytes": 245,
+      "sha256": "8f33196837af20e225e2ba90f65161a8b47308b2f665fc211625eb3e38755910"
+    },
+    {
+      "path": "constitution/05_ALIGNMENT_AND_NOVELTY_PROTOCOL.md",
+      "bytes": 1077,
+      "sha256": "359f3184a11c90128696684aeec303d7a2c4cad0182a3ef98def39870fd2055f"
+    },
+    {
+      "path": "modules/idea-expander/SKILL.md",
+      "bytes": 5221,
+      "sha256": "ed4a015ec898f1c0c36e001452d31f9359b39d788fdb6b26ae83dca0841382bc"
+    },
+    {
+      "path": "modules/idea-expander/agents/openai.yaml",
+      "bytes": 124,
+      "sha256": "595dabc42abafcd58fa38ad39b57f3a27623ac03b8c8c9fa64416ecf52656d02"
+    },
+    {
+      "path": "modules/idea-expander/references/composition.md",
+      "bytes": 1325,
+      "sha256": "110ee86575907b15b6c12ba50871ba82848797c52ab4831317d39def040a6193"
+    },
+    {
+      "path": "modules/idea-expander/references/expansion-packet.schema.json",
+      "bytes": 7015,
+      "sha256": "8ddd308a7fc10a707c2a0dd4e72c9ba2ac09c05de882eb5c85165f8cd8db28d5"
+    },
+    {
+      "path": "modules/idea-expander/references/expansion-protocol.md",
+      "bytes": 2174,
+      "sha256": "24d6e13f7224c01e02f939626088f7ffdf79f3c7f2e3272bb950ccadc387e087"
+    },
+    {
+      "path": "modules/idea-expander/references/integration-patch.md",
+      "bytes": 1605,
+      "sha256": "b57d12a85b112758773ab3242b826d2a613a69a5631fc0f3bf59a7b31117a848"
+    },
+    {
+      "path": "modules/idea-expander/references/output-contract.md",
+      "bytes": 1084,
+      "sha256": "fc6d891b0ed8a2b522291900fe91c43dad9ec0a339eb1c632c134547756d6923"
+    },
+    {
+      "path": "modules/idea-expander/scripts/validate_expansion_package.py",
+      "bytes": 2496,
+      "sha256": "445c71612e1d6ef3dd7bbba8bf42348dea16ed79da8e61bc45eb5e9d2820ef45"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/SKILL.md",
+      "bytes": 3550,
+      "sha256": "8b3a09bd1b96a7ee4c226c49e2cec5a3c07f12ef7a5c6afd6535c26f0db0eabf"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/agents/openai.yaml",
+      "bytes": 123,
+      "sha256": "85e960482c6b98504a9e931d1ce964d52565676350a52e444e80f83da0113cec"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/references/business-plan-handoff.md",
+      "bytes": 1366,
+      "sha256": "b7f207aa6d37d1d13d32d8aaea8234decf2581b02662f675f1428ca46bd7c9e0"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/references/node-operating-contract.md",
+      "bytes": 1277,
+      "sha256": "a6f58c7c172936bdf38023be02b01523963e044fc5b9a03e4a18224cddcf99cf"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/references/polycognitive-board.md",
+      "bytes": 1993,
+      "sha256": "fa66dbc4a74a6947307ab65c4c359c47a7266a29e7c53a0bfff309a9cd24e063"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/references/red-team-protocol.md",
+      "bytes": 1325,
+      "sha256": "1e5a4b3ab1d28104c595d44f3cd933a0e61048c3e388d2d9d36dd2a7755d816e"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/references/three-perspective-swot.md",
+      "bytes": 2525,
+      "sha256": "8814913d93275540d20175502b43b5a2074b3d9ea6e3da299fc4c6e4b090965b"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/schemas/decision-output.schema.json",
+      "bytes": 3889,
+      "sha256": "b5bf92bbb7899070636c6726e3aa0f2366abe8243884bfce51227974d994b94b"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/schemas/node-input.schema.json",
+      "bytes": 747,
+      "sha256": "4e0bd53d6a842e6981b4ced47af3e7aa908c9019331b6cda1745319fd7f17a1e"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/scripts/validate_decision_input.py",
+      "bytes": 1917,
+      "sha256": "5166b6f6935d2b2100390d85d472ab967f1ea238d1f17b647ac19a0fe9d9a8b1"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/scripts/validate_decision_package.py",
+      "bytes": 945,
+      "sha256": "d987753834f0386c101dc747f6929bb36dd15e5f85178fae54d368e685394309"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/tests/decision-package.valid.json",
+      "bytes": 1045,
+      "sha256": "e78255a2809afe177e551e38f0171e8293f7321aea0c9ecf206af90d29da875e"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/tests/node-input.ready.json",
+      "bytes": 2850,
+      "sha256": "a15feea2794fe6ee023ef1737902f9d1de27fdbd3f7626cda9b22127703353c3"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/tests/node-input.tampered.json",
+      "bytes": 2870,
+      "sha256": "8840f9827f6caa20e3094c17dff751e071515854970bb22ec1a0ac0b0919f31b"
+    },
+    {
+      "path": "personas/customer_buyer.md",
+      "bytes": 947,
+      "sha256": "8c7d4246b97d6e97831d0b8685e58741502a602182c0d56950f164bbe88e6141"
+    },
+    {
+      "path": "personas/distribution_growth.md",
+      "bytes": 991,
+      "sha256": "c2bdb49ed13d2efef748e46c6c927fadcf749fc711866dd078e0884d532e8a15"
+    },
+    {
+      "path": "personas/domain_expert.md",
+      "bytes": 950,
+      "sha256": "f0ac768e1083b0330f87bb00d4d522f7af8ab20801e2f647e9492ff13053074b"
+    },
+    {
+      "path": "personas/founder_operator.md",
+      "bytes": 968,
+      "sha256": "ba76fab214aef4c8342e8325b05d7331a14c3087c798f19a54baac4dc35903e4"
+    },
+    {
+      "path": "personas/investor_capital_allocator.md",
+      "bytes": 1007,
+      "sha256": "543eae18927a96e0ded424963026d024bcba63fe90a08edbbc1e8b93f700e4ef"
+    },
+    {
+      "path": "personas/market_competitor.md",
+      "bytes": 953,
+      "sha256": "eb9f0cac8e671ba2e28ad8bd3553710b3da58582242833b8e96ff3136df98e23"
+    },
+    {
+      "path": "personas/operator_executor.md",
+      "bytes": 969,
+      "sha256": "672d91b938ef42c2f00234e638dbfa718722454174795c99a95a2f115991ecb3"
+    },
+    {
+      "path": "personas/regulator_legal.md",
+      "bytes": 970,
+      "sha256": "efc81d77a219c8b93cddba251110fb0070a4509da11237de2a2cd539ab0ec52d"
+    },
+    {
+      "path": "personas/skeptic_auditor.md",
+      "bytes": 953,
+      "sha256": "90ab481f5556c3e7e08562f9b98244c1250ef16859a7eed9c193d1102655f2a2"
+    },
+    {
+      "path": "personas/systems_architect.md",
+      "bytes": 969,
+      "sha256": "83803e31ae349c864cc1a498d46fb7f26e0dd0db40b2e45942eaaab616930bca"
+    },
+    {
+      "path": "pipeline/IDEA_LIFECYCLE.yaml",
+      "bytes": 1935,
+      "sha256": "ea8287f365ca8ee53e41831c727e8c079c538d41ad2dbbe09b777723f7bbfbf7"
+    },
+    {
+      "path": "protocols/00_CLASSIFICATION_AND_ROUTING.md",
+      "bytes": 517,
+      "sha256": "23b32207de8dddc1da2e64f78256e54d8b6539cd6496a029fc79adfd02af0ad3"
+    },
+    {
+      "path": "protocols/01_DREAM_INVARIANT_WEDGE_PROOF.md",
+      "bytes": 550,
+      "sha256": "e15dc51984942b43c8c4aadf8de7b12a607eac87b470a07e03cacd9e04374dd9"
+    },
+    {
+      "path": "protocols/02_WIDE_DEEP_RETURN_TO_CENTER.md",
+      "bytes": 1321,
+      "sha256": "45b87612a956dc4fa904127347c62f0180bb6159e72548b785a4f808ebe751ad"
+    },
+    {
+      "path": "protocols/03_SOURCE_LINEAGE_AND_SUPERSESSION.md",
+      "bytes": 570,
+      "sha256": "3211b44e0754917fd23d071ff818c23701372499184798fd31eb6c0060a2ddd2"
+    },
+    {
+      "path": "protocols/04_PERSONA_ARCHETYPE_EVALUATION.md",
+      "bytes": 779,
+      "sha256": "921e94cd490484a31eb8811a7b507ecea76425706a1de7a1eea03e19757ddebf"
+    },
+    {
+      "path": "protocols/05_SUBSTRATE_LEVERAGE.md",
+      "bytes": 546,
+      "sha256": "a7d3f7ac5d3b5273137e9b5cb5e50da321fb5d4547e1995ed341e063c068251d"
+    },
+    {
+      "path": "protocols/06_RESEARCH_CODING_RETURN_LOOP.md",
+      "bytes": 686,
+      "sha256": "fa126f75e3c6a465d84ec46e54cc1b22e36887a1667a807fd166fbb50e7131f2"
+    },
+    {
+      "path": "protocols/07_PROTECTED_ACTIONS_AND_REGULATED_SERVICES.md",
+      "bytes": 555,
+      "sha256": "c6558dd1a749cd6368b907214b0f6eaea0165a2e0a8470a283e12cc93293e5e8"
+    },
+    {
+      "path": "protocols/08A_IDEA_EXPANSION.md",
+      "bytes": 1108,
+      "sha256": "3cb88a3d6643cc4b134d14bbb2027ef93fd90b30f850942e2f2858b20280aeb8"
+    },
+    {
+      "path": "protocols/08B_EXPANSION_TO_DECISION_HANDOFF.md",
+      "bytes": 694,
+      "sha256": "30bc688f947b11a32dff8abeb285eadc44cb0c452c129bc6c6de701e295c6eeb"
+    },
+    {
+      "path": "protocols/08_PROMOTION_GATES.md",
+      "bytes": 513,
+      "sha256": "975070303834e6f696de4096d4bf01241ae96807dd4d648fda9cd081bf4b7807"
+    },
+    {
+      "path": "protocols/09_DECISION_NODE.md",
+      "bytes": 561,
+      "sha256": "3c479d0d292049f9716ef07c8b6e2601c5e2b4d75907f8f2cefbb70d4b5d32fb"
+    },
+    {
+      "path": "protocols/10_GOVERNED_LEARNING_LOOP.md",
+      "bytes": 529,
+      "sha256": "c4d03deb72f4b9ea1d97cd016629badbb7e7864ef80e651d993e4faddc323a52"
+    },
+    {
+      "path": "scripts/apply_lifecycle_to_ideaos.py",
+      "bytes": 3308,
+      "sha256": "7d61c9ff09c9a2b4467d1f1c132eacd81bfdcf45f93561400f54311e9828a75e"
+    },
+    {
+      "path": "scripts/validate_ideaos_113_pack.py",
+      "bytes": 2956,
+      "sha256": "19f60610a5fb64515deaeda2011476f220bf1ad725bd253e828455bd39557aa5"
+    },
+    {
+      "path": "scripts/validate_ideaos_114_pack.py",
+      "bytes": 2310,
+      "sha256": "1c1a9508f33a5ebe0fdd8a302ef8297fb1bd754dca40300ee380ab3885a4e79f"
+    },
+    {
+      "path": "src/ideaos/__init__.py",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "src/ideaos/contracts.py",
+      "bytes": 1422,
+      "sha256": "950bc525f07bf6570cc5b218c50e8d03d4843e1153742281316836292d628dc7"
+    },
+    {
+      "path": "src/ideaos/digests.py",
+      "bytes": 336,
+      "sha256": "1bece74021035f1453778ebc611ecd1a8a84aadae4aa11e030f2f57480a070aa"
+    },
+    {
+      "path": "src/ideaos/errors.py",
+      "bytes": 478,
+      "sha256": "3771697add103016b5a10192674a9856a4a9ad50748fc28b608a233d39ff2553"
+    },
+    {
+      "path": "src/ideaos/expansion.py",
+      "bytes": 1564,
+      "sha256": "32361d80f195b7e4e5b5f0490cf39f8f4753e885423428ed07cae804617af588"
+    },
+    {
+      "path": "src/ideaos/lifecycle.py",
+      "bytes": 2133,
+      "sha256": "69e9d718e405b1bd60609956d05e8de5ece95b5c10bf3efb9d15dc78d0fd4d9d"
+    },
+    {
+      "path": "src/ideaos/resources/schemas/decision_context.schema.json",
+      "bytes": 509,
+      "sha256": "db8553b7b4da735996e9ffae9acd00689069c1e180b9c0e238e2cedbd132c1e5"
+    },
+    {
+      "path": "src/ideaos/resources/schemas/decision_handoff_request.schema.json",
+      "bytes": 677,
+      "sha256": "81c2c9e84f6e0582e4241d275da354e732a89ad2d2f563a783cc2b1f26d59e73"
+    },
+    {
+      "path": "src/ideaos/resources/schemas/decision_node_input.schema.json",
+      "bytes": 747,
+      "sha256": "4e0bd53d6a842e6981b4ced47af3e7aa908c9019331b6cda1745319fd7f17a1e"
+    },
+    {
+      "path": "src/ideaos/resources/schemas/expansion_gate_receipt.schema.json",
+      "bytes": 883,
+      "sha256": "2c3c9cb8398c0316b389aa6559785701ba500a2d0ea9c1ddc24bbc88e04e902d"
+    },
+    {
+      "path": "src/ideaos/resources/schemas/expansion_packet.schema.json",
+      "bytes": 7015,
+      "sha256": "8ddd308a7fc10a707c2a0dd4e72c9ba2ac09c05de882eb5c85165f8cd8db28d5"
+    },
+    {
+      "path": "src/ideaos/resources/schemas/ideaos_run_request.schema.json",
+      "bytes": 2429,
+      "sha256": "82bfa68b35904d4451e8b4104607ac3737bb51b2225cf51bd58a40013dffe04c"
+    },
+    {
+      "path": "src/ideaos/runtime.py",
+      "bytes": 8088,
+      "sha256": "bfd835dd532c8e12f1c2e5db439a1939f58264a334fca11df9a7aa767801d7de"
+    },
+    {
+      "path": "templates/CONVERGENCE_BRIEF.md",
+      "bytes": 131,
+      "sha256": "99161ee89d62a47e79ab8b6f92bc58d3150307fbede8a184e5e7777a3465539c"
+    },
+    {
+      "path": "templates/DEEP_DOSSIER_INDEX.md",
+      "bytes": 839,
+      "sha256": "200d626b088737c9a2f87294135a5afd9f70e045879b0d6780f875496378176e"
+    },
+    {
+      "path": "templates/EXPANDED_IDEA_DOSSIER_INDEX.md",
+      "bytes": 661,
+      "sha256": "d4f5f3429370c8a6577282b5041f0c59cc1b315e440d91fd684385959d644ef3"
+    },
+    {
+      "path": "templates/WIDE_DEEP_RETURN_TO_CENTER.md",
+      "bytes": 379,
+      "sha256": "ae9725af4dd05fe15f05dfdad84613c12973db8044f7776632d4644e42c04643"
+    },
+    {
+      "path": "tests/expansion_packet.ready.json",
+      "bytes": 2101,
+      "sha256": "0358204e6cfca25ad1ac54cbdb8a99315516ff4a94578129fe30d7b68342cba2"
+    },
+    {
+      "path": "tests/test_decision_handoff.py",
+      "bytes": 2087,
+      "sha256": "8ed2321bb3becc26e63379ac432a718cfead86cb6bffd5b4db3c200882dab3ab"
+    },
+    {
+      "path": "tests/test_expansion_gate.py",
+      "bytes": 1006,
+      "sha256": "a4440d5a5f81caa64c48bcde7a13c193e4b74378214e7c8e183a04e83784dbd3"
+    },
+    {
+      "path": "thinking_archetypes/analytical.md",
+      "bytes": 754,
+      "sha256": "e3dc0e45b12dc66144ddd7af9f4420924113572d7f6948b5b2a064e607058e71"
+    },
+    {
+      "path": "thinking_archetypes/convergent.md",
+      "bytes": 782,
+      "sha256": "805dcd2812482bd784cf56c20c9e1cf9d169b43858350821340a3b15ff475cd2"
+    },
+    {
+      "path": "thinking_archetypes/creative.md",
+      "bytes": 748,
+      "sha256": "e5e813880abe83fcc79086025e25454a021fc713ba0be6e295328ebc8ad87d15"
+    },
+    {
+      "path": "thinking_archetypes/critical.md",
+      "bytes": 784,
+      "sha256": "55c2184f5f2688b568e91b3a0d0d69992afb76817d4729ad006e8dde71c53bc5"
+    },
+    {
+      "path": "thinking_archetypes/experiential.md",
+      "bytes": 812,
+      "sha256": "cf0000ea1b00ba5181c866247627101cdd66a6a17344bccc571641e0115fc684"
+    },
+    {
+      "path": "thinking_archetypes/exploratory.md",
+      "bytes": 788,
+      "sha256": "9369f401f2a6c599a52d9ea5337e478a33714a79767884a1a5137833f83c3e25"
+    },
+    {
+      "path": "thinking_archetypes/facilitative.md",
+      "bytes": 819,
+      "sha256": "0c5a20827c88e3d88fc2cda4584a285fa0fca6db14b57f231299e021a4eeae0e"
+    },
+    {
+      "path": "thinking_archetypes/integrative.md",
+      "bytes": 778,
+      "sha256": "87fdf09aa021fd0fc518d6583cd153ac7849aafa07a1e64f51a2050a7ec141f1"
+    },
+    {
+      "path": "thinking_archetypes/pragmatic.md",
+      "bytes": 798,
+      "sha256": "553d216a06f855ca0b66beb7ca417e275d539da6fc6261ac654a3aef7685560f"
+    },
+    {
+      "path": "thinking_archetypes/reflective.md",
+      "bytes": 800,
+      "sha256": "e95a23eb012c936aa0c810a0c2fd4bd6b3fdf2d47d30f26ae3cbd06836ed9901"
+    },
+    {
+      "path": "thinking_archetypes/strategic.md",
+      "bytes": 788,
+      "sha256": "651f730fa1a34d73757d8ed03475dee4c9188057b71ab0680231c224ac00690e"
+    },
+    {
+      "path": "thinking_archetypes/systems.md",
+      "bytes": 783,
+      "sha256": "9f5867f6c025208537cdea4709e9dad1f88a8432cedd6df761957624ee8d87ca"
+    }
+  ]
+}

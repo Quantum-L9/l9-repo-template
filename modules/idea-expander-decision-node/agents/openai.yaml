@@ -1,0 +1,3 @@
+interface:
+  display_name: "Idea Expander Decision Node"
+  short_description: "Adjudicate expanded ideas before execution"

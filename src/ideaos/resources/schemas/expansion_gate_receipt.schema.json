@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/expansion_gate_receipt.schema.json",
+  "title": "ExpansionGateReceipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "idea_id",
+    "status",
+    "blockers",
+    "input_digest",
+    "decision_node_handoff_allowed"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ideaos.expansion-gate-receipt/v1"
+    },
+    "idea_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "READY",
+        "BLOCKED"
+      ]
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "input_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "decision_node_handoff_allowed": {
+      "type": "boolean"
+    }
+  }
+}
