@@ -817,6 +817,7 @@ def _ci_config() -> object:
         desc="observability",
         work_dir=Path("/nonexistent"),
         payload=None,
+        payload_contract=None,
         template_src=Path("/nonexistent"),
         org_profile_src=None,
         repo_class="non_constellation_python",
