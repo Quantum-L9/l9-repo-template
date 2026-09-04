@@ -642,6 +642,48 @@ Still supported, and still what the stages automate:
 
 In-repo gates never open PRs (`OPEN_PR=0`).
 
+## Dispatch path (a surface with no create-repo authority)
+
+`.github/workflows/repo-birth-dispatch.yml` runs the same `make new-repo` on a
+runner, for operators whose surface cannot create a repository at all.
+
+Claude Code on the web and on mobile reach GitHub through a proxy that binds a
+session to its configured repositories. `POST /orgs/{org}/repos` is not a
+`repos/{owner}/{repo}/...` path, so `gh repo create` — stage 6 — is unreachable
+there; so are `repos/{owner}/{repo}/environments` and the Actions
+`variables`/`secrets` sub-paths. Reading workflows and runs is permitted, which
+is what makes dispatching one viable. A runner is not behind that proxy.
+
+This splits what stage 6 deliberately keeps as one operation across two
+executors: an agent dispatches, a runner creates. The invariant itself is
+unchanged — the runner calls `make new-repo`, so creating the remote, creating
+`origin`, and pushing the root commit still happen inside a single
+`gh repo create --source --remote origin --push` in `stage_create`. Nothing is
+reimplemented on the runner, and nothing about the desktop path changes.
+
+Authority comes from the `repo-birth` GitHub App, whose installation token is
+minted per run. Its credentials live in the repository environment `repo-birth`
+(`BIRTH_APP_ID`, `BIRTH_APP_PRIVATE_KEY`), which is restricted to `main` — that
+restriction is what stops a fork or a feature branch from minting a token
+carrying organization Administration. The App is installed on **all**
+repositories: a newborn cannot be named in a selected-repositories list before
+it exists.
+
+The workflow orchestrates birth; it is not CI, and it does not enroll this
+repository in anything. No job declares a `uses:` naming a Quantum-L9 CI
+workflow, so `canonical_ci.discover_bindings()` returns `[]` and the ownership
+boundary above is untouched. It lives in the template and is never inherited by
+a newborn.
+
+Stage 9 still applies. With no organization ruleset in place, a dispatched
+birth is `QUARANTINED` exactly as a local one is, unless the
+`ci_unverified_reason` input is given — it maps to `L9_BIRTH_CI_UNVERIFIED`,
+and a blank value is still not an authorization.
+
+The receipt is uploaded as an artifact on every run, including a failed one: a
+quarantined birth publishes the repository and exits non-zero, and its receipt
+is the only record of why.
+
 ## Staged runner (debugging surface)
 
 The original four-stage runner remains for debugging an individual stage. It

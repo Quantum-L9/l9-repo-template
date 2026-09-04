@@ -1,0 +1,145 @@
+name: Repo birth (dispatch)
+
+# Birth a repository from a surface that holds no create-repo authority.
+#
+# Claude Code on the web and on mobile reach GitHub through a proxy that binds a
+# session to its configured repositories: `POST /orgs/{org}/repos` is not a
+# `repos/{owner}/{repo}/...` path, so `gh repo create` — and therefore stage 6,
+# `stage_create` in scripts/birth-runner/new_repo.py — is unreachable there. A
+# runner is not behind that proxy. This workflow is the second half of a
+# deliberate two-step: the agent dispatches, the runner creates.
+#
+# It orchestrates birth; it is NOT CI. No job here declares a `uses:` naming a
+# Quantum-L9 CI workflow, so `canonical_ci.discover_bindings()` finds no binding
+# to authorize and the CI ownership boundary in docs/ops/REPO_BIRTH.md is
+# untouched. A newborn still ships no CI workflow of its own — that remains
+# correct, and this file lives in the template, never in a newborn.
+#
+# The runner does not re-implement any birth stage. It calls `make new-repo`,
+# the same entrypoint a desktop operator calls, so the one-operation invariant
+# of stage 6 — create the remote, create `origin`, push the root commit — stays
+# inside new_repo.py where it belongs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_name:
+        description: "Repository name, no owner prefix"
+        required: true
+        type: string
+      package_name:
+        description: "snake_case Python package name"
+        required: true
+        type: string
+      description:
+        description: "One-line repository description"
+        required: true
+        type: string
+      visibility:
+        description: "Repository visibility"
+        required: true
+        type: choice
+        options:
+          - private
+          - public
+        default: private
+      repo_class:
+        description: "Org repo class — blank uses the runner default"
+        required: false
+        type: string
+      ci_unverified_reason:
+        description: >-
+          Accept an unenrolled repository, with a reason. Blank fails closed at
+          stage 9 and leaves the repository QUARANTINED but preserved. See
+          docs/ops/REPO_BIRTH.md, "Current limitation".
+        required: false
+        type: string
+
+# The workflow's own GITHUB_TOKEN needs nothing beyond reading this checkout.
+# Every act of authority uses the App installation token minted below, so
+# narrowing this does not narrow the birth.
+permissions:
+  contents: read
+
+# Two births of the same name must not race: the loser fails
+# `_preflight_name_free` at best, and interleaves two root commits at worst.
+concurrency:
+  group: repo-birth-${{ inputs.repo_name }}
+  cancel-in-progress: false
+
+jobs:
+  birth:
+    name: Birth ${{ inputs.repo_name }}
+    runs-on: ubuntu-latest
+    # Environment `repo-birth` holds BIRTH_APP_ID and BIRTH_APP_PRIVATE_KEY and
+    # is restricted to `main`. That restriction is the control stopping a fork
+    # or a feature branch from minting an org-administration token.
+    environment: repo-birth
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout template
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
+        with:
+          python-version: "3.12"
+
+      - name: Sync locked dependencies
+        # canonical_ci.py imports yaml; the rest of the birth runner is stdlib.
+        # `uv sync` creates .venv, which Repo.mk then prefers over python3.
+        run: uv sync --extra dev
+
+      - name: Mint installation token
+        id: app_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.BIRTH_APP_ID }}
+          private-key: ${{ secrets.BIRTH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Birth the repository
+        # Every dispatch input arrives through `env`, never interpolated into
+        # the script body: `${{ inputs.description }}` inside a `run:` is a
+        # shell-injection sink, and a description is free text.
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          BIRTH_ORG: ${{ github.repository_owner }}
+          BIRTH_REPO: ${{ inputs.repo_name }}
+          BIRTH_PKG: ${{ inputs.package_name }}
+          BIRTH_DESC: ${{ inputs.description }}
+          BIRTH_CLASS: ${{ inputs.repo_class }}
+          BIRTH_VISIBILITY: ${{ inputs.visibility }}
+          # Empty is not an authorization: new_repo.py strips this and fails
+          # closed on a blank value, so exporting it unconditionally is safe.
+          L9_BIRTH_CI_UNVERIFIED: ${{ inputs.ci_unverified_reason }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            REPO="$BIRTH_REPO"
+            PKG="$BIRTH_PKG"
+            DESC="$BIRTH_DESC"
+            ORG="$BIRTH_ORG"
+            RECEIPT="$GITHUB_WORKSPACE/birth-receipt.json"
+          )
+          if [ "$BIRTH_VISIBILITY" = "private" ]; then
+            args+=(PRIVATE=1)
+          fi
+          if [ -n "$BIRTH_CLASS" ]; then
+            args+=(CLASS="$BIRTH_CLASS")
+          fi
+
+          make new-repo "${args[@]}"
+
+      - name: Upload birth receipt
+        # Unconditional. A QUARANTINED birth publishes the repository and exits
+        # non-zero; its receipt is the only record of why, so it must survive
+        # the failure that produced it.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: birth-receipt-${{ inputs.repo_name }}
+          path: birth-receipt.json
+          if-no-files-found: warn
