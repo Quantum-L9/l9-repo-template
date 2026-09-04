@@ -46,7 +46,8 @@ make new-repo
       ▼
 [3] FINALIZE               canonical LICENSE · uv lock · ruff safe autofix +
    AUTOMATICALLY           format · reconcile plugin-config · render generated
-                           rules · regenerate manifests
+                           rules · compile agent docs via governance's own
+                           skill (advisory) · regenerate manifests
       ▼
 [4] APPLY ORG BIRTH        current Quantum-L9/.github · only applicable
     PROFILE                non-inheritable controls · current org SHA recorded
@@ -99,6 +100,53 @@ What this does not do is make an unready product birthable. A payload whose own
 code fails mypy, whose tests do not import, or which trips a rule ruff will not
 auto-fix (`E402` after a `sys.path` bootstrap is the common one) still stops at
 stage 5, and should.
+
+## Agent docs are compiled by governance, not by this repository
+
+`l9-update-agent-docs` lives in `Quantum-L9/Cursor-Governance` and stays there.
+Stage 3 **invokes** it against the newborn (`finalize.docs`); it is never
+vendored. A copy here would be a second source of truth for documentation
+policy — the duplication `CLAUDE.md` forbids — and stale the day governance
+changed.
+
+Point birth at a governance checkout with `L9_GOV_ROOT`; the dispatch workflow
+clones `Cursor-Governance` at `governance_ref` and passes it. Absent or
+unreachable, the stage records `SKIP` and the birth continues: a documentation
+compiler being down is not a reason to refuse to create a repository, and this
+must never become a second gate competing with stage 5.
+
+**What it does, and does not, do.** The skill's name invites the wrong
+expectation. It compiles documentation obligations, validates the root pointer
+stack, and can render `llms.txt`. It does **not** author `README.md`,
+`CLAUDE.md`, or `AGENTS.md` — it reports on them, and their content stays a
+decision an owner makes. On a real newborn it returned
+`FAIL; 2 documentation blocker(s)`, naming missing `README.md` headings and
+missing `CANONICAL_LAW.md` / `AGENTS.md` pointers.
+
+## There is no mypy autofix, deliberately
+
+Ruff has a safe fixer; mypy has none. Its one automatic remedy,
+`--install-types`, **cannot work in a newborn**: the environment is uv-managed
+and has no `pip`, so mypy shells out to an interpreter that installs nothing and
+changes nothing. A stage wrapping it records `PASS` for work that never
+happened — worse than the failure it was meant to fix. This was built, measured
+against a real birth, and removed.
+
+Even where it could install, the stub would exist only in that venv, absent from
+`pyproject.toml` and `uv.lock`, so the newborn's own CI would fail identically on
+day one. Declaring a dependency is a product decision.
+
+Everything else mypy reports is a statement about the product:
+
+| Class | Fixable by birth? |
+|---|---|
+| `no-untyped-def` — missing annotation | No. Writing a signature is a design decision. |
+| `no-untyped-call` — call into an unannotated function | No. Cascades from the above. |
+| `import-not-found` — module does not exist | No. The payload is incomplete. |
+| `attr-defined` — symbol does not exist | No. |
+
+Inventing an answer to any of them is what a type checker exists to prevent, so
+stage 5 runs mypy and fails closed.
 
 ## Creation is not birth
 

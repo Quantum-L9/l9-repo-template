@@ -54,6 +54,12 @@ on:
           docs/ops/REPO_BIRTH.md, "Enrolment status".
         required: false
         type: string
+      governance_ref:
+        description: >-
+          Branch, tag, or SHA of Quantum-L9/Cursor-Governance supplying the
+          l9-update-agent-docs skill. Blank uses main.
+        required: false
+        type: string
       payload_repo:
         description: >-
           owner/name of the repository holding the product bytes. Blank births
@@ -131,6 +137,35 @@ jobs:
           app-id: ${{ vars.BIRTH_APP_ID }}
           private-key: ${{ secrets.BIRTH_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+
+      - name: Fetch governance (for the agent-docs skill)
+        # `l9-update-agent-docs` lives in Quantum-L9/Cursor-Governance and stays
+        # there. Birth invokes it from this checkout and never vendors it: a copy
+        # in the template would be a second source of truth for documentation
+        # policy, stale the day governance changed.
+        #
+        # Pinned like the payload, and for the same reason — this is code that
+        # runs against the newborn, so which commit ran is part of the record.
+        # Advisory: if governance is unreachable the birth continues and the
+        # receipt says so, because a documentation compiler being down is not a
+        # reason to refuse to create a repository.
+        id: governance
+        continue-on-error: true
+        env:
+          GOV_REF: ${{ inputs.governance_ref }}
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/cursor-governance"
+          ref="${GOV_REF:-main}"
+          case "/$ref/" in
+            */../*) echo "governance_ref must not contain '..'" >&2; exit 2 ;;
+          esac
+          git clone --no-checkout https://github.com/Quantum-L9/Cursor-Governance.git "$dest"
+          git -C "$dest" fetch --depth 1 origin "$ref"
+          git -C "$dest" checkout --detach FETCH_HEAD
+          sha="$(git -C "$dest" rev-parse HEAD)"
+          echo "root=$dest" >> "$GITHUB_OUTPUT"
+          echo "governance: Quantum-L9/Cursor-Governance@${sha}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fetch the payload
         # A payload is product bytes from somewhere else, so it arrives as a
@@ -233,6 +268,9 @@ jobs:
           L9_BIRTH_CI_UNVERIFIED: ${{ inputs.ci_unverified_reason }}
           BIRTH_PAYLOAD: ${{ steps.payload.outputs.root }}
           BIRTH_PAYLOAD_CONTRACT: ${{ steps.payload.outputs.contract }}
+          # Empty when the governance fetch failed; the birth then records
+          # finalize.docs as SKIP and carries on.
+          L9_GOV_ROOT: ${{ steps.governance.outputs.root }}
         run: |
           set -euo pipefail
 
