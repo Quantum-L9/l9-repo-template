@@ -284,6 +284,24 @@ class TestBirthNormalisesBeforeItAttests:
         assert "20 lint fix(es)" in detail
         assert "12 file(s) reformatted" in detail
 
+    def test_the_counters_are_anchored_and_bounded(self) -> None:
+        """An unanchored leading `\\d+` is retried at every offset of the output.
+
+        That is quadratic in the length of a run's stdout rather than linear
+        (Sonar python:S8786), and ruff prints each counter on its own line, so
+        anchoring costs nothing. Asserted because the cheap spelling is the one
+        a later edit reaches for.
+        """
+        assert new_repo._REFORMATTED_RE.pattern.startswith("^")
+        assert new_repo._FIXED_RE.pattern.startswith("^")
+        assert "\\d+" not in new_repo._REFORMATTED_RE.pattern
+        assert "\\d+" not in new_repo._FIXED_RE.pattern
+
+    def test_a_counter_mid_line_is_not_mistaken_for_the_summary(self) -> None:
+        # Anchoring is what stops "...left 12 files reformatted" in some other
+        # sentence from being read as ruff's own count.
+        assert new_repo._autofix_detail("", "note: it left 12 files reformatted") == "already clean"
+
     def test_a_clean_payload_says_so_rather_than_nothing(self) -> None:
         # A blank detail reads as "the step did not run". It ran; it found none.
         assert new_repo._autofix_detail("All checks passed!", "5 files left unchanged") == (

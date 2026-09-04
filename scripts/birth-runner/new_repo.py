@@ -1232,8 +1232,12 @@ def _reconcile_detail(stdout: str) -> str:
     return "; ".join(changes) if changes else "already describes this repository"
 
 
-_FIXED_RE = re.compile(r"Fixed (\d+) error")
-_REFORMATTED_RE = re.compile(r"(\d+) files? reformatted")
+# Ruff prints each of these as its own line, so both are anchored to a line
+# start and both counts are bounded. An unanchored leading `\d+` is retried at
+# every offset of the output when there is no match, which is quadratic in the
+# length of a run's stdout rather than linear (Sonar python:S8786).
+_FIXED_RE = re.compile(r"^Fixed (\d{1,9}) error", re.MULTILINE)
+_REFORMATTED_RE = re.compile(r"^(\d{1,9}) files? reformatted", re.MULTILINE)
 
 
 def _autofix_detail(check_output: str, format_output: str) -> str:
