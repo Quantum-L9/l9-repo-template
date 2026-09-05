@@ -1,15 +1,13 @@
 import hashlib
 import json
-import sys
 import unittest
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 from ideaos.errors import IdeaOSError
 from ideaos.expansion import gate_expansion
 from ideaos.lifecycle import build_decision_node_input
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def semantic_digest(value):

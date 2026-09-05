@@ -41,3 +41,15 @@ The decision node adjudicates. It does not retroactively rewrite the expansion h
 Execution begins only from a valid downstream decision and promotion state.
 
 See `pipeline/IDEA_LIFECYCLE.yaml` for the machine-readable topology.
+
+## Repository boundary
+
+IdeaOS lives **outside** Constellation: it decides *whether* an idea should be
+built, and hands an authorized decision downstream. It is not a Constellation
+node and not a shared dependency, so it is not born from the sibling templates
+that own those shapes — [L9-Node-Template](https://github.com/Quantum-L9/L9-Node-Template)
+for nodes, [Constellation.PackageTemplate](https://github.com/Quantum-L9/Constellation.PackageTemplate)
+for deps.
+
+Execution topology is likewise not owned here: an authorized decision leaves via
+`IdeaExecutionPacket` to `l9-idea-execute`.

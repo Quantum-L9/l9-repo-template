@@ -1,9 +1,11 @@
-import json,sys,unittest
+import json
+import unittest
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT/'src'))
+
 from ideaos.errors import ContractValidationError
 from ideaos.expansion import GATE_POLICY_DIGEST, gate_expansion
+
+ROOT = Path(__file__).resolve().parents[1]
 
 class ExpansionGateTests(unittest.TestCase):
     def fixture(self): return json.loads((ROOT/'tests'/'expansion_packet.ready.json').read_text())

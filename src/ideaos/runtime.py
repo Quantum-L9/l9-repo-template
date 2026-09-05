@@ -48,7 +48,7 @@ def _assert_operation_registry():
 
 def runtime_capabilities()->dict[str,Any]:
     _assert_operation_registry(); schemas=schema_documents()
-    def dg(n): return semantic_digest(schemas[n])
+    def dg(n: str) -> str: return semantic_digest(schemas[n])
     doc={
       "schema":"ideaos.runtime-capabilities/v1","runtime_version":__version__,
       "canonical_ingress":{"library":"ideaos.IdeaOSRuntime.execute","cli":"ideaos run","request_schema":"ideaos_run_request.schema.json","request_schema_digest":dg("ideaos_run_request.schema.json"),"receipt_schema":"ideaos_run_receipt.schema.json","receipt_schema_digest":dg("ideaos_run_receipt.schema.json")},
@@ -83,7 +83,7 @@ class IdeaOSRuntime:
         if mode=="expansion_gate" and output["status"]!="READY": status="blocked"; stop="EXPANSION_NOT_READY"
         receipt={"schema":"ideaos.run-receipt/v1","request_id":request["request_id"],"trace_id":request["trace_id"],"mode":mode,"objective":request["objective"],"status":status,**({"stop_reason":stop} if stop else {}),"input_digest":semantic_digest(artifact),"output_digest":semantic_digest(output),"output_schema":spec.output_schema,"output":output,"validation":{"profile":"strict","input_schema":spec.input_schema,"output_schema":spec.output_schema},"constraints":list(request["constraints"]),"context_refs":list(request["context_refs"]),"authority_rules":list(request["authority_rules"]),"provenance":{"producer":"ideaos.runtime","runtime_version":__version__,"request_digest":semantic_digest(request)}}
         validate(receipt,"ideaos_run_receipt.schema.json"); return receipt
-    def _execute_operation(self,spec,artifact,options):
+    def _execute_operation(self,spec:OperationSpec,artifact:dict[str,Any],options:dict[str,Any])->dict[str,Any]:
         if spec.mode=="route": return self.engine.route(artifact)
         if spec.mode=="evaluate": return self.engine.evaluate_packet(artifact)
         if spec.mode=="execution_packet": return self.engine.build_execution_packet(artifact,decision_ref=options.get("decision_ref"),produced_at=options.get("produced_at"))
