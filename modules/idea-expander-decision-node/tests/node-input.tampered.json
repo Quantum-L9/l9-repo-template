@@ -99,6 +99,7 @@
     "status": "READY",
     "blockers": [],
     "input_digest": "sha256:2334a876618316b33883852c249a1fb3a29c370094f8c912d306b98dbcb84921",
+    "gate_policy_digest": "sha256:d4503c6c3a021400b25b6fbecbbedd4d5a7471c6e45f19086ce63a7a56f253db",
     "decision_node_handoff_allowed": true
   },
   "decision_context": {

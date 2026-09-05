@@ -23,10 +23,50 @@ required = [
     "src/ideaos/resources/schemas/decision_handoff_request.schema.json",
     "src/ideaos/resources/schemas/decision_node_input.schema.json",
     "tests/test_decision_handoff.py",
+    "tests/test_expansion_gate.py",
+    "tests/test_decision_package.py",
 ]
 for rel in required:
     if not (ROOT / rel).exists():
         errors.append(f"missing {rel}")
+
+# Fail-closed authority chain. Each check below exists because the corresponding
+# bypass was reproduced against 11.4.0: a forged READY receipt was accepted, a
+# BLOCKED handoff with an empty blocker list was issued a READY receipt, the
+# decision validator never loaded its own schema, and the installer admitted a
+# synthetic tree containing three placeholder files.
+lifecycle_src = (ROOT / "src/ideaos/lifecycle.py").read_text(encoding="utf-8")
+if "gate_expansion(expansion_packet)" not in lifecycle_src:
+    errors.append("decision handoff does not recompute the expansion gate")
+
+expansion_src = (ROOT / "src/ideaos/expansion.py").read_text(encoding="utf-8")
+if "UPSTREAM_HANDOFF_BLOCKED" not in expansion_src:
+    errors.append("expansion gate does not block on a BLOCKED handoff with no listed blockers")
+if "gate_policy_digest" not in expansion_src:
+    errors.append("expansion gate receipt does not carry a gate policy digest")
+
+package_validator = (
+    ROOT / "modules/idea-expander-decision-node/scripts/validate_decision_package.py"
+).read_text(encoding="utf-8")
+if "decision-output.schema.json" not in package_validator:
+    errors.append("decision package validator does not load its declared schema")
+if "Draft202012Validator" not in package_validator:
+    errors.append("decision package validator does not perform Draft 2020-12 validation")
+
+installer = (ROOT / "scripts/apply_lifecycle_to_ideaos.py").read_text(encoding="utf-8")
+for token, why in (
+    ("rev-parse", "installer does not check the target's git HEAD"),
+    ("--porcelain", "installer does not require a clean worktree"),
+    ("BACKUP", "installer does not take a backup before overwriting"),
+    ("tests/test_expansion_gate.py", "installer does not install the lifecycle regression tests"),
+):
+    if token not in installer:
+        errors.append(why)
+
+# No evidence path may point at a layout this pack does not have.
+for rel in ("TRACEABILITY.yaml", "VALIDATION.md", "README.md"):
+    if "runtime_overlay" in (ROOT / rel).read_text(encoding="utf-8"):
+        errors.append(f"{rel} references the removed runtime_overlay/ layout")
 
 # No parallel decision-node input schema drift.
 a = ROOT / "src/ideaos/resources/schemas/decision_node_input.schema.json"

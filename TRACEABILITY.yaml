@@ -1,4 +1,4 @@
-version: 1
+version: 2
 change: idea_expander_first_class_stage
 baseline:
   doctrine: IdeaOS_Consolidated_System_v11_Polished
@@ -10,10 +10,18 @@ requirements:
   expansion_before_decision:
     evidence: architecture/01_PIPELINE_STATE_MACHINE.md
   deterministic_handoff_gate:
-    evidence: runtime_overlay/src/ideaos/expansion.py
+    evidence: src/ideaos/expansion.py
   decision_authority_separation:
     evidence: architecture/02_AUTHORITY_BOUNDARIES.md
   decision_node_ready_only:
     evidence: modules/idea-expander-decision-node/scripts/validate_decision_input.py
   one_disposition_per_discovery:
     evidence: modules/idea-expander/scripts/validate_expansion_package.py
+  gate_authority_is_recomputed_not_asserted:
+    evidence: tests/test_decision_handoff.py::test_forged_ready_receipt_for_blocked_packet_is_rejected
+  blocked_handoff_never_yields_ready:
+    evidence: tests/test_expansion_gate.py::test_blocked_with_empty_blocker_list_still_blocks
+  decision_package_enforces_its_own_contract:
+    evidence: tests/test_decision_package.py
+  installer_is_bound_to_the_baseline_commit:
+    evidence: scripts/apply_lifecycle_to_ideaos.py

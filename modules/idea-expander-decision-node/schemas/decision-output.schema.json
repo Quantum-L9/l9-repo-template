@@ -2,11 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://quantum-l9.local/ideaos/schemas/decision_node_output.schema.json",
   "title": "IdeaExpanderDecisionOutput",
+  "description": "The decision node's adjudication of exactly one IdeaExpanderDecisionNodeInput v3. Structure alone never authorizes execution: the aggregation rules in references/polycognitive-board.md and the refinement loop in references/red-team-protocol.md are enforced by validate_decision_package.py and are part of this contract.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema",
     "idea_id",
+    "decision_node_input_digest",
     "perspectives",
     "red_team",
     "board_votes",
@@ -17,11 +19,16 @@
   ],
   "properties": {
     "schema": {
-      "const": "ideaos.decision-node-output/v2"
+      "const": "ideaos.decision-node-output/v3"
     },
     "idea_id": {
       "type": "string",
       "minLength": 1
+    },
+    "decision_node_input_digest": {
+      "description": "semantic_digest of the exact IdeaExpanderDecisionNodeInput v3 that was adjudicated. Binds this authorization to one input, so an output cannot be replayed against a different dossier.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "perspectives": {
       "type": "object",
@@ -33,84 +40,28 @@
       ],
       "properties": {
         "deployability": {
-          "type": "object",
-          "required": [
-            "score",
-            "findings"
-          ],
-          "properties": {
-            "score": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 10
-            },
-            "findings": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          }
+          "$ref": "#/$defs/perspective"
         },
         "marketability": {
-          "type": "object",
-          "required": [
-            "score",
-            "findings"
-          ],
-          "properties": {
-            "score": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 10
-            },
-            "findings": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          }
+          "$ref": "#/$defs/perspective"
         },
         "economics": {
-          "type": "object",
-          "required": [
-            "score",
-            "findings"
-          ],
-          "properties": {
-            "score": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 10
-            },
-            "findings": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          }
+          "$ref": "#/$defs/perspective"
         }
       }
     },
     "red_team": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
-        "critical_findings",
-        "dispositions"
+        "findings"
       ],
       "properties": {
-        "critical_findings": {
+        "findings": {
+          "description": "Every finding, at every severity, with its disposition. The finding history is not deleted by refinement (red-team-protocol.md).",
           "type": "array",
           "items": {
-            "type": "string"
-          }
-        },
-        "dispositions": {
-          "type": "array",
-          "items": {
-            "type": "string"
+            "$ref": "#/$defs/finding"
           }
         }
       }
@@ -120,60 +71,78 @@
       "minItems": 3,
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
           "member",
           "vote",
-          "reason"
+          "reason",
+          "confidence"
         ],
         "properties": {
           "member": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "vote": {
-            "enum": [
-              "GO",
-              "CONDITIONAL_GO",
-              "HOLD",
-              "NO_GO"
-            ]
+            "$ref": "#/$defs/decision"
           },
           "reason": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "evidence_gaps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }
     },
     "decision": {
-      "enum": [
-        "GO",
-        "CONDITIONAL_GO",
-        "HOLD",
-        "NO_GO"
-      ]
+      "$ref": "#/$defs/decision"
     },
     "conditions": {
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
           "gate",
           "owner",
+          "trigger",
           "failure_consequence"
         ],
         "properties": {
           "gate": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "owner": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "trigger": {
+            "description": "The observable event that tests this gate. `CONDITIONAL_GO requires executable gates` — a condition with no trigger can never be evaluated, so promotion would rest on a promise rather than a gate.",
+            "type": "string",
+            "minLength": 1
           },
           "failure_consequence": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       }
     },
     "dissent": {
+      "description": "Minority positions. `preserve every member's memo and minority vote` — any board vote differing from the final decision must appear here.",
       "type": "array",
       "items": {
         "type": "string"
@@ -183,6 +152,105 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "decision": {
+      "enum": [
+        "GO",
+        "CONDITIONAL_GO",
+        "HOLD",
+        "NO_GO"
+      ]
+    },
+    "perspective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "score",
+        "findings"
+      ],
+      "properties": {
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "finding": {
+      "description": "A red-team finding, shaped exactly as references/red-team-protocol.md declares it. Prose-only findings left `unresolved` unrepresentable, so `unresolved critical findings force HOLD or NO_GO` could not be machine-checked and a GO could ship over an open critical finding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "claim_challenged",
+        "evidence",
+        "severity",
+        "confidence",
+        "failure_mechanism",
+        "business_impact",
+        "required_repair",
+        "disposition"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claim_challenged": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "failure_mechanism": {
+          "type": "string",
+          "minLength": 1
+        },
+        "business_impact": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_repair": {
+          "type": "string",
+          "minLength": 1
+        },
+        "disposition": {
+          "enum": [
+            "resolved",
+            "mitigated",
+            "accepted",
+            "converted_to_condition",
+            "unresolved"
+          ]
+        }
       }
     }
   }

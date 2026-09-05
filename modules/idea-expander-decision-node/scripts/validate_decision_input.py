@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-import hashlib
+"""Defence-in-depth admission check for an IdeaExpanderDecisionNodeInput v3.
+
+This runs at the decision node's door, so it must reach the same verdict as
+ideaos.lifecycle.build_decision_node_input rather than a weaker approximation of
+it. Checking that a receipt says READY and that its digest matches the packet
+proves the packet was not edited after the receipt was written — it does not
+prove a gate wrote the receipt at all. Both are recomputed here.
+"""
+
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
+
+CHECKOUT = Path(__file__).resolve().parents[3]
+SRC = CHECKOUT / "src"
 
 
 def fail(message: str) -> None:
     print("FAIL:", message)
     raise SystemExit(1)
-
-
-def semantic_digest(value) -> str:
-    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
 def main() -> None:
@@ -22,27 +30,27 @@ def main() -> None:
     if doc.get("schema") != "ideaos.decision-node-input/v3":
         fail("bad schema")
 
-    packet = doc.get("expansion_packet", {})
-    receipt = doc.get("expansion_gate_receipt", {})
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+    try:
+        from ideaos.errors import IdeaOSError
+        from ideaos.lifecycle import build_decision_node_input
+    except ImportError as exc:  # a gate that cannot check is not a gate
+        fail(
+            f"cannot import the IdeaOS runtime from {SRC} ({exc}). This validator "
+            "re-runs the real expansion gate; it does not approximate it."
+        )
 
-    if receipt.get("schema") != "ideaos.expansion-gate-receipt/v1":
-        fail("missing or invalid ExpansionGateReceipt")
-    if receipt.get("status") != "READY":
-        fail("ExpansionGateReceipt is not READY")
-    if receipt.get("blockers"):
-        fail("ExpansionGateReceipt still has blockers")
-    if receipt.get("decision_node_handoff_allowed") is not True:
-        fail("ExpansionGateReceipt does not authorize decision-node handoff")
-    if receipt.get("idea_id") != packet.get("idea_id"):
-        fail("idea_id mismatch between expansion packet and gate receipt")
-    if receipt.get("input_digest") != semantic_digest(packet):
-        fail("expansion packet digest mismatch: packet changed after expansion gate")
+    try:
+        build_decision_node_input(
+            doc.get("expansion_packet", {}),
+            doc.get("expansion_gate_receipt", {}),
+            doc.get("decision_context", {}),
+        )
+    except IdeaOSError as exc:
+        fail(str(exc))
 
-    handoff = packet.get("decision_node_handoff", {})
-    if handoff.get("status") != "READY":
-        fail("expansion handoff is not READY")
-    if handoff.get("blockers"):
-        fail("expansion handoff still has blockers")
+    packet = doc["expansion_packet"]
     for key in ("dream", "invariant", "wedge", "proof"):
         if not packet.get("revised_center", {}).get(key):
             fail(f"missing revised_center.{key}")

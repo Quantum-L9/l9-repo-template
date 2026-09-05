@@ -51,11 +51,6 @@
         "candidate_id": "W1",
         "disposition": "integrate_now",
         "reason": "improves proof"
-      },
-      {
-        "candidate_id": "D1",
-        "disposition": "sequence_later",
-        "reason": "needs outcome volume"
       }
     ],
     "revised_center": {
@@ -98,7 +93,7 @@
     "idea_id": "fixture-idea",
     "status": "READY",
     "blockers": [],
-    "input_digest": "sha256:2334a876618316b33883852c249a1fb3a29c370094f8c912d306b98dbcb84921",
+    "input_digest": "sha256:cac955e7ea6a16a4ac4de7de5523a5c560c75540d92eeed505d409989152cdb0",
     "gate_policy_digest": "sha256:d4503c6c3a021400b25b6fbecbbedd4d5a7471c6e45f19086ce63a7a56f253db",
     "decision_node_handoff_allowed": true
   },

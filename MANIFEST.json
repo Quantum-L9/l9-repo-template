@@ -1,7 +1,7 @@
 {
   "pack": "IdeaOS_Consolidated_System_v11.4_Lifecycle_Complete",
-  "version": "11.4.0",
-  "file_count": 99,
+  "version": "11.4.1",
+  "file_count": 102,
   "files": [
     {
       "path": "BASELINE_SOURCE.md",
@@ -10,8 +10,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 960,
-      "sha256": "19d0c4f553e22bf7685885117f440b9d984062ccdc5af47e706c0cef4bcd9ccf"
+      "bytes": 3836,
+      "sha256": "a410cd3f53327fe0242cec657c863394dad3d38c08edf9b6ef1b726d8f6add00"
     },
     {
       "path": "README.md",
@@ -25,28 +25,23 @@
     },
     {
       "path": "TRACEABILITY.yaml",
-      "bytes": 756,
-      "sha256": "4f28496b150654b7d590715ee4216e2500c6fcb68ddcd5406596df7ebf936ca6"
+      "bytes": 1207,
+      "sha256": "d4448c4b66bb943949b8fdad9deeee3fab88cfe172476676b98f5bbe5bfb5c16"
     },
     {
       "path": "VALIDATION.md",
-      "bytes": 702,
-      "sha256": "deba13e770a504e1afc28b89be6f230bcd1c959dfb6c703ecac0177e685c5478"
-    },
-    {
-      "path": "VALIDATION_REPORT_11.3.md",
-      "bytes": 165,
-      "sha256": "c760f36b79d0adf5b7a19dfd6ced5b5e50bcdf87f092fe78b7f3ea147b26e27e"
+      "bytes": 2342,
+      "sha256": "e416f3ed6b18a1df16fb7dabbb6507c443d7b0dd1b08491c4dfdb43f8367b0fd"
     },
     {
       "path": "VALIDATION_REPORT_11.4.md",
-      "bytes": 2626,
-      "sha256": "376875d1aa60b9f4e18f7b22d27b9027bd5c9196c2797911ee8348cfba297714"
+      "bytes": 4164,
+      "sha256": "87656a4ab9202bb374e5dece15b03d8d2d00503b685f8128543d73e7511bf4e8"
     },
     {
       "path": "VERSION",
       "bytes": 7,
-      "sha256": "b20e1ce95de64f1c1c82cb20370952326892e0ec8abe6a79e15cfd0184b5cec1"
+      "sha256": "de427ecc5ec2f82ece509133d11051ca66746169c41bbf0bc7839e8b2d79c7b2"
     },
     {
       "path": "architecture/00_OPERATING_MODEL.md",
@@ -105,8 +100,8 @@
     },
     {
       "path": "modules/idea-expander/references/composition.md",
-      "bytes": 1325,
-      "sha256": "110ee86575907b15b6c12ba50871ba82848797c52ab4831317d39def040a6193"
+      "bytes": 1850,
+      "sha256": "e514763a2e0306f11c1c8d4df2b309d1e203949cb793e0a31211b6e38f7831b1"
     },
     {
       "path": "modules/idea-expander/references/expansion-packet.schema.json",
@@ -120,8 +115,8 @@
     },
     {
       "path": "modules/idea-expander/references/integration-patch.md",
-      "bytes": 1605,
-      "sha256": "b57d12a85b112758773ab3242b826d2a613a69a5631fc0f3bf59a7b31117a848"
+      "bytes": 1924,
+      "sha256": "1bfe7a3c38237f33b1c37bdd8336d43c3fab97f0993917d2e5e78896844c8e16"
     },
     {
       "path": "modules/idea-expander/references/output-contract.md",
@@ -170,8 +165,8 @@
     },
     {
       "path": "modules/idea-expander-decision-node/schemas/decision-output.schema.json",
-      "bytes": 3889,
-      "sha256": "b5bf92bbb7899070636c6726e3aa0f2366abe8243884bfce51227974d994b94b"
+      "bytes": 6607,
+      "sha256": "8fdb8461ba3e06b27161f17fa52e20b8e17d2df691fadf36df426d6e9489881a"
     },
     {
       "path": "modules/idea-expander-decision-node/schemas/node-input.schema.json",
@@ -180,28 +175,33 @@
     },
     {
       "path": "modules/idea-expander-decision-node/scripts/validate_decision_input.py",
-      "bytes": 1917,
-      "sha256": "5166b6f6935d2b2100390d85d472ab967f1ea238d1f17b647ac19a0fe9d9a8b1"
+      "bytes": 1956,
+      "sha256": "bcc3b9bcc53c1bb9ca553fa2334944ab724c89969ad7539f52028455af72396b"
     },
     {
       "path": "modules/idea-expander-decision-node/scripts/validate_decision_package.py",
-      "bytes": 945,
-      "sha256": "d987753834f0386c101dc747f6929bb36dd15e5f85178fae54d368e685394309"
+      "bytes": 4265,
+      "sha256": "a0ddeefff3e26829519263080666d25acc49d041a7dc28d0addeeeb9646836b6"
     },
     {
       "path": "modules/idea-expander-decision-node/tests/decision-package.valid.json",
-      "bytes": 1045,
-      "sha256": "e78255a2809afe177e551e38f0171e8293f7321aea0c9ecf206af90d29da875e"
+      "bytes": 1921,
+      "sha256": "f2a697a2e98e765365e6ca97be9684346d03707a30262948a790f51bf03b7a44"
+    },
+    {
+      "path": "modules/idea-expander-decision-node/tests/node-input.forged-receipt.json",
+      "bytes": 2822,
+      "sha256": "67b97d41899380bbd4cdf8d6018a8f2984cf3218924aac34c9e347c34c4f522d"
     },
     {
       "path": "modules/idea-expander-decision-node/tests/node-input.ready.json",
-      "bytes": 2850,
-      "sha256": "a15feea2794fe6ee023ef1737902f9d1de27fdbd3f7626cda9b22127703353c3"
+      "bytes": 2951,
+      "sha256": "07eee43368a273f7031708d8115a25ffff369dcb1a6e37ea2ddca2be153b9117"
     },
     {
       "path": "modules/idea-expander-decision-node/tests/node-input.tampered.json",
-      "bytes": 2870,
-      "sha256": "8840f9827f6caa20e3094c17dff751e071515854970bb22ec1a0ac0b0919f31b"
+      "bytes": 2971,
+      "sha256": "749d23de69936f2a024fa4494d9d7331026882089caed31cf3dca3af6a4e6824"
     },
     {
       "path": "personas/customer_buyer.md",
@@ -325,18 +325,28 @@
     },
     {
       "path": "scripts/apply_lifecycle_to_ideaos.py",
-      "bytes": 3308,
-      "sha256": "7d61c9ff09c9a2b4467d1f1c132eacd81bfdcf45f93561400f54311e9828a75e"
+      "bytes": 8013,
+      "sha256": "daddb263384802043a22ea94ea2b9bcc6718ca7594e60b3a6fa54e6fa5f19eb2"
     },
     {
-      "path": "scripts/validate_ideaos_113_pack.py",
+      "path": "scripts/archive/README.md",
+      "bytes": 526,
+      "sha256": "b3966a85ea7fc4cda26f536880a787b4aa58e02dc77d36b8d5849a29ff048820"
+    },
+    {
+      "path": "scripts/archive/VALIDATION_REPORT_11.3.md",
+      "bytes": 165,
+      "sha256": "c760f36b79d0adf5b7a19dfd6ced5b5e50bcdf87f092fe78b7f3ea147b26e27e"
+    },
+    {
+      "path": "scripts/archive/validate_ideaos_113_pack.py",
       "bytes": 2956,
       "sha256": "19f60610a5fb64515deaeda2011476f220bf1ad725bd253e828455bd39557aa5"
     },
     {
       "path": "scripts/validate_ideaos_114_pack.py",
-      "bytes": 2310,
-      "sha256": "1c1a9508f33a5ebe0fdd8a302ef8297fb1bd754dca40300ee380ab3885a4e79f"
+      "bytes": 4502,
+      "sha256": "6ced7c8de45f7c4ff9363b19cdb3c2c7204fa5826b8567d6bfdf4aa919ead650"
     },
     {
       "path": "src/ideaos/__init__.py",
@@ -360,13 +370,13 @@
     },
     {
       "path": "src/ideaos/expansion.py",
-      "bytes": 1564,
-      "sha256": "32361d80f195b7e4e5b5f0490cf39f8f4753e885423428ed07cae804617af588"
+      "bytes": 2660,
+      "sha256": "55dd1014afc2b93dfbcb1b65253896649d254406f665aa92f1b87f2b0a035455"
     },
     {
       "path": "src/ideaos/lifecycle.py",
-      "bytes": 2133,
-      "sha256": "69e9d718e405b1bd60609956d05e8de5ece95b5c10bf3efb9d15dc78d0fd4d9d"
+      "bytes": 3415,
+      "sha256": "319656c3edabf1bb42a0797978f9f868fce7bd3178ba28675513c4bb471806df"
     },
     {
       "path": "src/ideaos/resources/schemas/decision_context.schema.json",
@@ -385,8 +395,8 @@
     },
     {
       "path": "src/ideaos/resources/schemas/expansion_gate_receipt.schema.json",
-      "bytes": 883,
-      "sha256": "2c3c9cb8398c0316b389aa6559785701ba500a2d0ea9c1ddc24bbc88e04e902d"
+      "bytes": 1212,
+      "sha256": "dcf5bec754ec0418788c51774b8f238056032682834b5ed1ca7c79560f40db43"
     },
     {
       "path": "src/ideaos/resources/schemas/expansion_packet.schema.json",
@@ -430,13 +440,18 @@
     },
     {
       "path": "tests/test_decision_handoff.py",
-      "bytes": 2087,
-      "sha256": "8ed2321bb3becc26e63379ac432a718cfead86cb6bffd5b4db3c200882dab3ab"
+      "bytes": 3758,
+      "sha256": "38ae7bd707b070d0700eea7189259b2bdcc286e460710e0d26ea884742f9c72d"
+    },
+    {
+      "path": "tests/test_decision_package.py",
+      "bytes": 4276,
+      "sha256": "2849868a7dc0a2d9b28ce3704947c8e88fa5ee9fe03de8c0e1e3b6c017d31952"
     },
     {
       "path": "tests/test_expansion_gate.py",
-      "bytes": 1006,
-      "sha256": "a4440d5a5f81caa64c48bcde7a13c193e4b74378214e7c8e183a04e83784dbd3"
+      "bytes": 2197,
+      "sha256": "e7e02f4644e7f9d056407bdc1427638638a7e8665d0677f0e09f39e2387244ff"
     },
     {
       "path": "thinking_archetypes/analytical.md",

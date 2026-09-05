@@ -7,7 +7,15 @@ Raw / Developed Idea
         ↓
 Idea Expander
         ↓
-Expanded Idea Dossier
+ExpandedIdeaDossierPacket
+        ↓
+expansion gate                       ideaos.expansion.gate_expansion
+        ↓
+ExpansionGateReceipt (READY)
+        ↓
+decision handoff                     ideaos.lifecycle.build_decision_node_input
+        ↓
+IdeaExpanderDecisionNodeInput v3
         ↓
 idea-expander-decision-node
         ↓
@@ -15,6 +23,11 @@ GO | CONDITIONAL_GO | HOLD | NO_GO
         ↓
 IdeaExecutionPacket / l9-idea-execute when authorized
 ```
+
+The expansion gate and the decision handoff are mandatory stages, not
+formalities: the decision node accepts only a v3 input, and the handoff
+recomputes the gate rather than trusting a supplied receipt. A dossier cannot
+be passed to the decision node directly.
 
 ## Idea Expander owns
 

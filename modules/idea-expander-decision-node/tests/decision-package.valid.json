@@ -1,6 +1,7 @@
 {
-  "schema": "ideaos.decision-node-output/v2",
+  "schema": "ideaos.decision-node-output/v3",
   "idea_id": "fixture-idea",
+  "decision_node_input_digest": "sha256:6841e1c7376f158190b5d4c251296ba04c73285a6357a6e93e4ab17ba9e36005",
   "perspectives": {
     "deployability": {
       "score": 8,
@@ -22,24 +23,43 @@
     }
   },
   "red_team": {
-    "critical_findings": [],
-    "dispositions": []
+    "findings": [
+      {
+        "id": "rt-1",
+        "claim_challenged": "baseline volume is sufficient to clear fixed cost",
+        "evidence": [
+          "no measured baseline in the dossier"
+        ],
+        "severity": "critical",
+        "confidence": "medium",
+        "failure_mechanism": "fixed cost is carried before volume arrives",
+        "business_impact": "runway consumed before the wedge is proven",
+        "required_repair": "measure one month of real baseline volume",
+        "disposition": "converted_to_condition"
+      }
+    ]
   },
   "board_votes": [
     {
       "member": "operator",
       "vote": "CONDITIONAL_GO",
-      "reason": "prove"
+      "reason": "prove",
+      "confidence": "medium"
     },
     {
       "member": "buyer",
       "vote": "CONDITIONAL_GO",
-      "reason": "prove demand"
+      "reason": "prove demand",
+      "confidence": "medium"
     },
     {
       "member": "skeptic",
       "vote": "HOLD",
-      "reason": "unknown baseline"
+      "reason": "unknown baseline",
+      "confidence": "high",
+      "evidence_gaps": [
+        "no measured baseline volume"
+      ]
     }
   ],
   "decision": "CONDITIONAL_GO",
@@ -47,11 +67,12 @@
     {
       "gate": "baseline evidence",
       "owner": "founder",
+      "trigger": "one month of measured baseline volume is recorded",
       "failure_consequence": "HOLD"
     }
   ],
   "dissent": [
-    "skeptic prefers HOLD"
+    "skeptic prefers HOLD until baseline volume is measured"
   ],
   "evidence_acquisition": [
     "baseline volume"

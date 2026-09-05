@@ -10,6 +10,7 @@
     "status",
     "blockers",
     "input_digest",
+    "gate_policy_digest",
     "decision_node_handoff_allowed"
   ],
   "properties": {
@@ -33,6 +34,11 @@
       }
     },
     "input_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "gate_policy_digest": {
+      "description": "Digest of the gate rule set that issued this receipt. A receipt issued under a different policy is not equal to what the current gate would issue, so decision handoff rejects it.",
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
     },

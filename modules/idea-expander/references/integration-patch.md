@@ -17,11 +17,15 @@ Update IdeaOS documentation/runtime routing so the semantic pipeline is explicit
 ```text
 Spark / Developed Idea / Uploaded Pack
   -> Idea Expander
-  -> Expanded Idea Dossier
+  -> ExpandedIdeaDossierPacket
+  -> expansion gate            -> ExpansionGateReceipt (READY)
+  -> decision handoff          -> IdeaExpanderDecisionNodeInput v3
   -> idea-expander-decision-node when decision evaluation is required
   -> IdeaDecisionPacket
   -> IdeaExecutionPacket
 ```
+
+`pipeline/IDEA_LIFECYCLE.yaml` is the machine authority for this topology.
 
 ## Existing doctrine remains authoritative
 
@@ -35,7 +39,11 @@ The module consumes, rather than forks:
 
 ## Decision-node seam
 
-Update `idea-expander-decision-node` input language from generic "developed idea dossier" to accept the validated `Expanded Idea Dossier` / `expansion_packet.json` directly while preserving backward compatibility.
+`idea-expander-decision-node` accepts exactly one artifact: an
+`IdeaExpanderDecisionNodeInput v3` carrying the expansion packet, its
+`ExpansionGateReceipt` and the decision context. There is no backward-compatible
+path that accepts a dossier directly — accepting one would be the gate bypass the
+v3 seam exists to close.
 
 The expander ends before business-plan/QA/red-team/polycognitive adjudication.
 
