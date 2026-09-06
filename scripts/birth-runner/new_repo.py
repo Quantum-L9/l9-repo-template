@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Canonical L9 repository-birth engine.
 
-This module owns the birth state machine. The concern-specific stage
-implementations live in ``new_repo_legacy.py`` temporarily to keep PR #34
-focused on authority topology; they are not an independently invokable
-orchestrator. Both ``make new-repo`` and the dispatch adapter enter through the
-phase functions defined here:
+This module owns the birth state machine. Concern-specific stage implementations
+remain isolated in ``new_repo_legacy.py`` during PR #34, but that module is not
+an independently invokable orchestrator. Both ``make new-repo`` and the dispatch
+adapter enter only through the phase functions defined here:
 
     prepare() -> seal() -> publish()
                      \-> all()  (local/debug compatibility topology)
@@ -35,14 +34,12 @@ def _load_stages():
 
 
 _stages = _load_stages()
-# Compatibility export: existing tests and callers importing stage helpers from
-# new_repo.py continue to see the same symbols while orchestration ownership is
-# centralized here.
 for _name in dir(_stages):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_stages, _name)
 
 PRIVILEGED_TOKEN_ENV = "L9_BIRTH_PRIVILEGED_TOKEN"
+CONTROL_PATH_ENV = "L9_BIRTH_CONTROL_PATH"
 ALLOWED_PUBLISH_TOOLS = frozenset({"git", "gh"})
 
 
@@ -188,6 +185,23 @@ def verify_sealed(root: Path, root_sha: str, tree_sha: str) -> None:
         raise BirthError("prepared repository does not disable Git hooks")
 
 
+def _resolve_control_tool(tool: str) -> str:
+    if tool not in ALLOWED_PUBLISH_TOOLS:
+        raise BirthError(f"PUBLISH refused non-control-plane executable: {tool}")
+    roots = [Path(value).resolve() for value in os.environ.get(CONTROL_PATH_ENV, "").split(os.pathsep) if value]
+    if not roots:
+        raise BirthError(f"{CONTROL_PATH_ENV} must be bound before privileged PUBLISH")
+    for root in roots:
+        candidate = (root / tool).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    raise BirthError(f"trusted {tool} executable is not present in {CONTROL_PATH_ENV}")
+
+
 def control_run(
     cmd: list[str],
     *,
@@ -197,16 +211,16 @@ def control_run(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     tool = Path(cmd[0]).name
-    if tool not in ALLOWED_PUBLISH_TOOLS:
-        raise BirthError(f"PUBLISH refused non-control-plane executable: {tool}")
+    executable = _resolve_control_tool(tool)
     merged = sanitized_control_env()
+    merged["PATH"] = os.environ.get(CONTROL_PATH_ENV, "")
     token = (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip()
     if token:
         merged["GH_TOKEN"] = token
     if env:
-        merged.update({key: value for key, value in env.items() if key != "GH_TOKEN"})
+        merged.update({key: value for key, value in env.items() if key not in {"GH_TOKEN", "PATH"}})
     proc = subprocess.run(
-        cmd,
+        [executable, *cmd[1:]],
         cwd=str(cwd) if cwd else None,
         check=False,
         capture_output=capture,
@@ -290,9 +304,9 @@ def publish(
     """Publish and remotely attest a previously sealed root."""
     if not (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip():
         raise BirthError(f"{PRIVILEGED_TOKEN_ENV} is required for PUBLISH")
+    _resolve_control_tool("git")
+    _resolve_control_tool("gh")
     verify_sealed(cfg.dest, root_sha, tree_sha)
-    # Existing remote stages are pure GitHub control-plane operations. Route
-    # their run() global through the strict git/gh allowlist for this phase.
     original_run = _stages.run
     _stages.run = control_run
     try:
@@ -319,10 +333,6 @@ def all(cfg: BirthConfig) -> BirthReceipt:
         receipt.state = canonical_ci.LOCAL
         _write_receipt(cfg, receipt)
         return receipt
-
-    # Production publication MUST use the fresh-runner dispatch topology. The
-    # one-process remote path is retained only when authority is explicitly
-    # supplied after PREPARE by the caller through the canonical variable.
     if not (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip():
         raise BirthError(
             "remote all() requires L9_BIRTH_PRIVILEGED_TOKEN after PREPARE; "
