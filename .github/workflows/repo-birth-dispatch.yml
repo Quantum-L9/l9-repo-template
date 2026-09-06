@@ -153,6 +153,10 @@ jobs:
           BIRTH_PAYLOAD: ${{ steps.payload.outputs.root }}
           BIRTH_PAYLOAD_CONTRACT: ${{ steps.payload.outputs.contract }}
           L9_GOV_ROOT: ${{ steps.governance.outputs.root }}
+          L9_BIRTH_GOVERNANCE_SHA: ${{ steps.governance.outputs.sha }}
+          L9_BIRTH_PAYLOAD_REPOSITORY: ${{ inputs.payload_repo }}
+          L9_BIRTH_PAYLOAD_REQUESTED_REF: ${{ inputs.payload_ref }}
+          L9_BIRTH_PAYLOAD_RESOLVED_SHA: ${{ steps.payload.outputs.sha }}
         run: |
           set -euo pipefail
           unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
@@ -212,7 +216,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/births"
           tar -C "$RUNNER_TEMP/births" -xzf "$RUNNER_TEMP/sealed-input/sealed-birth.tgz"
           cp "$RUNNER_TEMP/sealed-input/birth-handoff.json" "$RUNNER_TEMP/birth-handoff.json"
-      - name: Mint privileged publication token on fresh runner
+      - name: Verify sealed artifact before authority exists
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
+          .venv/bin/python -I scripts/birth-runner/birth_boundary.py verify --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}"
+      - name: Mint privileged publication token after verification
         id: publish_token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -229,7 +238,7 @@ jobs:
           L9_BIRTH_CI_UNVERIFIED: ${{ inputs.ci_unverified_reason }}
         run: |
           set -euo pipefail
-          .venv/bin/python -I scripts/birth-runner/birth_boundary.py publish --handoff "$RUNNER_TEMP/birth-handoff.json"
+          .venv/bin/python -I scripts/birth-runner/birth_boundary.py publish --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}"
       - name: Upload final birth evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
