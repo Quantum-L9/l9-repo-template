@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Privilege boundary for repository birth.
+"""Transport adapter for the canonical repository-birth engine.
 
-PREPARE runs all product-controlled work with no repository-create token present,
-then sanitizes Git process configuration, validates, and seals one root commit.
-PUBLISH accepts only the sealed handoff and permits only git/gh control-plane
-commands while privileged authority exists.
+This module owns no birth sequencing. ``new_repo.py`` owns prepare, seal,
+publish, and all. This adapter only converts CLI arguments to the engine model,
+serializes/validates ``l9.repo-birth-handoff/v1``, and reconstructs that model
+on a fresh PUBLISH runner.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -14,10 +13,7 @@ import hashlib
 import importlib.util
 import json
 import os
-import shutil
-import subprocess
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,12 +21,10 @@ from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = Path(__file__).resolve().parent / "schemas" / "birth-handoff.schema.json"
-PRIVILEGED_TOKEN_ENV = "L9_BIRTH_PRIVILEGED_TOKEN"
-ALLOWED_PUBLISH_TOOLS = frozenset({"git", "gh"})
 
 
 class BoundaryError(RuntimeError):
-    pass
+    """The transport/handoff contract is invalid or cannot be reconstructed."""
 
 
 def _load_new_repo():
@@ -55,112 +49,41 @@ def _sha256(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
-def _git(root: Path, *args: str) -> str:
-    proc = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=_sanitized_env(),
-    )
-    if proc.returncode != 0:
-        detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
-        raise BoundaryError(f"git {' '.join(args)} failed ({proc.returncode}): {detail[-1200:]}")
-    return (proc.stdout or "").strip()
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        # Evidence remains valid on filesystems that cannot apply POSIX modes.
+        return
 
 
-def _sanitized_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("GIT_") and key != PRIVILEGED_TOKEN_ENV
-    }
-    if extra:
-        env.update(extra)
-    return env
-
-
-def _assert_no_privileged_token() -> None:
-    if (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip():
-        raise BoundaryError(
-            f"{PRIVILEGED_TOKEN_ENV} must not exist during PREPARE; privilege is minted after seal"
+def _validate_handoff(value: dict[str, Any]) -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    errors = sorted(Draft202012Validator(schema).iter_errors(value), key=lambda e: list(e.path))
+    if errors:
+        detail = "; ".join(
+            f"{'/'.join(str(part) for part in error.path) or '<root>'}: {error.message}"
+            for error in errors
         )
-
-
-def _sanitize_git_config(root: Path) -> None:
-    config = root / ".git" / "config"
-    if not config.is_file():
-        raise BoundaryError("prepared repository has no .git/config")
-    # Product code ran before this point and may have written hooks/fsmonitor/
-    # aliases/credential helpers into local Git config. Replace that mutable
-    # process configuration with the minimum repository config before sealing.
-    filemode = "true" if os.name != "nt" else "false"
-    config.write_text(
-        "[core]\n"
-        "\trepositoryformatversion = 0\n"
-        f"\tfilemode = {filemode}\n"
-        "\tbare = false\n"
-        "\tlogallrefupdates = true\n"
-        "\thooksPath = /dev/null\n",
-        encoding="utf-8",
-    )
-
-
-def _seal(cfg: Any, receipt: Any) -> dict[str, str]:
-    _assert_no_privileged_token()
-    _sanitize_git_config(cfg.dest)
-    _git(cfg.dest, "add", "-A")
-    message = "\n".join(
-        [
-            f"chore: birth {cfg.slug} from l9-repo-template@{receipt.template_sha[:12]}",
-            "",
-            *nr.prov.commit_trailers(receipt.birth_receipt),
-        ]
-    )
-    proc = subprocess.run(
-        [
-            "git",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "user.name=L9 Birth Runner",
-            "-c",
-            "user.email=noreply@quantum-l9.invalid",
-            "commit",
-            "-q",
-            "-m",
-            message,
-        ],
-        cwd=cfg.dest,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=_sanitized_env(),
-    )
-    if proc.returncode != 0:
-        raise BoundaryError(
-            "root seal failed: " + (((proc.stderr or "") + (proc.stdout or "")).strip()[-1200:])
-        )
-    root_sha = _git(cfg.dest, "rev-parse", "HEAD")
-    tree_sha = _git(cfg.dest, "rev-parse", "HEAD^{tree}")
-    parents = _git(cfg.dest, "rev-list", "--parents", "-n", "1", "HEAD").split()
-    if len(parents) != 1:
-        raise BoundaryError("sealed birth commit is not a root commit")
-    if _git(cfg.dest, "status", "--porcelain"):
-        raise BoundaryError("prepared repository is dirty after root seal")
-    receipt.head_sha = root_sha
-    nr._verify_provenance(cfg, receipt, "seal.provenance", "sealed birth record proved")
-    return {"root_commit_sha": root_sha, "root_tree_sha": tree_sha}
+        raise BoundaryError(f"invalid birth handoff: {detail}")
+    claimed = str(value.get("handoff_digest") or "")
+    unsigned = dict(value)
+    unsigned.pop("handoff_digest", None)
+    if claimed != _sha256(unsigned):
+        raise BoundaryError("birth handoff digest mismatch")
 
 
 def _receipt_from_dict(data: dict[str, Any]) -> Any:
     product = data.get("product") or {}
     template = data.get("template") or {}
     organization = data.get("organization") or {}
+    repository = str(product.get("repository") or "")
+    owner, _, name = repository.partition("/")
     receipt = nr.BirthReceipt(
-        org=str(product.get("repository", "")).split("/", 1)[0],
-        repository=str(product.get("repository", "")).split("/", 1)[-1],
+        org=owner,
+        repository=name or owner,
         package=str(product.get("package") or ""),
         description=str(product.get("description") or ""),
         template_repo=str(template.get("repository") or "Quantum-L9/l9-repo-template"),
@@ -193,49 +116,15 @@ def _receipt_from_dict(data: dict[str, Any]) -> Any:
     return receipt
 
 
-def _write_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
-
-
-def _validate_handoff(value: dict[str, Any]) -> None:
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
-    errors = sorted(Draft202012Validator(schema).iter_errors(value), key=lambda e: list(e.path))
-    if errors:
-        detail = "; ".join(
-            f"{'/'.join(str(part) for part in error.path) or '<root>'}: {error.message}"
-            for error in errors
-        )
-        raise BoundaryError(f"invalid birth handoff: {detail}")
-    claimed = str(value.get("handoff_digest") or "")
-    unsigned = dict(value)
-    unsigned.pop("handoff_digest", None)
-    actual = _sha256(unsigned)
-    if claimed != actual:
-        raise BoundaryError("birth handoff digest mismatch")
-
-
-def prepare(args: argparse.Namespace) -> int:
-    _assert_no_privileged_token()
+def _prepare_argv(args: argparse.Namespace) -> list[str]:
     argv = [
-        "--repo",
-        args.repo,
-        "--pkg",
-        args.pkg,
-        "--desc",
-        args.desc,
-        "--org",
-        args.org,
-        "--work-dir",
-        str(args.work_dir),
-        "--template-src",
-        str(args.template_src),
-        "--repo-class",
-        args.repo_class,
+        "--repo", args.repo,
+        "--pkg", args.pkg,
+        "--desc", args.desc,
+        "--org", args.org,
+        "--work-dir", str(args.work_dir),
+        "--template-src", str(args.template_src),
+        "--repo-class", args.repo_class,
         "--no-remote",
         "--keep",
     ]
@@ -247,31 +136,13 @@ def prepare(args: argparse.Namespace) -> int:
         argv += ["--org-profile-src", str(args.org_profile_src)]
     if args.private:
         argv += ["--private"]
-    cfg = nr.build_config(nr.parse_args(argv))
-    receipt = nr.BirthReceipt(
-        org=cfg.org,
-        repository=cfg.repo,
-        package=cfg.pkg,
-        description=cfg.desc,
-        payload=str(cfg.payload) if cfg.payload else "",
-        workdir=str(cfg.dest),
-        born_at=datetime.now(UTC).isoformat(timespec="seconds"),
-    )
-    receipt.template_sha = nr.git_head(cfg.template_src)
-    version_file = cfg.template_src / nr.prov.TEMPLATE_VERSION_PATH
-    if version_file.is_file():
-        receipt.template_version = version_file.read_text(encoding="utf-8").strip()
+    return argv
 
-    nr.stage_preflight(cfg, receipt)
-    nr.stage_assemble(cfg, receipt)
-    nr.stage_finalize(cfg, receipt)
-    profile = nr.stage_apply_org_profile(cfg, receipt)
-    nr.stage_stamp_provenance(cfg, receipt, profile)
-    nr.stage_validate(cfg, receipt)
-    sealed = _seal(cfg, receipt)
-    receipt.state = "SEALED"
-    nr._write_receipt(cfg, receipt)
 
+def prepare(args: argparse.Namespace) -> int:
+    nr.assert_prepare_unprivileged()
+    cfg = nr.build_config(nr.parse_args(_prepare_argv(args)))
+    receipt, profile, sealed = nr.prepare(cfg)
     request_basis = {
         "repository": cfg.slug,
         "package": cfg.pkg,
@@ -281,6 +152,10 @@ def prepare(args: argparse.Namespace) -> int:
         "template_sha": receipt.template_sha,
         "org_policy_sha": receipt.org_profile_sha,
         "payload_source": receipt.payload_source,
+        "governance_sha": os.environ.get("L9_BIRTH_GOVERNANCE_SHA", ""),
+        "payload_repository": os.environ.get("L9_BIRTH_PAYLOAD_REPOSITORY", ""),
+        "payload_requested_ref": os.environ.get("L9_BIRTH_PAYLOAD_REQUESTED_REF", ""),
+        "payload_resolved_sha": os.environ.get("L9_BIRTH_PAYLOAD_RESOLVED_SHA", ""),
     }
     handoff: dict[str, Any] = {
         "schema": "l9.repo-birth-handoff/v1",
@@ -290,22 +165,18 @@ def prepare(args: argparse.Namespace) -> int:
         "description": cfg.desc,
         "private": cfg.private,
         "repo_class": profile["name"],
-        "template": {
-            "sha": receipt.template_sha,
-            "version": receipt.template_version,
-        },
+        "template": {"sha": receipt.template_sha, "version": receipt.template_version},
         "organization": {"sha": receipt.org_profile_sha},
-        "payload": {
-            "mode": receipt.payload_mode,
-            "source": receipt.payload_source,
-        },
+        "payload": {"mode": receipt.payload_mode, "source": receipt.payload_source},
         "prepared": {
             **sealed,
             "root_path": str(cfg.dest),
             "contents_manifest_sha256": receipt.manifest_sha256,
             "permanent_receipt_digest": str(receipt.birth_receipt.get("digest") or ""),
         },
-        "prepare_receipt": str(cfg.receipt_path or (cfg.work_dir / f"{cfg.repo}-birth-receipt.json")),
+        "prepare_receipt": str(
+            cfg.receipt_path or (cfg.work_dir / f"{cfg.repo}-birth-receipt.json")
+        ),
         "bootstrap_timeout": cfg.bootstrap_timeout,
         "profile": profile,
         "receipt": receipt.to_dict(),
@@ -317,161 +188,87 @@ def prepare(args: argparse.Namespace) -> int:
     return 0
 
 
-def _control_run(
-    cmd: list[str],
-    *,
-    cwd: Path | None = None,
-    check: bool = True,
-    capture: bool = True,
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    tool = Path(cmd[0]).name
-    if tool not in ALLOWED_PUBLISH_TOOLS:
-        raise BoundaryError(f"PUBLISH refused non-control-plane executable: {tool}")
-    merged = _sanitized_env()
-    token = (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip()
-    if token:
-        merged["GH_TOKEN"] = token
-    if env:
-        # Caller may add non-privileged values but cannot replace the token.
-        merged.update({k: v for k, v in env.items() if k != "GH_TOKEN"})
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        check=False,
-        capture_output=capture,
-        text=True,
-        env=merged,
-    )
-    if check and proc.returncode != 0:
-        detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
-        raise BoundaryError(f"{' '.join(cmd)} failed ({proc.returncode})\n{detail[-1600:]}")
-    return proc
-
-
-def _remote_head(slug: str) -> str | None:
-    proc = _control_run(["gh", "api", f"repos/{slug}/commits/main", "--jq", ".sha"], check=False)
-    value = (proc.stdout or "").strip()
-    return value if len(value) == 40 else None
-
-
-def _publish_root(cfg: Any, receipt: Any, root_sha: str) -> None:
-    existing = _control_run(["gh", "repo", "view", cfg.slug, "--json", "name"], check=False)
-    if existing.returncode == 0:
-        head = _remote_head(cfg.slug)
-        if head == root_sha:
-            receipt.record("github.create", "repository created", "PASS", "already exact")
-            receipt.record("github.push", "initial push", "PASS", root_sha[:12])
-            return
-        state = "QUARANTINED_PARTIAL_CREATE" if head is None else "CONFLICT"
-        receipt.state = state
-        raise BoundaryError(f"{cfg.slug} already exists but sealed root cannot be proven ({state})")
-
-    visibility = "--private" if cfg.private else "--public"
-    proc = _control_run(
-        [
-            "gh",
-            "repo",
-            "create",
-            cfg.slug,
-            visibility,
-            "--description",
-            cfg.desc,
-            "--source",
-            str(cfg.dest),
-            "--remote",
-            "origin",
-            "--push",
-        ],
-        check=False,
-    )
-    if proc.returncode == 0:
-        receipt.record("github.create", "repository created", "PASS", cfg.slug)
-        receipt.record("github.push", "initial push", "PASS", root_sha[:12])
-        return
-
-    # gh repo create is not atomic. Probe instead of guessing what half happened.
-    probe = _control_run(["gh", "repo", "view", cfg.slug, "--json", "name"], check=False)
-    if probe.returncode != 0:
-        receipt.state = "PUBLISH_FAILED_NO_REMOTE"
-        raise BoundaryError("publication failed and target repository is absent; safe to retry")
-    head = _remote_head(cfg.slug)
-    if head == root_sha:
-        receipt.record("github.create", "repository created", "PASS", "recovered after command failure")
-        receipt.record("github.push", "initial push", "PASS", root_sha[:12])
-        return
-    receipt.state = "QUARANTINED_PARTIAL_CREATE"
-    raise BoundaryError("repository exists after failed publication but exact sealed root is not present")
-
-
-def publish(args: argparse.Namespace) -> int:
-    token = (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip()
-    if not token:
-        raise BoundaryError(f"{PRIVILEGED_TOKEN_ENV} is required for PUBLISH")
-    handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
-    if not isinstance(handoff, dict):
+def _load_handoff(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BoundaryError(f"cannot read birth handoff {path}: {exc}") from exc
+    if not isinstance(value, dict):
         raise BoundaryError("birth handoff must be a JSON object")
-    _validate_handoff(handoff)
+    _validate_handoff(value)
+    return value
 
-    prepared = handoff["prepared"]
-    root = Path(prepared["root_path"]).resolve()
-    root_sha = str(prepared["root_commit_sha"])
-    tree_sha = str(prepared["root_tree_sha"])
-    if _git(root, "rev-parse", "HEAD") != root_sha:
-        raise BoundaryError("prepared HEAD changed after seal")
-    if _git(root, "rev-parse", "HEAD^{tree}") != tree_sha:
-        raise BoundaryError("prepared tree changed after seal")
-    if _git(root, "status", "--porcelain"):
-        raise BoundaryError("prepared working tree changed after seal")
-    hooks = _git(root, "config", "--local", "--get", "core.hooksPath")
-    if hooks != "/dev/null":
-        raise BoundaryError("prepared repository does not disable Git hooks")
 
-    data = handoff["receipt"]
-    receipt = _receipt_from_dict(data)
-    work_dir = root.parent
-    cfg = nr.BirthConfig(
-        org=handoff["repository"].split("/", 1)[0],
-        repo=handoff["repository"].split("/", 1)[1],
-        pkg=handoff["package"],
-        desc=handoff["description"],
-        work_dir=work_dir,
+def _cfg_from_handoff(handoff: dict[str, Any], root: Path) -> Any:
+    repository = str(handoff["repository"])
+    org, _, repo = repository.partition("/")
+    if not org or not repo:
+        raise BoundaryError("handoff repository must be owner/name")
+    return nr.BirthConfig(
+        org=org,
+        repo=repo,
+        pkg=str(handoff["package"]),
+        desc=str(handoff["description"]),
+        work_dir=root.parent,
         payload=None,
         payload_contract=None,
         template_src=ROOT,
         org_profile_src=None,
-        repo_class=handoff["repo_class"],
+        repo_class=str(handoff["repo_class"]),
         remote=True,
         private=bool(handoff["private"]),
         keep=True,
-        receipt_path=Path(handoff["prepare_receipt"]),
-        bootstrap_timeout=int(handoff.get("bootstrap_timeout") or 180),
+        receipt_path=root.parent / f"{repo}-birth-receipt.json",
+        bootstrap_timeout=int(handoff["bootstrap_timeout"]),
     )
-    cfg.verified_payload_mode = str((handoff.get("payload") or {}).get("mode") or "none")
 
-    # Fail closed if any future remote stage tries to execute product/toolchain code.
-    nr.run = _control_run
-    try:
-        _publish_root(cfg, receipt, root_sha)
-        receipt.state = nr.canonical_ci.PROVISIONAL
-        profile = dict(handoff["profile"])
-        nr.stage_remote_bootstrap(cfg, receipt, profile)
-        nr.stage_verify_ci_enrollment(cfg, receipt)
-        nr.stage_attest(cfg, receipt, profile)
-        receipt.state = (
-            nr.canonical_ci.PROVISIONAL if not receipt.failed else nr.canonical_ci.QUARANTINED
-        )
-        receipt.ci["state"] = receipt.state
-    except Exception as exc:
-        receipt.record("birth.error", "birth", "FAIL", str(exc).splitlines()[0][:120])
-        nr._write_receipt(cfg, receipt)
-        raise
-    nr._write_receipt(cfg, receipt)
+
+def _resolve_root(handoff: dict[str, Any], explicit: Path | None) -> Path:
+    if explicit is not None:
+        return explicit.resolve()
+    prepared = handoff.get("prepared") or {}
+    recorded = Path(str(prepared.get("root_path") or ""))
+    candidate = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "births" / Path(
+        str(handoff["repository"])
+    ).name
+    if candidate.is_dir():
+        return candidate.resolve()
+    if recorded.is_dir():
+        return recorded.resolve()
+    raise BoundaryError("sealed root is not materialized on this runner")
+
+
+def verify(args: argparse.Namespace) -> int:
+    handoff = _load_handoff(args.handoff)
+    root = _resolve_root(handoff, args.root)
+    prepared = handoff["prepared"]
+    nr.verify_sealed(
+        root,
+        str(prepared["root_commit_sha"]),
+        str(prepared["root_tree_sha"]),
+    )
+    print(f"VERIFIED SEALED {handoff['repository']} {prepared['root_commit_sha']}")
+    return 0
+
+
+def publish(args: argparse.Namespace) -> int:
+    handoff = _load_handoff(args.handoff)
+    root = _resolve_root(handoff, args.root)
+    prepared = handoff["prepared"]
+    receipt = _receipt_from_dict(dict(handoff["receipt"]))
+    cfg = _cfg_from_handoff(handoff, root)
+    nr.publish(
+        cfg,
+        receipt,
+        dict(handoff["profile"]),
+        root_sha=str(prepared["root_commit_sha"]),
+        tree_sha=str(prepared["root_tree_sha"]),
+    )
     print(nr.render_receipt(receipt))
     return 1 if receipt.failed else 0
 
 
-def build_parser() -> argparse.ArgumentParser:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="birth_boundary.py")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -480,25 +277,35 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--pkg", required=True)
     prep.add_argument("--desc", required=True)
     prep.add_argument("--org", default=nr.DEFAULT_ORG)
-    prep.add_argument("--work-dir", type=Path, required=True)
-    prep.add_argument("--template-src", type=Path, default=ROOT)
-    prep.add_argument("--org-profile-src", type=Path)
     prep.add_argument("--payload", type=Path)
     prep.add_argument("--payload-contract", type=Path)
+    prep.add_argument("--work-dir", type=Path, required=True)
+    prep.add_argument("--template-src", type=Path, default=ROOT)
+    prep.add_argument("--org-profile-src", type=Path, required=True)
     prep.add_argument("--repo-class", default=nr.BIRTH_PROFILE_CLASS)
     prep.add_argument("--private", action="store_true")
+    prep.add_argument("--bootstrap-timeout", type=int, default=180)
     prep.add_argument("--handoff", type=Path, required=True)
+
+    check = sub.add_parser("verify")
+    check.add_argument("--handoff", type=Path, required=True)
+    check.add_argument("--root", type=Path)
 
     pub = sub.add_parser("publish")
     pub.add_argument("--handoff", type=Path, required=True)
-    return parser
+    pub.add_argument("--root", type=Path)
+    return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args = parse_args(argv)
     try:
-        return prepare(args) if args.command == "prepare" else publish(args)
-    except (BoundaryError, nr.BirthError, nr.prov.ProvenanceError, nr.canonical_ci.CanonicalCIError) as exc:
+        if args.command == "prepare":
+            return prepare(args)
+        if args.command == "verify":
+            return verify(args)
+        return publish(args)
+    except (BoundaryError, nr.BirthError, nr.prov.ProvenanceError) as exc:
         print(f"BIRTH {args.command.upper()} FAIL: {exc}", file=sys.stderr)
         return 1
 
