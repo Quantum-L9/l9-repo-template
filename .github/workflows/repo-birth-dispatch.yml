@@ -221,6 +221,22 @@ jobs:
           set -euo pipefail
           unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
           .venv/bin/python -I scripts/birth-runner/birth_boundary.py verify --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}"
+      - name: Bind trusted control-plane executables before authority exists
+        run: |
+          set -euo pipefail
+          git_path="$(realpath "$(command -v git)")"
+          gh_path="$(realpath "$(command -v gh)")"
+          for tool in "$git_path" "$gh_path"; do
+            case "$tool" in
+              "$RUNNER_TEMP"/*|"$GITHUB_WORKSPACE"/*)
+                echo "refusing control-plane executable from mutable workspace: $tool" >&2
+                exit 1
+                ;;
+            esac
+          done
+          control_path="$(dirname "$git_path"):$(dirname "$gh_path")"
+          echo "L9_BIRTH_CONTROL_PATH=$control_path" >> "$GITHUB_ENV"
+          printf 'trusted git=%s\ntrusted gh=%s\n' "$git_path" "$gh_path" >> "$GITHUB_STEP_SUMMARY"
       - name: Mint privileged publication token after verification
         id: publish_token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
@@ -238,6 +254,7 @@ jobs:
           L9_BIRTH_CI_UNVERIFIED: ${{ inputs.ci_unverified_reason }}
         run: |
           set -euo pipefail
+          export PATH="$L9_BIRTH_CONTROL_PATH"
           .venv/bin/python -I scripts/birth-runner/birth_boundary.py publish --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}"
       - name: Upload final birth evidence
         if: always()
