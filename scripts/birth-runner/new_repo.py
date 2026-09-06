@@ -1,1658 +1,108 @@
 #!/usr/bin/env python3
-"""One-command repository birth for non-Constellation Quantum-L9 Python repos.
+"""Canonical L9 repository-birth engine.
 
-`make new-repo` runs this. When it returns PASS the repository is *born* — not
-"created, now go do seven other things". The eight stages below are a state
-machine, and every one of them either passes or stops the birth.
+This module owns the birth state machine. The concern-specific stage
+implementations live in ``new_repo_legacy.py`` temporarily to keep PR #34
+focused on authority topology; they are not an independently invokable
+orchestrator. Both ``make new-repo`` and the dispatch adapter enter through the
+phase functions defined here:
 
-    [1] PREFLIGHT              tools, auth, identity validation, name is free
-                               + the compiled payload, reproduced against its source
-    [2] ASSEMBLE LOCALLY       template + identity stamp + optional payload
-    [3] FINALIZE               LICENSE, uv lock, rules, manifest, metadata
-    [4] APPLY ORG BIRTH PROFILE current Quantum-L9/.github, class capabilities
-    [5] STAMP BIRTH PROVENANCE the immutable record, written AFTER the payload
-    [6] VALIDATE BEFORE CREATION  the full product gate, on the newborn
-    [7] PUBLISH ROOT COMMIT       provenance trailers, create, push -> PROVISIONAL
-    [8] REMOTE ORG BOOTSTRAP      labels, settings, applicable seeding
-    [9] CANONICAL CI              prove l9-ci-core's ruleset enrols this repo
-   [10] REMOTE ATTESTATION        read the remote back and prove it
+    prepare() -> seal() -> publish()
+                     \-> all()  (local/debug compatibility topology)
 
-`uv lock` is stage 3, not something a product author is asked to remember. A
-birth invariant belongs to the birth engine.
-
-Stage 5 exists because ORDER IS THE CONTRACT. Provenance is generated output, so
-it is stamped after the product payload has been overlaid and after the
-organization has had its say — never copied in with the template and hoped over.
-A payload may not carry any of it: `scripts/birth-runner/birth_provenance.py`
-names the protected paths and the birth refuses a payload that supplies one,
-rather than letting an overlay silently overwrite the record of the newborn's own
-birth with some older repository's.
-
-Stage 5 also splits two questions that were previously one file's job:
-
-    .l9-template-version         IMMUTABLE  what this repository was born from
-    .l9/org-birth-profile.yaml   IMMUTABLE  class + the exact pair of commits
-    .l9/birth-receipt.json       IMMUTABLE  the whole record, plus a digest
-    .l9/template-state.yaml      MUTABLE    what it must conform to TODAY
-
-Reconciliation moves the last one. Nothing moves the first three, so
-"is this repository genuinely what it claims it was born from?" keeps its answer
-years after "is it up to date?" has changed its own.
-
-Ownership, unchanged by this script:
-
-    l9-repo-template     owns HOW A REPO IS BORN
-    Quantum-L9/.github   owns WHAT THE ORGANIZATION REQUIRES
-    l9-ci-core           owns HOW CI EXECUTES
-    l9-ci-control-plane  owns WHICH CI APPLIES WHERE
-    the product repo     owns ITS PRODUCT
-
-This script never decides what the organization requires. It reads
-`policies/repo-classes.yml` from Quantum-L9/.github at a recorded SHA and
-applies it.
-
-Nor does it author what a product supplies. A repository-shaped PAYLOAD is
-consumed only under a COMPILED CONTRACT — `l9.birth-payload/v1`, produced by
-`scripts/birth-runner/compile_birth_payload.py` from an immutable, clean git
-snapshot of the actual source repository. Stage 1 recomputes that manifest
-against the source tree and requires every hash to match before a single file is
-copied; a mismatch stops the birth while a work directory is still the only
-thing that exists. The contract is a manifest, not a second repository: the
-bytes still come from the source tree, and the contract only proves which bytes
-were authorized. A fragment payload keeps the original additive-overlay
-semantics and needs no contract.
-
-Nor does it decide what a product owns. A PAYLOAD that is a standalone
-repository is AUTHORITATIVE over its product tree: the template's example
-product — the FastAPI service, the Docker runtime, the local observability
-stack — is not inherited by a repository that never asked for it. What is
-chassis and what is example is declared in
-`scripts/birth-runner/payload-ownership.yaml`, not inferred here. A partial
-payload keeps the original additive-overlay semantics.
+Production dispatch crosses a fresh-runner boundary between seal and publish.
+No product-controlled process is executed by publish().
 """
-
 from __future__ import annotations
 
-import argparse
-import base64
 import importlib.util
-import json
 import os
-import re
-import shutil
 import subprocess
 import sys
-import time
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 
-def _load_sibling(name: str):
-    """Load a module that lives next to this file, wherever this file lives.
-
-    Not a bare `import`: that resolves for free when the script is executed
-    directly (sys.path[0] is the script's directory) and fails when a fixture,
-    a renamed tree, or a test harness loads this file by path instead. These
-    sibling modules are not optional, so they are located relative to THIS file
-    rather than to whatever the interpreter's search path happens to be.
-    """
-    if name in sys.modules:
-        return sys.modules[name]
-    path = Path(__file__).resolve().parent / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(name, path)
+def _load_stages():
+    path = Path(__file__).resolve().parent / "new_repo_legacy.py"
+    spec = importlib.util.spec_from_file_location("l9_birth_stages", path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load the birth module {name} at {path}")
+        raise RuntimeError(f"cannot load birth stages at {path}")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
 
-# The engine that WRITES provenance and the checker that VERIFIES it share one
-# module deliberately: two copies of a digest algorithm are two digests.
-prov = _load_sibling("birth_provenance")
-# The ownership contract has three readers now — this engine, the payload
-# compiler, and the payload verifier. One module reads it, so a birth and the
-# payload it consumes cannot disagree about what `authoritative` means.
-ownership_contract = _load_sibling("payload_ownership")
-payload_verifier = _load_sibling("verify_birth_payload")
+_stages = _load_stages()
+# Compatibility export: existing tests and callers importing stage helpers from
+# new_repo.py continue to see the same symbols while orchestration ownership is
+# centralized here.
+for _name in dir(_stages):
+    if not _name.startswith("__"):
+        globals()[_name] = getattr(_stages, _name)
 
-# Same reason, same mechanism: the CI verdict logic is loaded by path so a
-# renamed tree or a by-path harness still gets a working engine.
-canonical_ci = _load_sibling("canonical_ci")
-
-TEMPLATE_ROOT = Path(__file__).resolve().parents[2]
-
-DEFAULT_ORG = "Quantum-L9"
-ORG_PROFILE_REPO = "Quantum-L9/.github"
-ORG_PROFILE_PATH = "policies/repo-classes.yml"
-PYPROJECT = "pyproject.toml"
-MARKER_PATH = prov.MARKER_PATH
-VERIFY_BIRTH = "scripts/birth-runner/verify_birth_integrity.py"
-# The template's own answer to "what does a product inherit from me?". Read from
-# the template source, never from the payload: a payload does not get to widen
-# the set of template surfaces it silently keeps.
-OWNERSHIP_PATH = ownership_contract.OWNERSHIP_PATH
-SEED_BRANCH = "chore/auto-seed-governance"
-# A licence that names one repository is wrong in every other repository. The
-# org consumer template carried this notice; birth copies that file in as
-# canonical, so the assertion belongs in the birth engine too, not only upstream.
-POISONED_LICENSE_NOTICE = "applies only to the Quantum-L9/.github repository"
-# The org taxonomy is 33 labels; require most rather than an exact count, so
-# adding one label upstream does not fail every birth.
-MIN_ORG_LABELS = 20
+PRIVILEGED_TOKEN_ENV = "L9_BIRTH_PRIVILEGED_TOKEN"
+ALLOWED_PUBLISH_TOOLS = frozenset({"git", "gh"})
 
 
-def default_work_dir() -> Path:
-    """A private, user-owned birth workspace.
-
-    Never a fixed path under /tmp. A world-writable directory with a
-    predictable name lets any local user pre-create `<workdir>/<repo>` — as a
-    symlink, or with their own contents — before the birth runs, and the
-    engine would then assemble a repository inside it and push the result.
-    `$XDG_STATE_HOME` (or `~/.local/state`) is user-owned, and the directory is
-    created 0700 so a pre-existing world-readable one is not silently reused.
-    """
-    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
-    root = Path(base) / "l9" / "births"
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    return root
-
-
-BIRTH_PROFILE_CLASS = "non_constellation_python"
-# Operator breakglass. A reason is mandatory: a bare "1" records nothing a
-# later reader can act on, and this is the switch that turns "no CI" from a
-# stop into a downgrade.
-CI_UNVERIFIED_ENV = "L9_BIRTH_CI_UNVERIFIED"
-CANONICAL_LICENSE = "LICENSE"
-
-# Machine state never carried from one tree into another — `.git`, caches, build
-# metadata. Defined with the ownership contract because the payload compiler
-# applies exactly the same exclusion: the manifest that authorizes a birth has to
-# equal the bytes the overlay actually copies.
-COPY_EXCLUDE_DIRS = ownership_contract.COPY_EXCLUDE_DIRS
-COPY_EXCLUDE_SUFFIXES = ownership_contract.COPY_EXCLUDE_SUFFIXES
-
-# Agent session scaffolding, projected into whatever checkout the bootstrap ran
-# in. It is not template content and a newborn must not inherit it: `.claude/`
-# carries symlinks into the governance clone at an absolute machine path and a
-# copy of the governance command/skill library, and `.mcp.json` is 0600
-# environment configuration. Before this exclusion a birth run from a governed
-# workspace copied all of it in, `git add -A` staged it, and it landed in the
-# newborn's ROOT COMMIT — the one commit that is supposed to be attestable
-# provenance and nothing else.
-#
-# Excluded from the TEMPLATE copy only. A product payload that genuinely owns a
-# `.claude/` directory still overlays it; that is the product's file, not this
-# machine's.
-TEMPLATE_EXCLUDE_TOP_LEVEL = frozenset({".claude", ".mcp.json"})
-
-# Template-only content at an exact nested path, excluded for the same reason as
-# the top-level set above but not expressible by a first path segment: `.github`
-# IS inherited (`chassis` in payload-ownership.yaml carries CODEOWNERS, labels
-# and dependabot into every newborn), so only the individual file is excluded.
-#
-# `repo-birth-dispatch.yml` is this template's own birth surface. A newborn
-# inheriting it gains a manually-dispatchable workflow that mints an
-# organisation-Administration token — inert only for as long as nobody creates a
-# `repo-birth` environment in that repository, and NOT inert at all had those
-# credentials been organisation-level rather than repository-environment ones.
-# A repository born from this template is a product, not a second factory.
-TEMPLATE_EXCLUDE_PATHS = frozenset({Path(".github/workflows/repo-birth-dispatch.yml")})
-
-REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
-PKG_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-MARKER_PROFILE_RE = re.compile(r"^profile:[ \t]*[\"']?([A-Za-z0-9_-]+)[\"']?[ \t]*$", re.M)
-SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+def new_receipt(cfg: BirthConfig) -> BirthReceipt:
+    receipt = BirthReceipt(
+        org=cfg.org,
+        repository=cfg.repo,
+        package=cfg.pkg,
+        description=cfg.desc,
+        payload=str(cfg.payload) if cfg.payload else "",
+        workdir=str(cfg.dest),
+        born_at=datetime.now(UTC).isoformat(timespec="seconds"),
+    )
+    receipt.template_sha = git_head(cfg.template_src)
+    version_file = cfg.template_src / prov.TEMPLATE_VERSION_PATH
+    if version_file.is_file():
+        receipt.template_version = version_file.read_text(encoding="utf-8").strip()
+    return receipt
 
 
-class BirthError(RuntimeError):
-    """A stage refused to continue. The message is the operator-facing reason."""
+def assert_prepare_unprivileged() -> None:
+    if (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip():
+        raise BirthError(
+            f"{PRIVILEGED_TOKEN_ENV} must not exist during PREPARE; "
+            "publication authority is introduced only after seal"
+        )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Pure helpers — no I/O, unit-tested without git, gh, or a network.
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def validate_repo_name(name: str) -> str:
-    name = (name or "").strip()
-    if not name:
-        raise BirthError("REPO is required (e.g. REPO=l9-observability-core)")
-    if not REPO_NAME_RE.match(name):
-        raise BirthError(f"invalid REPO {name!r}: expect GitHub repository name characters")
-    if name.endswith(".git"):
-        raise BirthError(f"invalid REPO {name!r}: drop the .git suffix")
-    return name
-
-
-def validate_package_name(pkg: str) -> str:
-    pkg = (pkg or "").strip()
-    if not pkg:
-        raise BirthError("PKG is required (e.g. PKG=l9_observability_core)")
-    if not PKG_NAME_RE.match(pkg):
-        raise BirthError(f"invalid PKG {pkg!r}: expect snake_case Python identifier")
-    if not pkg.isidentifier() or pkg == "l9_example_pkg":
-        raise BirthError(f"invalid PKG {pkg!r}: must be a fresh Python identifier")
-    return pkg
-
-
-def validate_description(desc: str) -> str:
-    desc = (desc or "").strip()
-    if not desc:
-        raise BirthError("DESC is required (one-line description)")
-    if "CHANGE_ME" in desc or "CHANGE ME" in desc:
-        raise BirthError("DESC still carries a placeholder")
-    return desc
-
-
-def parse_json_in_yaml(text: str) -> dict:
-    """Parse the JSON-in-YAML org policy.
-
-    Full-line ``#`` comments are stripped so the policy can document itself.
-    Identical contract to ``ops/repo-class-profile.js`` on the organization
-    side: one file, two languages, zero YAML dependency in either.
-    """
-    if not text or not text.strip():
-        raise BirthError("org repo-classes policy is empty")
-    stripped = re.sub(r"^[ \t]*#.*$", "", text, flags=re.M)
-    try:
-        doc = json.loads(stripped)
-    except json.JSONDecodeError as exc:
-        raise BirthError(f"org repo-classes policy is not JSON-in-YAML: {exc}") from exc
-    if not isinstance(doc, dict) or not isinstance(doc.get("classes"), dict):
-        raise BirthError("org repo-classes policy has no classes map")
-    return doc
-
-
-def match_pattern(patterns: list[str], dest: str) -> str | None:
-    """Exact path, or one trailing ``/**`` directory prefix. No glob syntax.
-
-    A birth contract that needs a regex to explain what a repository receives
-    is not a contract.
-    """
-    for pattern in patterns or ():
-        if not pattern:
-            continue
-        if pattern == dest:
-            return pattern
-        if pattern.endswith("/**") and dest.startswith(pattern[:-2]):
-            return pattern
-    return None
-
-
-def resolve_profile(doc: dict, class_name: str | None) -> dict:
-    """Resolve one class, strictly.
-
-    Birth is strict where a sweep is lenient: a typo at birth must stop the
-    birth, not silently fall back to a wider default payload.
-    """
-    known = sorted(doc["classes"])
-    name = class_name or doc.get("default_class")
-    if name not in doc["classes"]:
-        raise BirthError(f"unknown repo class {name!r} (known: {', '.join(known)})")
-    cls = doc["classes"][name]
-    return {
-        "name": name,
-        "description": cls.get("description", ""),
-        "seed_categories": list(cls.get("seed_categories") or []),
-        "inherit": list(cls.get("inherit") or []),
-        "forbid": list(cls.get("forbid") or []),
-        "remote_apply": dict(cls.get("remote_apply") or {}),
-        "mandatory_files_waive": list(cls.get("mandatory_files_waive") or []),
-        "marker_path": doc.get("marker_path", MARKER_PATH),
+def sanitized_control_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_") and key not in {"GH_TOKEN", "GITHUB_TOKEN"}
     }
-
-
-def parse_marker_profile(text: str | None) -> str | None:
-    if not text:
-        return None
-    found = MARKER_PROFILE_RE.search(text)
-    return found.group(1) if found else None
-
-
-def forbidden_present(root: Path, profile: dict) -> list[str]:
-    """Every FORBID pattern that actually exists in an assembled tree.
-
-    FORBID is an assertion about the repository, not only a filter on a seed
-    payload: a forbidden path can arrive from a product payload overlay just as
-    easily as from a seeder.
-    """
-    hits: list[str] = []
-    for pattern in profile["forbid"]:
-        probe = pattern[:-3] if pattern.endswith("/**") else pattern
-        if (root / probe).exists():
-            hits.append(pattern)
-    return hits
-
-
-# The marker is rendered by the shared provenance module: the checker has to
-# read exactly what the engine wrote, so one function writes it.
-render_marker = prov.render_marker
-
-
-@dataclass
-class StageResult:
-    key: str
-    label: str
-    status: str  # PASS | FAIL | SKIP
-    detail: str = ""
-
-
-@dataclass
-class BirthReceipt:
-    org: str = ""
-    repository: str = ""
-    package: str = ""
-    description: str = ""
-    template_repo: str = "Quantum-L9/l9-repo-template"
-    template_sha: str = "unknown"
-    template_version: str = "unknown"
-    org_profile_repo: str = ORG_PROFILE_REPO
-    org_profile_sha: str = "unknown"
-    birth_profile: str = ""
-    payload: str = ""
-    payload_mode: str = "none"
-    # The compiled `l9.birth-payload/v1` this birth was authorized by, and the
-    # source snapshot it pinned. Operator evidence — the SOURCE CONTRIBUTION
-    # proof, kept separate from `manifest_sha256` below, which is the different
-    # proof over what the repository was born containing.
-    payload_contract: str = ""
-    payload_source: dict = field(default_factory=dict)
-    workdir: str = ""
-    head_sha: str = "unknown"
-    born_at: str = ""
-    manifest_sha256: str = ""
-    # The birth receipt COMMITTED INTO the newborn (`.l9/birth-receipt.json`).
-    # This run receipt is an operator report and lives in the work directory;
-    # that one is the repository's own permanent record and carries the digest
-    # the root commit's trailer names.
-    birth_receipt: dict = field(default_factory=dict)
-    materialized: list[str] = field(default_factory=list)
-    stages: list[StageResult] = field(default_factory=list)
-    state: str = canonical_ci.LOCAL
-    ci: dict = field(default_factory=dict)
-
-    def record(self, key: str, label: str, status: str, detail: str = "") -> StageResult:
-        result = StageResult(key, label, status, detail)
-        self.stages.append(result)
-        return result
-
-    @property
-    def failed(self) -> list[StageResult]:
-        return [s for s in self.stages if s.status == "FAIL"]
-
-    def to_dict(self) -> dict:
-        return {
-            "schema": "l9.repo-birth-receipt/v1",
-            "born_at": self.born_at,
-            "template": {
-                "repository": self.template_repo,
-                "sha": self.template_sha,
-                "template_version": self.template_version,
-            },
-            "organization": {
-                "repository": self.org_profile_repo,
-                "sha": self.org_profile_sha,
-                "birth_profile": self.birth_profile,
-            },
-            "product": {
-                "repository": f"{self.org}/{self.repository}" if self.org else self.repository,
-                "package": self.package,
-                "description": self.description,
-                "payload": self.payload,
-                "payload_mode": self.payload_mode,
-                "payload_contract": self.payload_contract,
-                "payload_source": dict(self.payload_source),
-            },
-            "birth_receipt": dict(self.birth_receipt),
-            "manifest_sha256": self.manifest_sha256,
-            "workdir": self.workdir,
-            "head_sha": self.head_sha,
-            # A repository that exists is not a repository that is born. This is
-            # the field that says which one happened.
-            "state": self.state,
-            "ci": dict(self.ci),
-            "materialized": list(self.materialized),
-            "result": "PASS" if not self.failed else "FAIL",
-            "born": self.state == canonical_ci.BORN,
-            "stages": [
-                {"key": s.key, "label": s.label, "status": s.status, "detail": s.detail}
-                for s in self.stages
-            ],
-        }
-
-
-_GROUPS = (
-    ("preflight", "Preflight"),
-    ("assemble", "Assemble"),
-    ("finalize", "Finalization"),
-    ("org", "Organization"),
-    ("stamp", "Provenance"),
-    ("validate", "Validation"),
-    ("github", "GitHub"),
-    ("ci", "Canonical CI"),
-    ("attest", "Attestation"),
-)
-
-
-def render_receipt(receipt: BirthReceipt) -> str:
-    lines: list[str] = ["", "L9 REPOSITORY BIRTH"]
-    lines.append("Template")
-    lines.append(f"  {receipt.template_repo:<22} {receipt.template_sha}")
-    lines.append(f"  {'template_version':<22} {receipt.template_version}")
-    lines.append("Organization")
-    lines.append(f"  {receipt.org_profile_repo:<22} {receipt.org_profile_sha}")
-    lines.append(f"  {'birth_profile':<22} {receipt.birth_profile}")
-    lines.append("Product")
-    lines.append(f"  {'repository':<22} {receipt.org}/{receipt.repository}")
-    lines.append(f"  {'package':<22} {receipt.package}")
-    if receipt.payload:
-        lines.append(f"  {'payload':<22} {receipt.payload} ({receipt.payload_mode})")
-    if receipt.birth_receipt:
-        lines.append("Birth record")
-        lines.append(f"  {'receipt digest':<22} sha256:{receipt.birth_receipt.get('digest', '')}")
-        lines.append(f"  {'contents digest':<22} sha256:{receipt.manifest_sha256}")
-
-    for prefix, heading in _GROUPS:
-        group = [s for s in receipt.stages if s.key.startswith(f"{prefix}.")]
-        if not group:
-            continue
-        lines.append(heading)
-        for stage in group:
-            lines.append(f"  {stage.label:<22} {stage.status}")
-    lines.append(f"BIRTH: {'PASS' if not receipt.failed else 'FAIL'}")
-    # Publication and birth are different events, so the receipt names both.
-    # `BIRTH: PASS` is the gate ladder; STATE is the lifecycle.
-    lines.append(f"STATE: {receipt.state}")
-    if receipt.state == canonical_ci.BORN:
-        lines.append(f"BORN {receipt.org}/{receipt.repository}")
-        lines.append(f"  root: {receipt.head_sha}")
-    elif receipt.state != canonical_ci.LOCAL:
-        lines.append(
-            f"NOT BORN — repository is {receipt.state}: {receipt.org}/{receipt.repository}"
-        )
-        lines.append(f"  root: {receipt.head_sha}")
-        if receipt.ci.get("birth_run_url"):
-            lines.append(f"  ci_run: {receipt.ci['birth_run_url']}")
-    lines.append("")
-    return "\n".join(lines)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# I/O helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def run(
-    cmd: list[str],
-    *,
-    cwd: Path | None = None,
-    check: bool = True,
-    capture: bool = True,
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    merged = os.environ.copy()
-    if env:
-        merged.update(env)
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        check=False,
-        capture_output=capture,
-        text=True,
-        env=merged,
-    )
-    if check and proc.returncode != 0:
-        detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
-        raise BirthError(f"{' '.join(cmd)} failed ({proc.returncode})\n{detail[-2000:]}")
-    return proc
-
-
-def _is_machine_state(rel: Path) -> bool:
-    return any(part in COPY_EXCLUDE_DIRS for part in rel.parts) or any(
-        part.endswith(COPY_EXCLUDE_SUFFIXES) for part in rel.parts
-    )
-
-
-def _is_session_scaffolding(rel: Path) -> bool:
-    return (
-        bool(rel.parts) and rel.parts[0] in TEMPLATE_EXCLUDE_TOP_LEVEL
-    ) or rel in TEMPLATE_EXCLUDE_PATHS
-
-
-def copy_tree(src: Path, dest: Path) -> int:
-    """Copy the template working tree, skipping git, machine state, and session
-    scaffolding."""
-    copied = 0
-    for path in src.rglob("*"):
-        rel = path.relative_to(src)
-        if _is_machine_state(rel) or _is_session_scaffolding(rel):
-            continue
-        target = dest / rel
-        if path.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
-        elif path.is_file() or path.is_symlink():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target, follow_symlinks=False)
-            copied += 1
-    return copied
-
-
-def overlay_payload(payload: Path, dest: Path) -> list[str]:
-    """Overlay product files onto the assembled scaffold.
-
-    The payload wins on collision — the template is the chassis, the payload is
-    the product. Git and machine state are never carried across.
-
-    A symlink is copied AS a symlink, exactly as the template copy does it and
-    exactly as git stores it. Dereferencing one would materialize the target's
-    content under the link's name, which is a different file from the one the
-    compiled payload hashed — and the invariant this overlay has to satisfy is
-    that the bytes it writes are the bytes the manifest authorized.
-    """
-    written: list[str] = []
-    for path in sorted(payload.rglob("*")):
-        rel = path.relative_to(payload)
-        if _is_machine_state(rel):
-            continue
-        target = dest / rel
-        if path.is_symlink():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.is_symlink() or target.exists():
-                target.unlink()
-            shutil.copy2(path, target, follow_symlinks=False)
-            written.append(rel.as_posix())
-        elif path.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
-        elif path.is_file():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
-            written.append(rel.as_posix())
-    return written
-
-
-def load_ownership(template_src: Path) -> dict:
-    """The template's payload-ownership contract, as a birth-stopping read.
-
-    The contract itself is parsed by `payload_ownership.load_ownership`; this
-    only translates its refusal into the birth engine's own error type, so an
-    unreadable contract stops a birth here exactly as it stops a compilation
-    over there.
-    """
-    try:
-        return ownership_contract.load_ownership(template_src)
-    except ownership_contract.OwnershipContractError as exc:
-        raise BirthError(str(exc)) from exc
-
-
-# Positive identification against the declared `repository_shape`, and the
-# packages a repository-shaped payload ships. Same functions the compiler calls:
-# the classification a compiled payload proposes and the one birth re-derives
-# have to come from one implementation, or "authoritative" means two things.
-is_repository_payload = ownership_contract.is_repository_payload
-payload_package_dirs = ownership_contract.payload_package_dirs
-
-
-def _relative_files(root: Path) -> list[str]:
-    """Every real file under `root`, repository-relative, machine state skipped."""
-    found: list[str] = []
-    for path in root.rglob("*"):
-        rel = path.relative_to(root)
-        if _is_machine_state(rel):
-            continue
-        if path.is_file() or path.is_symlink():
-            found.append(rel.as_posix())
-    return sorted(found)
-
-
-def reconcile_product_ownership(dest: Path, payload: Path, ownership: dict) -> list[str]:
-    """Make the payload authoritative over the product surfaces it owns.
-
-    The overlay can only ever *overwrite*. It cannot express "this product does
-    not have a Dockerfile", because there is no file in the payload with which
-    to say so. Under an authoritative payload, absence says it: a `product`
-    surface the payload does not supply is removed rather than inherited from
-    the example product this template ships.
-
-    Chassis and organization surfaces are untouched. The birth engine, the
-    repository-execution facade, the canonical LICENSE, the class marker and the
-    MATERIALIZE payload all survive — a product owns its product, not the
-    factory that made it.
-
-    Returns the removed paths, repository-relative and sorted.
-    """
-    supplied = set(_relative_files(payload))
-    patterns = list(ownership["product"])
-    removed: list[str] = []
-    for rel in _relative_files(dest):
-        if rel in supplied:
-            continue
-        if match_pattern(patterns, rel) is None:
-            continue
-        (dest / rel).unlink()
-        removed.append(rel)
-    _prune_emptied_dirs(dest, removed)
-    return removed
-
-
-def _prune_emptied_dirs(root: Path, removed: list[str]) -> None:
-    """Drop the directories reconciliation itself emptied, and only those.
-
-    Walking every directory in the tree would also collect one that was empty
-    before the birth started; this walks up from each removed file instead, so a
-    directory disappears only as a consequence of its own contents going.
-    """
-    for rel in removed:
-        parent = (root / rel).parent
-        while parent != root:
-            if parent.is_dir() and not any(parent.iterdir()):
-                parent.rmdir()
-                parent = parent.parent
-            else:
-                break
-
-
-def git_head(root: Path) -> str:
-    proc = run(["git", "-C", str(root), "rev-parse", "HEAD"], check=False)
-    sha = (proc.stdout or "").strip()
-    return sha if SHA_RE.match(sha) else "unknown"
-
-
-def gh_json(args: list[str]) -> object:
-    proc = run(["gh", *args])
-    return json.loads(proc.stdout or "null")
-
-
-def gh_json_safe(args: list[str]) -> object:
-    """gh api returning parsed JSON, or None on any failure. Never raises."""
-    proc = run(["gh", *args], check=False)
-    if proc.returncode != 0:
-        return None
-    try:
-        return json.loads(proc.stdout or "null")
-    except json.JSONDecodeError:
-        return None
-
-
-def _remote_text(slug: str, path: str) -> str | None:
-    """Decode a remote file's contents, or None when it cannot be read."""
-    proc = run(["gh", "api", f"repos/{slug}/contents/{path}", "--jq", ".content"], check=False)
-    if proc.returncode != 0:
-        return None
-    try:
-        return base64.b64decode("".join((proc.stdout or "").split())).decode("utf-8")
-    except (ValueError, UnicodeDecodeError):
-        return None
-
-
-@dataclass
-class BirthConfig:
-    org: str
-    repo: str
-    pkg: str
-    desc: str
-    work_dir: Path
-    payload: Path | None
-    payload_contract: Path | None
-    template_src: Path
-    org_profile_src: Path | None
-    repo_class: str
-    remote: bool
-    private: bool
-    keep: bool
-    receipt_path: Path | None
-    bootstrap_timeout: int
-    # Set by stage 1 once the compiled payload has been reproduced against the
-    # source tree. Assembly reads THIS rather than re-inferring the mode, so the
-    # classification a birth acts on is one that was verified, not one that was
-    # guessed while files were already being copied.
-    verified_payload_mode: str | None = None
-
-    @property
-    def slug(self) -> str:
-        return f"{self.org}/{self.repo}"
-
-    @property
-    def dest(self) -> Path:
-        return self.work_dir / self.repo
-
-
-def _preflight_tools(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Every executable the chosen mode needs, and a usable gh session."""
-    for tool in ("git", "python3", "uv"):
-        if shutil.which(tool) is None:
-            raise BirthError(f"{tool} not found on PATH")
-    receipt.record("preflight.tools", "tools", "PASS", "git, python3, uv")
-
-    # node runs the ORGANIZATION's seed payload builder in stage 4; a birth
-    # cannot materialize org state without it.
-    if shutil.which("node") is None:
-        raise BirthError(
-            "node not found on PATH — required to run the organization's seed payload builder"
-        )
-
-    if not (cfg.remote or cfg.org_profile_src is None):
-        receipt.record("preflight.auth", "auth", "SKIP", "local birth, no gh needed")
-        return
-    if shutil.which("gh") is None:
-        raise BirthError(
-            "gh not found on PATH — required to read the org birth profile and to create "
-            "the repository. Use --org-profile-src and --no-remote for a fully local birth."
-        )
-    # Probe with REST, not `gh auth status`. On a proxied surface the session
-    # gateway serves REST but refuses GraphQL, and `gh auth status` verifies
-    # over GraphQL — so it reports "The token in GH_TOKEN is invalid" while
-    # every REST call this birth makes succeeds. GH_TOKEN there is a 14-char
-    # placeholder; the proxy injects the real credential. Gating on auth status
-    # fails a birth that would have worked.
-    probe = run(["gh", "api", "user", "--jq", ".login"], check=False)
-    login = (probe.stdout or "").strip()
-    if probe.returncode != 0 or not login:
-        raise BirthError(
-            "GitHub REST is not reachable via gh — check credentials/proxy. "
-            "(`gh auth status` is NOT authoritative on a GraphQL-restricted surface.)"
-        )
-    receipt.record("preflight.auth", "auth", "PASS", f"REST reachable as {login}")
-
-
-def _preflight_sources(cfg: BirthConfig) -> None:
-    """The template must be a pristine checkout, and the workspace must be free."""
-    if not (cfg.template_src / PYPROJECT).is_file():
-        raise BirthError(f"template source is not a repository checkout: {cfg.template_src}")
-    if not (cfg.template_src / "src" / "l9_example_pkg").is_dir():
-        raise BirthError(
-            f"template source has already been renamed: {cfg.template_src} — "
-            "birth needs a pristine l9-repo-template checkout"
-        )
-    if cfg.payload is not None:
-        if not cfg.payload.is_dir():
-            raise BirthError(f"PAYLOAD is not a directory: {cfg.payload}")
-        # Fail here, not after a full tree copy: without the ownership contract
-        # a repository-shaped payload cannot be told from a fragment.
-        load_ownership(cfg.template_src)
-        # And fail here rather than at stamping time: a payload carrying
-        # `.l9-template-version` or a birth marker is almost always a tree copied
-        # out of an older repository, and the overlay wins on collision. Reject
-        # it while nothing has been assembled.
-        prov.assert_payload_owns_no_birth_paths(cfg.payload)
-    if cfg.dest.exists() and any(cfg.dest.iterdir()):
-        raise BirthError(
-            f"work directory already populated: {cfg.dest} — remove it or pass a different WORK_DIR"
-        )
-
-
-def _preflight_name_free(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Birth creates a repository; it does not adopt one that already exists."""
-    if not cfg.remote:
-        receipt.record("preflight.name", "name available", "SKIP", "local birth")
-        return
-    if run(["gh", "repo", "view", cfg.slug, "--json", "name"], check=False).returncode == 0:
-        raise BirthError(
-            f"{cfg.slug} already exists — birth creates a repository, it does not adopt one"
-        )
-    receipt.record("preflight.name", "name available", "PASS", f"{cfg.slug} is free")
-
-
-def _preflight_payload_contract(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Stage 1's half of the compilation boundary: reproduce, then classify.
-
-    The birthing agent orchestrates; it never authors payload semantics. What it
-    hands this engine is a compiled `l9.birth-payload/v1`, and the engine's job
-    is to distrust it: the source manifest is recomputed here, immediately before
-    assembly, and must equal the one the contract authorized down to every hash.
-    A byte that changed between compilation and now stops the birth while a work
-    directory is still the only thing that exists.
-
-    An authoritative payload REQUIRES a contract. Before this, repository shape
-    was inferred silently during assembly, which meant a decision that deletes
-    product surfaces was taken while files were already being copied and was
-    visible only afterwards, in a receipt line. Now the compiler proposes the
-    classification from evidence and this verifies it against the same ownership
-    contract.
-
-    A fragment stays what it always was: an additive overlay, no contract
-    required, absence meaning nothing. That mode is unchanged because products
-    already depend on it.
-    """
-    if cfg.payload is None:
-        receipt.record("preflight.payload", "payload contract", "SKIP", "no PAYLOAD given")
-        return
-
-    ownership = load_ownership(cfg.template_src)
-    repository_shaped = is_repository_payload(cfg.payload, ownership)
-
-    if cfg.payload_contract is None:
-        if repository_shaped:
-            raise BirthError(
-                f"PAYLOAD {cfg.payload} is repository-shaped, so it is authoritative over its "
-                "product tree — and an authoritative birth is compiled from an immutable "
-                "source snapshot, never inferred from a directory. Compile it first:\n"
-                "    make birth-payload SOURCE=<source checkout> OUT=<payload.json>\n"
-                "then pass PAYLOAD_CONTRACT=<payload.json>."
-            )
-        receipt.record(
-            "preflight.payload",
-            "payload contract",
-            "SKIP",
-            "additive fragment — no compiled payload required",
-        )
-        cfg.verified_payload_mode = "additive"
-        return
-
-    try:
-        document = payload_verifier.load_payload(cfg.payload_contract)
-    except payload_verifier.PayloadCompileError as exc:
-        raise BirthError(str(exc)) from exc
-
-    report = payload_verifier.verify_payload(
-        document,
-        cfg.payload,
-        template_src=cfg.template_src,
-        pkg=cfg.pkg,
-    )
-    if report.failed:
-        # No fallback to a naked-directory overlay. An invalid compiled payload
-        # is a refusal, not a downgrade: silently birthing the additive way from
-        # a contract that failed to reproduce is exactly the unverified path the
-        # contract exists to close.
-        raise BirthError(f"compiled birth payload did not reproduce: {report.reason}")
-
-    source = document["source"]
-    mode = str(document["mode"])
-    cfg.verified_payload_mode = mode
-    receipt.payload_contract = str(cfg.payload_contract)
-    receipt.payload_source = dict(source)
-    receipt.record(
-        "preflight.payload",
-        "payload contract",
-        "PASS",
-        f"{source['repository']}@{str(source['revision'])[:12]} {mode} — "
-        f"{len(document['files'])} file(s), manifest sha256:"
-        f"{str(document['manifest_sha256'])[:12]} reproduced",
-    )
-
-
-def stage_preflight(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Tools, auth, identity, and a target name that is actually free."""
-    _preflight_tools(cfg, receipt)
-    # Identity was validated when the config was built; record it as evidence.
-    receipt.record("preflight.identity", "identity", "PASS", f"{cfg.slug} / {cfg.pkg}")
-    _preflight_sources(cfg)
-    _preflight_payload_contract(cfg, receipt)
-    receipt.record(
-        "preflight.provenance",
-        "birth paths free",
-        "PASS",
-        f"{len(prov.ENGINE_OWNED_PATHS)} engine-owned path(s) unclaimed by the payload",
-    )
-    _preflight_name_free(cfg, receipt)
-
-
-def stage_assemble(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Template + identity stamp + optional product payload."""
-    cfg.dest.mkdir(parents=True, exist_ok=True)
-    copied = copy_tree(cfg.template_src, cfg.dest)
-    receipt.record("assemble.template", "template copied", "PASS", f"{copied} files")
-
-    # No `git remote add origin` here. Stage 6 runs `gh repo create --source
-    # --remote origin --push`, and gh's --remote flag CREATES that remote for
-    # the source repository; pre-creating it makes two owners for one remote.
-    # One operation owns remote-repo creation, origin creation, and the initial
-    # push.
-    run(["git", "init", "-q", "-b", "main"], cwd=cfg.dest)
-
-    run(
-        [
-            sys.executable,
-            "scripts/bootstrap_rename.py",
-            "--pkg",
-            cfg.pkg,
-            "--org",
-            cfg.org,
-            "--repo",
-            cfg.repo,
-        ],
-        cwd=cfg.dest,
-    )
-    receipt.record("assemble.identity", "identity stamped", "PASS", cfg.pkg)
-
-    _stamp_description(cfg)
-    receipt.record("assemble.description", "description", "PASS", cfg.desc[:48])
-
-    status, detail = _assemble_payload(cfg, receipt)
-    receipt.record("assemble.ownership", "payload ownership", status, detail)
-
-
-def _assemble_payload(cfg: BirthConfig, receipt: BirthReceipt) -> tuple[str, str]:
-    """Overlay the payload; return the ownership verdict for the caller to record.
-
-    The overlay stage is recorded here and the ownership stage by the caller, so
-    each stage key is written in exactly one place.
-    """
-    if cfg.payload is None:
-        receipt.record("assemble.payload", "payload overlay", "SKIP", "no PAYLOAD given")
-        receipt.payload_mode = "none"
-        return "SKIP", "no PAYLOAD given"
-
-    ownership = load_ownership(cfg.template_src)
-    # Verified in stage 1 against the compiled payload and the ownership
-    # contract. Assembly does not get a second opinion — a classification
-    # re-derived here could disagree with the one the birth was authorized under.
-    authoritative = cfg.verified_payload_mode == "authoritative"
-    receipt.payload_mode = "authoritative" if authoritative else "additive"
-    if authoritative:
-        _assert_payload_package_matches(cfg)
-
-    written = overlay_payload(cfg.payload, cfg.dest)
-    receipt.record("assemble.payload", "payload overlay", "PASS", f"{len(written)} files")
-
-    if not authoritative:
-        # A fragment adds and overrides; it never speaks for what it omits.
-        return "PASS", "additive overlay — payload is not repository-shaped"
-
-    removed = reconcile_product_ownership(cfg.dest, cfg.payload, ownership)
-    return "PASS", (
-        f"authoritative — {len(removed)} template product surface(s) not owned by the payload"
-        + (f": {', '.join(removed[:8])}" if removed else "")
-    )
-
-
-def _assert_payload_package_matches(cfg: BirthConfig) -> None:
-    """PKG must name the package the authoritative payload actually ships.
-
-    Under an authoritative payload the renamed template package is replaced by
-    the payload's. If PKG names a different package, the replacement removes the
-    renamed template package and installs one nothing points at — a birth that
-    fails deep inside stage 5 with an import error, for a mistake visible here.
-    """
-    packages = payload_package_dirs(cfg.payload) if cfg.payload else []
-    if packages and cfg.pkg not in packages:
-        raise BirthError(
-            f"PKG={cfg.pkg} is not the package this repository payload ships "
-            f"({', '.join(packages)}) — an authoritative payload owns src/, so the "
-            "names have to agree"
-        )
-
-
-def _stamp_description(cfg: BirthConfig) -> None:
-    """Replace the template's own description with the product's.
-
-    Only the `description = "..."` line in `[project]` is rewritten; prose that
-    happens to quote the template description is left alone.
-    """
-    pyproject = cfg.dest / PYPROJECT
-    text = pyproject.read_text(encoding="utf-8")
-    escaped = cfg.desc.replace("\\", "\\\\").replace('"', '\\"')
-    updated, count = re.subn(
-        r'^description = ".*"$',
-        f'description = "{escaped}"',
-        text,
-        count=1,
-        flags=re.M,
-    )
-    if count:
-        pyproject.write_text(updated, encoding="utf-8")
-
-
-def _fetch_org_profile(cfg: BirthConfig) -> tuple[str, str]:
-    """Return (policy text, org SHA) for the current Quantum-L9/.github.
-
-    A local `--org-profile-src` records the SHA of that checkout when it is a
-    git repository, so an offline birth still carries honest provenance rather
-    than a fabricated one.
-    """
-    if cfg.org_profile_src is not None:
-        policy = cfg.org_profile_src / ORG_PROFILE_PATH
-        if not policy.is_file():
-            raise BirthError(f"org profile source has no {ORG_PROFILE_PATH}: {cfg.org_profile_src}")
-        return policy.read_text(encoding="utf-8"), git_head(cfg.org_profile_src)
-
-    text = run(
-        ["gh", "api", f"repos/{ORG_PROFILE_REPO}/contents/{ORG_PROFILE_PATH}", "--jq", ".content"]
-    ).stdout
-
-    decoded = base64.b64decode("".join(text.split())).decode("utf-8")
-    head = gh_json(["api", f"repos/{ORG_PROFILE_REPO}/commits/HEAD", "--jq", "{sha:.sha}"])
-    sha = head.get("sha", "unknown") if isinstance(head, dict) else "unknown"
-    return decoded, sha
-
-
-def _org_checkout(cfg: BirthConfig, org_sha: str) -> Path | None:
-    """A Quantum-L9/.github working tree at the exact recorded SHA.
-
-    Returned so the birth can run the ORGANIZATION's own payload builder
-    (`ops/build-seed-payload.js`) rather than reimplementing the
-    category -> destination mapping here. Two implementations of "what does
-    this class receive" is two answers, and the seeder's is authoritative.
-    """
-    if cfg.org_profile_src is not None:
-        return cfg.org_profile_src
-    if shutil.which("gh") is None:
-        return None
-    dest = cfg.work_dir / f".org-github-{org_sha[:12]}"
-    if (dest / "ops" / "build-seed-payload.js").is_file():
-        return dest
-    dest.mkdir(parents=True, exist_ok=True)
-    run(["git", "init", "-q"], cwd=dest)
-    run(["git", "remote", "add", "origin", f"https://github.com/{ORG_PROFILE_REPO}.git"], cwd=dest)
-    ref = org_sha if SHA_RE.match(org_sha) else "HEAD"
-    run(["git", "fetch", "-q", "--depth=1", "origin", ref], cwd=dest)
-    run(["git", "checkout", "-q", "--detach", "FETCH_HEAD"], cwd=dest)
-    return dest
-
-
-# With `node -e`, process.argv is [execPath, ...args] — there is no script path
-# at argv[1] the way there is for a file, so the arguments start at index 1.
-_PAYLOAD_JS = """
-const fs = require('fs');
-const path = require('path');
-const root = process.argv[1];
-const opts = JSON.parse(process.argv[2]);
-process.chdir(root);
-const { buildSeedPayload } = require(path.join(root, 'ops', 'build-seed-payload.js'));
-process.stdout.write(JSON.stringify(buildSeedPayload({ fs, ...opts })));
-"""
-
-
-def build_org_payload(checkout: Path, profile: dict, cfg: BirthConfig) -> dict[str, str]:
-    """Ask the organization what this class materializes. Do not guess.
-
-    Runs `ops/build-seed-payload.js` from the pinned checkout, so INHERIT drops
-    and FORBID throws inside the org's own code path — the same one the seeder
-    uses. A FORBID hit surfaces here as a birth failure rather than as a red
-    pull request opened against the newborn a week later.
-    """
-    if shutil.which("node") is None:
-        raise BirthError(
-            "node not found on PATH — required to run the organization's seed payload builder"
-        )
-    opts = {
-        "profile": profile,
-        "hasRootCodeowners": (cfg.dest / "CODEOWNERS").is_file(),
-        "hasPython": (cfg.dest / PYPROJECT).is_file(),
-        "hasPackageJson": (cfg.dest / "package.json").is_file(),
-        "repository": cfg.slug,
-    }
-    proc = run(["node", "-e", _PAYLOAD_JS, str(checkout), json.dumps(opts)], check=False)
-    if proc.returncode != 0:
-        detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
-        raise BirthError(f"organization seed payload builder failed:\n{detail[-1500:]}")
-    try:
-        payload = json.loads(proc.stdout or "{}")
-    except json.JSONDecodeError as exc:
-        raise BirthError(f"seed payload builder returned non-JSON: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise BirthError("seed payload builder returned a non-object payload")
-    return payload
-
-
-def materialize_org_payload(root: Path, payload: dict[str, str]) -> tuple[list[str], list[str]]:
-    """Write MATERIALIZE files into the newborn at `root`, missing-only.
-
-    Missing-only matches the seeder's own semantics: the template and the
-    product payload are closer to the repository than the org default is, so
-    anything already present wins. Returns (written, kept).
-    """
-    written: list[str] = []
-    kept: list[str] = []
-    for dest, body in sorted(payload.items()):
-        target = root / dest
-        if target.exists():
-            kept.append(dest)
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body, encoding="utf-8")
-        written.append(dest)
-    return written, kept
-
-
-def inherited_present(root: Path, profile: dict) -> list[str]:
-    """INHERIT paths the repository is carrying its own copy of.
-
-    Not fatal: GitHub prefers a repository-local file over the organization
-    default, so a deliberate override is legal and supported. It is reported
-    because an *accidental* copy is duplication the organization would then
-    need a second synchronizer to clean up — which is the failure mode the
-    whole INHERIT/MATERIALIZE split exists to avoid.
-    """
-    hits: list[str] = []
-    for pattern in profile["inherit"]:
-        probe = pattern[:-3] if pattern.endswith("/**") else pattern
-        if (root / probe).exists():
-            hits.append(pattern)
-    return hits
-
-
-def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """The invariants a product author should never be asked to remember."""
-    canonical = cfg.template_src / CANONICAL_LICENSE
-    target = cfg.dest / CANONICAL_LICENSE
-    if not canonical.is_file():
-        raise BirthError("template has no canonical LICENSE")
-    # The org LICENSE is repository-generic (Quantum AI Partners, no repo name),
-    # so a payload that ships its own is overriding org policy, not customizing
-    # a per-repo header. Restore the canonical text.
-    replaced = target.is_file() and target.read_bytes() != canonical.read_bytes()
-    shutil.copy2(canonical, target)
-    # MUST FIX BEFORE BIRTH. The canonical text is copied into every newborn,
-    # so a repository-specific notice in it is a licence that disclaims the
-    # repository it governs — reproduced automatically, in every repository the
-    # factory ever makes. This is the one thing a factory must never automate.
-    if POISONED_LICENSE_NOTICE in target.read_text(encoding="utf-8"):
-        raise BirthError(
-            f"canonical LICENSE carries a repository-specific notice "
-            f"({POISONED_LICENSE_NOTICE!r}) — it cannot govern {cfg.slug}. "
-            "Fix templates/community-health/LICENSE upstream and the template LICENSE here."
-        )
-    receipt.record(
-        "finalize.license",
-        "license",
-        "PASS",
-        "restored canonical" if replaced else "canonical",
-    )
-
-    # Birth invariant, not a step someone remembers: the newborn must carry a
-    # lock resolved for its own identity, or `uv lock --check` fails in CI on
-    # day one.
-    run(["uv", "lock"], cwd=cfg.dest)
-    run(["uv", "sync", "--extra", "dev"], cwd=cfg.dest)
-    receipt.record("finalize.lock", "uv.lock generated", "PASS", "uv lock + sync")
-
-    # Formatting is a birth invariant, not a product author's chore. An assembled
-    # tree is template plus payload, written by two parties that never agreed on
-    # import order or line width, so a mechanically fixable diff between them was
-    # failing stage 5 and destroying the whole birth — for whitespace.
-    #
-    # This runs BEFORE the manifest, the version stamp and the receipt digest, so
-    # every one of those describes the bytes the newborn actually ships. Fixing
-    # after them would leave the root commit's own attestation describing a tree
-    # that no longer exists.
-    #
-    # It fixes; it does not decide. `ruff check --fix` applies only the rules
-    # ruff itself marks safely fixable, and stage 5 still runs `ruff check` and
-    # `ruff format --check` afterwards, so anything left — a real lint error, a
-    # rule needing --unsafe-fixes — still fails the birth closed. Nothing is
-    # suppressed and no gate is loosened; the mechanical half is simply done
-    # rather than reported.
-    autofix_python = str(_venv_python(cfg.dest))
-    fixed = run(
-        [autofix_python, "-m", "ruff", "check", "--fix", "."],
-        cwd=cfg.dest,
-        check=False,
-    )
-    formatted = run([autofix_python, "-m", "ruff", "format", "."], cwd=cfg.dest, check=False)
-    if formatted.returncode != 0:
-        raise BirthError(
-            "ruff format failed on the assembled tree — the newborn cannot be "
-            "normalised: " + ((formatted.stderr or formatted.stdout).strip() or "no output")
-        )
-    receipt.record(
-        "finalize.autofix",
-        "ruff autofix",
-        "PASS",
-        _autofix_detail(fixed.stdout + fixed.stderr, formatted.stdout + formatted.stderr),
-    )
-
-    # There is deliberately no mypy autofix here, and the reason is worth
-    # recording so it is not re-attempted.
-    #
-    # mypy has no `--fix`. Its one automatic remedy, `--install-types`, cannot
-    # work in a newborn: the environment is uv-managed and has no `pip`, so mypy
-    # shells out to an interpreter that cannot install anything and silently
-    # changes nothing. A stage wrapping it reports PASS for work that never
-    # happened — which is worse than the failure it was meant to fix.
-    #
-    # Even where it could install, the stub would exist only in that venv, absent
-    # from `pyproject.toml` and `uv.lock`, so the newborn's own CI would fail
-    # identically on day one. Declaring a dependency is a product decision.
-    #
-    # Everything else mypy reports — an unannotated signature, a call into one, a
-    # module that does not exist — is a statement about the product. Inventing an
-    # answer to any of them is precisely what a type checker exists to prevent,
-    # so stage 5 runs mypy and fails closed.
-
-    # BEFORE the rules are rendered, not after. Every generated rule is rendered
-    # FROM this config, so a config that still describes the template produces
-    # rules that are internally consistent and semantically false: an app
-    # entrypoint the newborn has no module for, an optional stack an
-    # authoritative payload removed, and the template's own name and domain.
-    # Package-token substitution cannot see any of that; only the assembled tree
-    # can, and it exists by now.
-    reconcile = run(
-        [str(_venv_python(cfg.dest)), "scripts/reconcile_plugin_config.py"],
-        cwd=cfg.dest,
-        check=False,
-    )
-    if reconcile.returncode != 0:
-        raise BirthError(
-            "plugin-config.yaml cannot be reconciled with the assembled repository: "
-            + (reconcile.stderr or reconcile.stdout).strip()
-        )
-    receipt.record(
-        "finalize.config",
-        "config reconciled",
-        "PASS",
-        _reconcile_detail(reconcile.stdout),
-    )
-
-    run([str(_venv_python(cfg.dest)), "scripts/render_cursor_rules.py", "--force"], cwd=cfg.dest)
-    receipt.record("finalize.rules", "generated rules", "PASS", "cursor rules rendered")
-
-    _run_governance_docs(cfg, receipt)
-
-    run([str(_venv_python(cfg.dest)), "scripts/regenerate_runtime_manifest.py"], cwd=cfg.dest)
-    receipt.record("finalize.manifest", "manifest", "PASS", "MANIFEST.sha256 regenerated")
-
-
-# `l9-update-agent-docs` in Quantum-L9/Cursor-Governance owns the root agent-doc
-# pointer stack. Birth INVOKES it from a checkout; it never vendors it. A copy
-# here would be a second source of truth for governance-owned documentation
-# policy, which is the duplication `CLAUDE.md` forbids, and it would be stale the
-# day governance changed.
-GOV_ROOT_ENV = "L9_GOV_ROOT"
-GOV_DOCS_SKILL = Path("skills/l9-update-agent-docs/scripts")
-GOV_DOCS_ENTRYPOINT = "repo_docs.py"
-# One receipt line, three exits from it. Naming the key and label once is what
-# stops a later edit renaming the SKIP path and leaving the PASS path behind,
-# which would read as two different stages in the same receipt.
-GOV_DOCS_KEY = "finalize.docs"
-GOV_DOCS_LABEL = "agent docs"
-
-
-def _run_governance_docs(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Compile the newborn's documentation obligations, from governance's own code.
-
-    What this does and does not do is worth stating, because the skill's name
-    invites the wrong expectation. It compiles obligations, validates the pointer
-    stack, and can render `llms.txt`. It does NOT author `README.md`,
-    `CLAUDE.md`, or `AGENTS.md` — those it reports on, and their content stays a
-    decision an owner makes.
-
-    Advisory, deliberately. A newborn's documentation debt is a fact worth
-    recording in the birth receipt, but governance being unreachable is not a
-    reason to refuse to create a repository, and this stage must never become a
-    second gate competing with stage 5.
-    """
-    gov_root = (os.environ.get(GOV_ROOT_ENV) or "").strip()
-    if not gov_root:
-        receipt.record(
-            GOV_DOCS_KEY,
-            GOV_DOCS_LABEL,
-            "SKIP",
-            f"no {GOV_ROOT_ENV} — governance skill not reachable",
-        )
-        return
-
-    scripts = Path(gov_root) / GOV_DOCS_SKILL
-    if not (scripts / GOV_DOCS_ENTRYPOINT).is_file():
-        receipt.record(
-            GOV_DOCS_KEY,
-            GOV_DOCS_LABEL,
-            "SKIP",
-            f"{GOV_DOCS_SKILL / GOV_DOCS_ENTRYPOINT} not found under {gov_root}",
-        )
-        return
-
-    # Run from the skill's own directory: its modules import each other by bare
-    # name, so the directory is the package. The newborn is addressed by --root,
-    # which is what keeps this an invocation rather than a copy.
-    proc = run(
-        [
-            str(_venv_python(cfg.dest)),
-            GOV_DOCS_ENTRYPOINT,
-            "--root",
-            str(cfg.dest),
-            "--json",
-        ],
-        cwd=scripts,
-        check=False,
-    )
-    receipt.record(
-        GOV_DOCS_KEY,
-        GOV_DOCS_LABEL,
-        "PASS",
-        _docs_detail(proc.stdout, proc.returncode),
-    )
-
-
-def _reconcile_detail(stdout: str) -> str:
-    """The reconciler's own account of what it changed, as one receipt line."""
-    changes = [line.strip() for line in stdout.splitlines() if line.startswith("  ")]
-    return "; ".join(changes) if changes else "already describes this repository"
-
-
-# Ruff prints each of these as its own line, so both are anchored to a line
-# start and both counts are bounded. An unanchored leading `\d+` is retried at
-# every offset of the output when there is no match, which is quadratic in the
-# length of a run's stdout rather than linear (Sonar python:S8786).
-_FIXED_RE = re.compile(r"^Fixed (\d{1,9}) error", re.MULTILINE)
-_REFORMATTED_RE = re.compile(r"^(\d{1,9}) files? reformatted", re.MULTILINE)
-
-
-def _autofix_detail(check_output: str, format_output: str) -> str:
-    """What ruff actually changed, as one receipt line.
-
-    Reported rather than merely done: a birth that silently rewrites the tree it
-    is about to attest is worse than one that leaves it alone. The numbers are
-    the difference between "the payload arrived clean" and "the payload needed
-    twenty fixes", and only the receipt will remember which.
-    """
-    fixed = _FIXED_RE.search(check_output)
-    reformatted = _REFORMATTED_RE.search(format_output)
-    parts = []
-    if fixed:
-        parts.append(f"{fixed.group(1)} lint fix(es)")
-    if reformatted:
-        parts.append(f"{reformatted.group(1)} file(s) reformatted")
-    return ", ".join(parts) if parts else "already clean"
-
-
-def _docs_detail(stdout: str, returncode: int) -> str:
-    """The governance skill's own verdict, as one receipt line.
-
-    Its receipt is the authority on its own result, so the status is read from
-    the JSON rather than inferred from an exit code this stage does not own.
-    """
-    try:
-        payload = json.loads(stdout or "{}")
-    except json.JSONDecodeError:
-        return f"unreadable receipt (exit {returncode})"
-    status = payload.get("final_status") or "UNKNOWN"
-    blockers = payload.get("blockers") or []
-    if blockers:
-        return f"{status}; {len(blockers)} documentation blocker(s)"
-    return str(status)
-
-
-def _venv_python(root: Path) -> Path:
-    candidate = root / ".venv" / "bin" / "python"
-    return candidate if candidate.is_file() else Path(sys.executable)
-
-
-def stage_apply_org_profile(cfg: BirthConfig, receipt: BirthReceipt) -> dict:
-    """Read the current organization contract and apply the applicable parts."""
-    policy_text, org_sha = _fetch_org_profile(cfg)
-    doc = parse_json_in_yaml(policy_text)
-    profile = resolve_profile(doc, cfg.repo_class)
-
-    receipt.org_profile_sha = org_sha
-    receipt.birth_profile = profile["name"]
-
-    # The class marker is NOT written here. It is birth provenance, and
-    # provenance is stamped in stage 5 — after the product payload, after
-    # MATERIALIZE, after everything that could still overwrite a file.
-    receipt.record("org.profile", "org defaults", "PASS", f"{profile['name']} @ {org_sha[:12]}")
-
-    # MATERIALIZE happens HERE, before validation and before the initial commit.
-    # A repository that is "born, then offered an org patch" is not born with
-    # the organization's current state; it is born incomplete and then sent a
-    # pull request. The applicable org files belong in the first commit.
-    checkout = _org_checkout(cfg, org_sha)
-    if checkout is None:
-        raise BirthError(
-            "cannot reach a Quantum-L9/.github checkout to materialize org files — "
-            "pass --org-profile-src for an offline birth"
-        )
-    payload = build_org_payload(checkout, profile, cfg)
-    written, kept = materialize_org_payload(cfg.dest, payload)
-    receipt.materialized = written
-    receipt.record(
-        "org.materialize",
-        "org files materialized",
-        "PASS",
-        f"{len(written)} written, {len(kept)} already present"
-        + (f": {', '.join(written)}" if written else ""),
-    )
-
-    # INHERIT is a claim that GitHub supplies the file org-wide. A repo-local
-    # copy overrides that, which is legal but worth naming.
-    overrides = inherited_present(cfg.dest, profile)
-    receipt.record(
-        "org.inherit",
-        "inherit clean",
-        "PASS",
-        "no local copies of inherited files"
-        if not overrides
-        else f"repo-local override of {len(overrides)}: {', '.join(overrides)}",
-    )
-
-    # FORBID is an assertion about the assembled repository, not only a filter
-    # on a seed payload — a product payload can introduce one just as easily.
-    hits = forbidden_present(cfg.dest, profile)
-    if hits:
-        raise BirthError(
-            f"assembled tree violates repo class {profile['name']}: {', '.join(hits)} — "
-            "organization CI targeting belongs to l9-ci-core / l9-ci-control-plane"
-        )
-    receipt.record(
-        "org.forbid",
-        "forbid clean",
-        "PASS",
-        f"{len(profile['forbid'])} pattern(s) probed",
-    )
-    return profile
-
-
-def stage_stamp_provenance(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
-    """Write the birth record — after the payload, after the organization, last.
-
-    Everything before this stage can still overwrite a file: the template copy,
-    the identity rename, the product overlay, MATERIALIZE. So the record of what
-    made this repository is generated HERE, from values the engine resolved, and
-    not copied in with the template and hoped over.
-
-    Four files, two lifetimes:
-
-        .l9-template-version        immutable   born-from version
-        .l9/org-birth-profile.yaml  immutable   class + the exact commit pair
-        .l9/birth-receipt.json      immutable   the whole record + its digest
-        .l9/template-state.yaml     mutable     what it must conform to today
-
-    The version is read from the template commit the record PINS, not from the
-    template working tree, and the two must agree. That single invariant is what
-    stops a repository being stamped `template_version: 2.1.0` beside a
-    `template_sha` whose tree says `2.0.0` — a claim nothing downstream could
-    ever check, discovered only when someone finally reads both.
-    """
-    marker_rel = str(profile.get("marker_path") or MARKER_PATH)
-    if marker_rel not in prov.BIRTH_OWNED_PATHS:
-        raise BirthError(
-            f"the organization policy puts the class marker at {marker_rel!r}, which this "
-            f"template does not protect as birth-owned ({sorted(prov.BIRTH_OWNED_PATHS)}) — "
-            "a payload could overwrite it. Update the template's protected paths first."
-        )
-
-    version_file = cfg.dest / prov.TEMPLATE_VERSION_PATH
-    pinned = prov.template_version_at(cfg.template_src, receipt.template_sha)
-    prov.assert_version_agrees(
-        assembled=version_file.read_text(encoding="utf-8").strip()
-        if version_file.is_file()
-        else "",
-        pinned=pinned,
-        sha=receipt.template_sha,
-    )
-    version_file.write_text(pinned + "\n", encoding="utf-8")
-    receipt.template_version = pinned
-    receipt.record(
-        "stamp.version",
-        "template version",
-        "PASS",
-        f"{pinned} @ {receipt.template_sha[:12]}",
-    )
-
-    marker = cfg.dest / marker_rel
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(
-        prov.render_marker(
-            profile_name=profile["name"],
-            repository=cfg.slug,
-            template_sha=receipt.template_sha,
-            template_version=pinned,
-            org_profile_sha=receipt.org_profile_sha,
-            born_at=receipt.born_at,
-        ),
+    if extra:
+        env.update(extra)
+    return env
+
+
+def sanitize_git_config(root: Path) -> None:
+    config = root / ".git" / "config"
+    if not config.is_file():
+        raise BirthError("prepared repository has no .git/config")
+    filemode = "true" if os.name != "nt" else "false"
+    config.write_text(
+        "[core]\n"
+        "\trepositoryformatversion = 0\n"
+        f"\tfilemode = {filemode}\n"
+        "\tbare = false\n"
+        "\tlogallrefupdates = true\n"
+        f"\thooksPath = {os.devnull}\n",
         encoding="utf-8",
     )
-    receipt.record(
-        "stamp.marker",
-        "birth marker",
-        "PASS",
-        f"{profile['name']} @ {receipt.org_profile_sha[:12]}",
-    )
-
-    (cfg.dest / prov.TEMPLATE_STATE_PATH).write_text(
-        prov.render_template_state(
-            template_sha=receipt.template_sha,
-            template_version=pinned,
-            org_policy_sha=receipt.org_profile_sha,
-            reconciled_at=receipt.born_at,
-        ),
-        encoding="utf-8",
-    )
-    receipt.record("stamp.conformance", "conformance state", "PASS", f"conforms to {pinned}")
-
-    # The contents digest is taken over exactly the files git is about to
-    # commit — `ls-files --cached --others --exclude-standard` — so the number
-    # recorded here is the number the root commit's tree hashes to. A gitignored
-    # build artifact lying in the work directory cannot make the two disagree.
-    manifest = prov.worktree_manifest(cfg.dest, exclude={prov.BIRTH_RECEIPT_PATH})
-    receipt.manifest_sha256 = prov.manifest_digest(manifest)
-    receipt.birth_receipt = prov.build_receipt(
-        repository=cfg.slug,
-        repo_class=profile["name"],
-        template_sha=receipt.template_sha,
-        template_version=pinned,
-        org_policy_sha=receipt.org_profile_sha,
-        payload_mode=receipt.payload_mode,
-        manifest_sha256=receipt.manifest_sha256,
-        born_at=receipt.born_at,
-    )
-    (cfg.dest / prov.BIRTH_RECEIPT_PATH).write_text(
-        prov.render_receipt_json(receipt.birth_receipt),
-        encoding="utf-8",
-    )
-    receipt.record(
-        "stamp.receipt",
-        "birth receipt",
-        "PASS",
-        f"{len(manifest)} files, sha256:{str(receipt.birth_receipt['digest'])[:12]}",
-    )
 
 
-def _verify_provenance(cfg: BirthConfig, receipt: BirthReceipt, key: str, label: str) -> None:
-    """Run the newborn's own birth-integrity checker against the newborn.
-
-    The same script the repository will carry forever, so what birth proves and
-    what CI proves later are the same proof rather than two implementations that
-    agree until they do not.
-    """
-    proc = run(
-        [str(_venv_python(cfg.dest)), VERIFY_BIRTH, "--require-receipt"],
-        cwd=cfg.dest,
-        check=False,
-    )
-    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
-    if proc.returncode != 0:
-        receipt.record(key, label, "FAIL", output.splitlines()[-1] if output else "")
-        raise BirthError(f"birth integrity verification failed:\n{output[-1500:]}")
-    receipt.record(
-        key, label, "PASS", f"sha256:{str(receipt.birth_receipt.get('digest', ''))[:12]}"
-    )
-
-
-def stage_validate(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """The full product gate, run on the newborn, before anything is created."""
-    python = _venv_python(cfg.dest)
-    checks = (
-        ("validate.inventory", "inventory", [str(python), "scripts/inventory_check.py"]),
-        ("validate.hygiene", "hygiene", [str(python), "scripts/repo_hygiene_audit.py"]),
-        (
-            "validate.rules",
-            "rules",
-            [str(python), "scripts/render_cursor_rules.py", "--check"],
-        ),
-        ("validate.lint", "lint", [str(python), "-m", "ruff", "check", "."]),
-        ("validate.format", "format", [str(python), "-m", "ruff", "format", "--check", "."]),
-        ("validate.typecheck", "typecheck", [str(python), "-m", "mypy", "src"]),
-        ("validate.tests", "tests", [str(python), "-m", "pytest", "-q"]),
-        ("validate.lock", "lock", ["uv", "lock", "--check"]),
-        (
-            "validate.provenance",
-            "birth provenance",
-            [str(python), VERIFY_BIRTH, "--require-receipt"],
-        ),
-    )
-    # The newborn carries the template's own test suite, including the birth
-    # acceptance test. Running a birth inside a birth is pure recursion.
-    nested = {"L9_SKIP_BIRTH_ACCEPTANCE": "1"}
-    failures: list[str] = []
-    for key, label, cmd in checks:
-        proc = run(cmd, cwd=cfg.dest, check=False, env=nested)
-        if proc.returncode == 0:
-            receipt.record(key, label, "PASS")
-        else:
-            tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-1200:]
-            receipt.record(key, label, "FAIL", tail.splitlines()[-1] if tail else "")
-            failures.append(f"{label}:\n{tail}")
-    if failures:
-        raise BirthError(
-            "validation failed before creation — nothing was created:\n\n" + "\n\n".join(failures)
-        )
-
-    _validate_ci_binding(cfg, receipt)
-
-
-def _validate_ci_binding(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """BIRTH-CI-004, proved locally before anything is created.
-
-    Absence of a CI workflow in the newborn is CORRECT, not a defect.
-    `l9-ci-core/.l9/org-runtime-contract.yaml` sets `consumer_copy_required:
-    false` and `consumer_core_pin_allowed: false`, and prohibits "copied L9
-    workflows in consumer repositories as an enforcement mechanism". Canonical CI
-    reaches the repository through an organisation required-workflow ruleset, so
-    a consumer that ships no workflow is the intended shape. Enrolment is proved
-    remotely after publication, by `stage_verify_ci_enrollment`.
-
-    What this stage catches is the opposite failure: a payload that ships a
-    binding to something that is NOT the canonical authority. That is worse than
-    none, because it looks like enrolment and evaluates something else.
-
-    Structural, not textual: `canonical_ci` parses each workflow and reads
-    `jobs.*.uses`, so a `uses:` in a comment is not enrolment. It runs on the
-    ASSEMBLED tree — after the payload overlay and after ownership
-    reconciliation — so "the payload omitted it" and "the payload replaced it"
-    are the same observable fact.
-    """
-    try:
-        bindings = canonical_ci.assert_binding_authorized(cfg.dest)
-    except canonical_ci.CanonicalCIError as exc:
-        receipt.record("validate.ci_binding", "ci binding", "FAIL", str(exc))
-        raise BirthError(str(exc)) from exc
-
-    if bindings:
-        # Legal but unusual: a repository may call the canonical workflow itself.
-        # Named rather than silently blessed — the ruleset is the sanctioned path.
-        detail = "; ".join(b.describe() for b in bindings)
-        receipt.record("validate.ci_binding", "ci binding", "PASS", detail)
-        return
-
-    receipt.record(
-        "validate.ci_binding",
-        "ci binding",
-        "PASS",
-        "no consumer CI workflow (correct — enrolment is an organisation ruleset)",
-    )
-
-
-def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Create the remote and push the finalized initial repository."""
-    run(["git", "add", "-A"], cwd=cfg.dest)
-    # The root commit carries the record too. Three independently comparable
-    # things come out of one birth — the commit, the receipt, and the contents
-    # the receipt's manifest digest covers — and a mismatch between any two of
-    # them means the birth is not what it says it is.
+def seal(cfg: BirthConfig, receipt: BirthReceipt) -> dict[str, str]:
+    """Seal the validated newborn into one root commit before privilege exists."""
+    assert_prepare_unprivileged()
+    sanitize_git_config(cfg.dest)
+    run(["git", "add", "-A"], cwd=cfg.dest, env=sanitized_control_env())
     message = "\n".join(
         [
             f"chore: birth {cfg.slug} from l9-repo-template@{receipt.template_sha[:12]}",
@@ -1664,6 +114,8 @@ def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
         [
             "git",
             "-c",
+            f"core.hooksPath={os.devnull}",
+            "-c",
             "user.name=L9 Birth Runner",
             "-c",
             "user.email=noreply@quantum-l9.invalid",
@@ -1673,16 +125,123 @@ def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
             message,
         ],
         cwd=cfg.dest,
+        env=sanitized_control_env(),
     )
-    receipt.head_sha = git_head(cfg.dest)
-    # The root commit only becomes checkable once it exists, so the full
-    # three-way proof runs here — before anything is pushed, not after.
-    _verify_provenance(cfg, receipt, "github.provenance", "birth record proved")
+    root_sha = run(
+        ["git", "rev-parse", "HEAD"], cwd=cfg.dest, env=sanitized_control_env()
+    ).stdout.strip()
+    tree_sha = run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=cfg.dest, env=sanitized_control_env()
+    ).stdout.strip()
+    parents = run(
+        ["git", "rev-list", "--parents", "-n", "1", "HEAD"],
+        cwd=cfg.dest,
+        env=sanitized_control_env(),
+    ).stdout.split()
+    if len(parents) != 1:
+        raise BirthError("sealed birth commit is not a root commit")
+    if run(
+        ["git", "status", "--porcelain"], cwd=cfg.dest, env=sanitized_control_env()
+    ).stdout.strip():
+        raise BirthError("prepared repository is dirty after root seal")
+    receipt.head_sha = root_sha
+    _verify_provenance(cfg, receipt, "seal.provenance", "sealed birth record proved")
+    return {"root_commit_sha": root_sha, "root_tree_sha": tree_sha}
+
+
+def prepare(
+    cfg: BirthConfig, receipt: BirthReceipt | None = None
+) -> tuple[BirthReceipt, dict[str, Any], dict[str, str]]:
+    """Run every product-controlled stage, validate, and seal exact Git state."""
+    assert_prepare_unprivileged()
+    receipt = receipt or new_receipt(cfg)
+    stage_preflight(cfg, receipt)
+    stage_assemble(cfg, receipt)
+    stage_finalize(cfg, receipt)
+    profile = stage_apply_org_profile(cfg, receipt)
+    stage_stamp_provenance(cfg, receipt, profile)
+    stage_validate(cfg, receipt)
+    sealed = seal(cfg, receipt)
+    receipt.state = "SEALED"
+    _write_receipt(cfg, receipt)
+    return receipt, profile, sealed
+
+
+def verify_sealed(root: Path, root_sha: str, tree_sha: str) -> None:
+    """Verify PREPARE output as untrusted data on the fresh publish runner."""
+    env = sanitized_control_env()
+    head = run(["git", "rev-parse", "HEAD"], cwd=root, env=env).stdout.strip()
+    if head != root_sha:
+        raise BirthError("prepared HEAD changed after seal")
+    tree = run(["git", "rev-parse", "HEAD^{tree}"], cwd=root, env=env).stdout.strip()
+    if tree != tree_sha:
+        raise BirthError("prepared tree changed after seal")
+    if run(["git", "status", "--porcelain"], cwd=root, env=env).stdout.strip():
+        raise BirthError("prepared working tree changed after seal")
+    hooks = run(
+        ["git", "config", "--local", "--get", "core.hooksPath"],
+        cwd=root,
+        check=False,
+        env=env,
+    )
+    if hooks.returncode != 0 or (hooks.stdout or "").strip() != os.devnull:
+        raise BirthError("prepared repository does not disable Git hooks")
+
+
+def control_run(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    check: bool = True,
+    capture: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    tool = Path(cmd[0]).name
+    if tool not in ALLOWED_PUBLISH_TOOLS:
+        raise BirthError(f"PUBLISH refused non-control-plane executable: {tool}")
+    merged = sanitized_control_env()
+    token = (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip()
+    if token:
+        merged["GH_TOKEN"] = token
+    if env:
+        merged.update({key: value for key, value in env.items() if key != "GH_TOKEN"})
+    proc = subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        check=False,
+        capture_output=capture,
+        text=True,
+        env=merged,
+    )
+    if check and proc.returncode != 0:
+        detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
+        raise BirthError(f"{' '.join(cmd)} failed ({proc.returncode})\n{detail[-1600:]}")
+    return proc
+
+
+def _remote_head_control(slug: str) -> str | None:
+    proc = control_run(
+        ["gh", "api", f"repos/{slug}/commits/main", "--jq", ".sha"], check=False
+    )
+    value = (proc.stdout or "").strip()
+    return value if SHA_RE.match(value) else None
+
+
+def publish_root(cfg: BirthConfig, receipt: BirthReceipt, root_sha: str) -> None:
+    """Create/recover the remote and publish only the exact sealed root."""
+    existing = control_run(["gh", "repo", "view", cfg.slug, "--json", "name"], check=False)
+    if existing.returncode == 0:
+        head = _remote_head_control(cfg.slug)
+        if head == root_sha:
+            receipt.record("github.create", "repository created", "PASS", "already exact")
+            receipt.record("github.push", "initial push", "PASS", root_sha[:12])
+            return
+        state = "QUARANTINED_PARTIAL_CREATE" if head is None else "CONFLICT"
+        receipt.state = state
+        raise BirthError(f"{cfg.slug} already exists but sealed root cannot be proven ({state})")
 
     visibility = "--private" if cfg.private else "--public"
-    # One command owns all three: create the remote repository, create the
-    # `origin` remote for this working tree, and push the initial commit.
-    run(
+    proc = control_run(
         [
             "gh",
             "repo",
@@ -1696,583 +255,97 @@ def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
             "--remote",
             "origin",
             "--push",
-        ]
-    )
-    receipt.record("github.create", "repository created", "PASS", cfg.slug)
-    receipt.record("github.push", "initial push", "PASS", receipt.head_sha[:12])
-
-
-def _newest_dispatch_run(workflow: str, since: str) -> dict | None:
-    """The most recent workflow_dispatch run of `workflow` created at/after `since`.
-
-    `gh workflow run` prints nothing useful and returns before a run exists, so
-    the run has to be found by polling the runs list. Filtering on `since`
-    keeps an older run of the same workflow from being mistaken for this one.
-    """
-    proc = run(
-        [
-            "gh",
-            "api",
-            f"repos/{ORG_PROFILE_REPO}/actions/workflows/{workflow}/runs"
-            "?event=workflow_dispatch&per_page=20",
-            "--jq",
-            ".workflow_runs",
         ],
         check=False,
     )
-    if proc.returncode != 0:
-        return None
-    try:
-        runs = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError:
-        return None
-    fresh = [r for r in runs if isinstance(r, dict) and str(r.get("created_at", "")) >= since]
-    return max(fresh, key=lambda r: str(r.get("created_at", "")), default=None)
-
-
-def _await_workflow(workflow: str, since: str, timeout_s: int) -> tuple[str, str]:
-    """Block until one dispatched run reaches a conclusion.
-
-    Returns (state, detail) where state is PASS / FAIL / TIMEOUT. A dispatch
-    that GitHub merely ACCEPTED proves nothing: not that the run started, not
-    that it succeeded, not that a single label was applied. Only `success`
-    earns a PASS.
-    """
-    deadline = time.monotonic() + timeout_s
-    run_id = None
-    while time.monotonic() < deadline:
-        found = _newest_dispatch_run(workflow, since)
-        if found:
-            run_id = found.get("id")
-            status = str(found.get("status") or "")
-            conclusion = str(found.get("conclusion") or "")
-            if status == "completed":
-                detail = f"run {run_id}: {conclusion or 'no conclusion'}"
-                return ("PASS" if conclusion == "success" else "FAIL", detail)
-        time.sleep(5)
-    return ("TIMEOUT", f"run {run_id or '(never appeared)'} did not complete in {timeout_s}s")
-
-
-def stage_remote_bootstrap(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
-    """Invoke the org capabilities now — and WAIT for them to finish.
-
-    The organization contract says `make new-repo` dispatches the bootstrap
-    workflow and waits for it. A dispatch returning 0 proves only that GitHub
-    accepted the request; treating that as done let a birth report PASS while
-    labels, settings and attestation had not run at all.
-    """
-    since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    dispatches = [
-        ("github.bootstrap", "org bootstrap", "repo-birth-bootstrap.yml"),
-        ("github.seed", "org files seeded", "auto-seed-new-repo.yml"),
-    ]
-    for key, label, workflow in dispatches:
-        cmd = [
-            "gh",
-            "workflow",
-            "run",
-            workflow,
-            "--repo",
-            ORG_PROFILE_REPO,
-            "-f",
-            f"target_repo={cfg.repo}",
-            "-f",
-            f"repo_class={profile['name']}",
-            "-f",
-            "dry_run=false",
-        ]
-        proc = run(cmd, check=False)
-        if proc.returncode != 0:
-            detail = ((proc.stderr or "") + (proc.stdout or "")).strip().splitlines()
-            receipt.record(key, label, "FAIL", detail[-1] if detail else "dispatch failed")
-            continue
-        state, detail = _await_workflow(workflow, since, cfg.bootstrap_timeout)
-        receipt.record(key, label, "PASS" if state == "PASS" else "FAIL", detail)
-
-
-def _repo_rulesets(slug: str) -> object:
-    """The rulesets that apply to a repository, org-inherited included.
-
-    SUMMARIES. This response says which rulesets apply and whether they are
-    enforced; it does not carry their `rules`. Deciding enrolment from it is the
-    mistake that makes a correctly enrolled repository read as unenrolled — see
-    `_repo_ruleset_detail`, which is where the rules actually come from.
-
-    None means "could not determine", which is NOT "not enrolled". A transient
-    API failure must never read as a clean absence.
-    """
-    proc = run(["gh", "api", f"repos/{slug}/rulesets?includes_parents=true"], check=False)
-    if proc.returncode != 0:
-        return None
-    try:
-        return json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError:
-        return None
-
-
-def _repo_ruleset_detail(slug: str, ruleset_id: int) -> object | None:
-    """One ruleset's FULL representation, org-inherited included.
-
-    The listing `_repo_rulesets` reads is a summary: it names each ruleset but
-    does not carry its `rules`. This is the only call that answers what a
-    ruleset actually requires.
-
-    `includes_parents=true` is what makes an organisation-owned ruleset
-    readable through the repository's own endpoint. None means "could not
-    determine" — a 404 for a ruleset that was listed a moment ago is a
-    disappearance, not an absence, and neither is "not enrolled".
-    """
-    proc = run(
-        ["gh", "api", f"repos/{slug}/rulesets/{ruleset_id}?includes_parents=true"], check=False
-    )
-    if proc.returncode != 0:
-        return None
-    try:
-        return json.loads(proc.stdout or "null")
-    except json.JSONDecodeError:
-        return None
-
-
-def _read_enrollment(slug: str, rulesets: object) -> object | None:
-    """Hydrate the ruleset listing and read enrolment off the full objects."""
-    return canonical_ci.enrollment_from_rulesets(
-        rulesets, fetch_detail=lambda ruleset_id: _repo_ruleset_detail(slug, ruleset_id)
-    )
-
-
-def stage_verify_ci_enrollment(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """BIRTH-CI-001 and BIRTH-CI-005: canonical CI reaches this repository.
-
-    Enrolment, not root-commit evaluation. GitHub required workflows run on
-    `pull_request`, `pull_request_target` and `merge_group` — never on `push` —
-    and a root commit has no base branch to be a pull request against. Waiting
-    here for a run against the root SHA would wait forever and QUARANTINE every
-    real birth, which is exactly what the first shape of this stage did.
-
-    What birth CAN prove is that the organisation ruleset requires the canonical
-    workflow for this repository, so the first pull request will be evaluated.
-    That is the honest claim, and it is proved remotely (BIRTH-CI-005): the local
-    workspace is never consulted.
-
-    The repository ends PROVISIONAL either way. BORN is earned later, by a real
-    pull request that canonical CI passes.
-    """
-    rulesets = _repo_rulesets(cfg.slug)
-    if rulesets is None:
-        receipt.record(
-            "ci.enrollment",
-            "ci enrollment",
-            "FAIL",
-            "repository rulesets unreadable — enrolment undeterminable",
-        )
-        raise BirthError(
-            f"cannot read the rulesets that apply to {cfg.slug}, so canonical CI "
-            "enrolment is undeterminable. Undeterminable is not enrolled."
-        )
-
-    try:
-        enrolled = _read_enrollment(cfg.slug, rulesets)
-    except canonical_ci.CanonicalCIError as exc:
-        # Undeterminable, not unenrolled. The breakglass below authorises
-        # publishing a repository KNOWN to be unenrolled; it cannot authorise
-        # publishing one whose enrolment was never established, so this raises
-        # before the reason is ever consulted.
-        receipt.record(
-            "ci.enrollment",
-            "ci enrollment",
-            "FAIL",
-            "organisation ruleset detail unreadable — enrolment undeterminable",
-        )
-        raise BirthError(f"canonical CI enrolment for {cfg.slug} is undeterminable: {exc}") from exc
-
-    receipt.ci = canonical_ci.ci_provenance(
-        canonical_ci.CIVerdict(
-            state=canonical_ci.PROVISIONAL,
-            detail=enrolled.describe() if enrolled else "not enrolled",
-            revision=receipt.head_sha,
-        )
-    )
-    if enrolled is not None:
-        receipt.record("ci.enrollment", "ci enrollment", "PASS", enrolled.describe())
+    if proc.returncode == 0:
+        receipt.record("github.create", "repository created", "PASS", cfg.slug)
+        receipt.record("github.push", "initial push", "PASS", root_sha[:12])
         return
-
-    # Not enrolled. The organisation ruleset that is supposed to require
-    # `org-ci.yml` has never been applied — see the activation kit in
-    # Cursor-Governance, WIP/org-ci-ruleset-activation. Until it is, no pull
-    # request in this repository will be evaluated by canonical CI either.
-    reason = (os.environ.get(CI_UNVERIFIED_ENV) or "").strip()
-    if not reason:
+    probe = control_run(["gh", "repo", "view", cfg.slug, "--json", "name"], check=False)
+    if probe.returncode != 0:
+        receipt.state = "PUBLISH_FAILED_NO_REMOTE"
+        raise BirthError("publication failed and target repository is absent; safe to retry")
+    head = _remote_head_control(cfg.slug)
+    if head == root_sha:
         receipt.record(
-            "ci.enrollment",
-            "ci enrollment",
-            "FAIL",
-            "no organisation ruleset requires canonical CI",
+            "github.create", "repository created", "PASS", "recovered after command failure"
         )
-        receipt.state = canonical_ci.QUARANTINED
-        raise BirthError(
-            f"{cfg.slug} is published but NOT enrolled with canonical CI.\n"
-            f"  authority: {canonical_ci.CI_AUTHORITY_REPO}/"
-            f"{canonical_ci.CI_AUTHORITY_WORKFLOW}\n"
-            "  No organisation-sourced ruleset requires that workflow here, so no "
-            "pull request in this repository will ever be evaluated.\n"
-            "  Apply the ruleset (Cursor-Governance WIP/org-ci-ruleset-activation), "
-            f"or re-run with {CI_UNVERIFIED_ENV}='<why>' to accept an unenrolled "
-            "repository. The repository is preserved either way."
-        )
-    receipt.record("ci.enrollment", "ci enrollment", "WARN", f"unverified by operator: {reason}")
-
-
-def _remote_has(slug: str, path: str) -> bool:
-    """True when `path` exists on the remote default branch (file or directory)."""
-    proc = run(["gh", "api", f"repos/{slug}/contents/{path}"], check=False)
-    return proc.returncode == 0
-
-
-def _attest_head(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """The remote default branch points at the commit birth actually made."""
-    deadline = time.monotonic() + cfg.bootstrap_timeout
-    remote_head = ""
-    while time.monotonic() < deadline:
-        proc = run(["gh", "api", f"repos/{cfg.slug}/commits/main", "--jq", ".sha"], check=False)
-        remote_head = (proc.stdout or "").strip()
-        if SHA_RE.match(remote_head):
-            break
-        time.sleep(3)
-    receipt.record(
-        "github.head",
-        "remote HEAD",
-        "PASS" if remote_head == receipt.head_sha else "FAIL",
-        remote_head[:12] or "unreachable",
-    )
-
-
-def _attest_content(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
-    """Required files, a licence that governs THIS repo, and the class marker."""
-    for rel in (
-        "README.md",
-        CANONICAL_LICENSE,
-        MARKER_PATH,
-        prov.TEMPLATE_VERSION_PATH,
-        prov.BIRTH_RECEIPT_PATH,
-        prov.TEMPLATE_STATE_PATH,
-        PYPROJECT,
-        "uv.lock",
-    ):
-        receipt.record(
-            f"github.present.{rel}",
-            f"remote {rel}",
-            "PASS" if _remote_has(cfg.slug, rel) else "FAIL",
-            rel,
-        )
-
-    # The licence that actually landed must not disclaim the repository it
-    # governs. The org template carried a `.github`-only notice for a while,
-    # and birth copies that file in as canonical — so a poisoned licence is
-    # exactly what this factory would otherwise reproduce perfectly, forever.
-    remote_license = _remote_text(cfg.slug, CANONICAL_LICENSE)
-    receipt.record(
-        "github.license",
-        "license generic",
-        "PASS" if remote_license and POISONED_LICENSE_NOTICE not in remote_license else "FAIL",
-        "generic consumer licence" if remote_license else "unreadable or repo-specific",
-    )
-
-    remote_class = parse_marker_profile(_remote_text(cfg.slug, MARKER_PATH))
-    receipt.record(
-        "github.class",
-        "org policy attested",
-        "PASS" if remote_class == profile["name"] else "FAIL",
-        remote_class or "marker unreadable",
-    )
-
-    # The birth receipt that landed must be the birth receipt that was written,
-    # and must still hash to its own digest. Reading the local work directory
-    # back would prove only that this process can read its own output.
-    local_digest = str(receipt.birth_receipt.get("digest") or "")
-    remote_digest, recomputed = _remote_receipt_digests(cfg.slug)
-    receipt.record(
-        "github.receipt",
-        "birth receipt attested",
-        "PASS"
-        if local_digest and remote_digest == local_digest and recomputed == local_digest
-        else "FAIL",
-        f"sha256:{local_digest[:12]}"
-        if remote_digest == local_digest == recomputed
-        else f"remote says {remote_digest[:12] or '(unreadable)'}, hashes to {recomputed[:12]}",
-    )
-
-
-def _remote_receipt_digests(slug: str) -> tuple[str, str]:
-    """(digest the remote receipt claims, digest it actually hashes to)."""
-    text = _remote_text(slug, prov.BIRTH_RECEIPT_PATH)
-    if not text:
-        return "", ""
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return "", ""
-    if not isinstance(parsed, dict):
-        return "", ""
-    return str(parsed.get("digest") or ""), prov.receipt_digest(parsed)
-
-
-def _attest_org_state(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
-    """MATERIALIZE present, FORBID absent, and no seeder PR left pending."""
-    missing = [rel for rel in receipt.materialized if not _remote_has(cfg.slug, rel)]
-    receipt.record(
-        "github.materialized",
-        "org files on remote",
-        "PASS" if not missing else "FAIL",
-        f"{len(receipt.materialized)} attested"
-        if not missing
-        else f"missing: {', '.join(missing)}",
-    )
-
-    leaked = [
-        pattern
-        for pattern in profile["forbid"]
-        if _remote_has(cfg.slug, pattern[:-3] if pattern.endswith("/**") else pattern)
-    ]
-    receipt.record(
-        "github.forbid",
-        "forbid attested",
-        "PASS" if not leaked else "FAIL",
-        ", ".join(leaked) if leaked else f"{len(profile['forbid'])} probed",
-    )
-
-    # If the applicable org state really is in the initial commit, the seeder
-    # has nothing left to offer. A pending seed PR means the repository was
-    # born incomplete and then sent a patch.
-    open_seed = gh_json_safe(
-        ["api", f"repos/{cfg.slug}/pulls?state=open&head={cfg.org}:{SEED_BRANCH}", "--jq", "length"]
-    )
-    pending = open_seed if isinstance(open_seed, int) else 0
-    receipt.record(
-        "github.no_pending_seed",
-        "no pending org PR",
-        "PASS" if pending == 0 else "FAIL",
-        "born with org state" if pending == 0 else f"{pending} seeder PR(s) still pending",
-    )
-
-
-def _attest_remote_apply(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
-    """Labels and settings are API state, proved by reading the API.
-
-    Not by the bootstrap workflow having exited zero — that is the same
-    dispatch-equals-done mistake one layer up.
-    """
-    if profile["remote_apply"].get("labels"):
-        proc = run(
-            ["gh", "api", f"repos/{cfg.slug}/labels?per_page=100", "--jq", "length"], check=False
-        )
-        count = int((proc.stdout or "0").strip() or 0) if proc.returncode == 0 else 0
-        receipt.record(
-            "github.labels",
-            "labels applied",
-            "PASS" if count >= MIN_ORG_LABELS else "FAIL",
-            f"{count} labels on remote",
-        )
-    if profile["remote_apply"].get("repo_settings"):
-        settings = gh_json_safe(["api", f"repos/{cfg.slug}"])
-        ok = isinstance(settings, dict) and settings.get("delete_branch_on_merge") is True
-        receipt.record(
-            "github.settings",
-            "repo settings applied",
-            "PASS" if ok else "FAIL",
-            "org policy applied" if ok else "settings not applied",
-        )
-
-
-def stage_attest(cfg: BirthConfig, receipt: BirthReceipt, profile: dict) -> None:
-    """Read the remote back. Local assembly proves nothing about GitHub.
-
-    Every check queries the REMOTE. A birth that only re-inspects the work
-    directory it just built has verified its own arithmetic, not the
-    repository it claims to have created.
-    """
-    _attest_head(cfg, receipt)
-    _attest_content(cfg, receipt, profile)
-    _attest_org_state(cfg, receipt, profile)
-    _attest_remote_apply(cfg, receipt, profile)
-    _attest_ci(cfg, receipt)
-
-
-def _attest_ci(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """BIRTH-CI-005: the enrolment claim is re-read from GitHub, not from memory.
-
-    `stage_verify_ci_enrollment` already read the rulesets. This asserts the same
-    fact again at attestation time, so a receipt can never carry an enrolment the
-    repository's own ruleset list does not show.
-    """
-    rulesets = _repo_rulesets(cfg.slug)
-    try:
-        enrolled = _read_enrollment(cfg.slug, rulesets) if rulesets is not None else None
-    except canonical_ci.CanonicalCIError as exc:
-        # Not excused by the breakglass: the operator accepted an UNENROLLED
-        # repository, which is not the same claim as one nothing could read.
-        receipt.record("attest.ci", "ci enrollment attested", "FAIL", str(exc))
+        receipt.record("github.push", "initial push", "PASS", root_sha[:12])
         return
-    if enrolled is not None:
-        receipt.record("attest.ci", "ci enrollment attested", "PASS", enrolled.describe())
-    elif (os.environ.get(CI_UNVERIFIED_ENV) or "").strip():
-        receipt.record(
-            "attest.ci", "ci enrollment attested", "WARN", "unenrolled, accepted by operator"
-        )
-    else:
-        receipt.record(
-            "attest.ci", "ci enrollment attested", "FAIL", "no organisation ruleset on the remote"
-        )
+    receipt.state = "QUARANTINED_PARTIAL_CREATE"
+    raise BirthError(
+        "repository exists after failed publication but exact sealed root is not present"
+    )
 
 
-def build_config(args: argparse.Namespace) -> BirthConfig:
-    if args.payload_contract and not args.payload:
-        # An argument error, not a source-tree condition — so it is caught here,
-        # where the answer does not depend on what is on disk. A compiled payload
-        # AUTHORIZES bytes; it does not carry them.
+def publish(
+    cfg: BirthConfig,
+    receipt: BirthReceipt,
+    profile: dict[str, Any],
+    *,
+    root_sha: str,
+    tree_sha: str,
+) -> BirthReceipt:
+    """Publish and remotely attest a previously sealed root."""
+    if not (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip():
+        raise BirthError(f"{PRIVILEGED_TOKEN_ENV} is required for PUBLISH")
+    verify_sealed(cfg.dest, root_sha, tree_sha)
+    # Existing remote stages are pure GitHub control-plane operations. Route
+    # their run() global through the strict git/gh allowlist for this phase.
+    original_run = _stages.run
+    _stages.run = control_run
+    try:
+        publish_root(cfg, receipt, root_sha)
+        receipt.state = canonical_ci.PROVISIONAL
+        stage_remote_bootstrap(cfg, receipt, profile)
+        stage_verify_ci_enrollment(cfg, receipt)
+        stage_attest(cfg, receipt, profile)
+        receipt.state = (
+            canonical_ci.PROVISIONAL if not receipt.failed else canonical_ci.QUARANTINED
+        )
+        receipt.ci["state"] = receipt.state
+    finally:
+        _stages.run = original_run
+    _write_receipt(cfg, receipt)
+    return receipt
+
+
+def all(cfg: BirthConfig) -> BirthReceipt:
+    """Local/debug compatibility topology using the same canonical phases."""
+    receipt, profile, sealed = prepare(cfg)
+    if not cfg.remote:
+        receipt.record("github.create", "repository created", "SKIP", "--no-remote")
+        receipt.state = canonical_ci.LOCAL
+        _write_receipt(cfg, receipt)
+        return receipt
+
+    # Production publication MUST use the fresh-runner dispatch topology. The
+    # one-process remote path is retained only when authority is explicitly
+    # supplied after PREPARE by the caller through the canonical variable.
+    if not (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip():
         raise BirthError(
-            "PAYLOAD_CONTRACT was given without a PAYLOAD — a compiled payload authorizes "
-            "bytes, it does not carry them. Pass the source tree the contract was compiled from."
+            "remote all() requires L9_BIRTH_PRIVILEGED_TOKEN after PREPARE; "
+            "production callers must use the two-job dispatch boundary"
         )
-    return BirthConfig(
-        org=(args.org or DEFAULT_ORG).strip(),
-        repo=validate_repo_name(args.repo),
-        pkg=validate_package_name(args.pkg),
-        desc=validate_description(args.desc),
-        work_dir=Path(args.work_dir).expanduser().resolve(),
-        payload=Path(args.payload).expanduser().resolve() if args.payload else None,
-        payload_contract=(
-            Path(args.payload_contract).expanduser().resolve() if args.payload_contract else None
-        ),
-        template_src=Path(args.template_src).expanduser().resolve(),
-        org_profile_src=(
-            Path(args.org_profile_src).expanduser().resolve() if args.org_profile_src else None
-        ),
-        repo_class=(args.repo_class or BIRTH_PROFILE_CLASS).strip(),
-        remote=not args.no_remote,
-        private=args.private,
-        keep=args.keep,
-        receipt_path=Path(args.receipt).expanduser().resolve() if args.receipt else None,
-        bootstrap_timeout=args.bootstrap_timeout,
+    return publish(
+        cfg,
+        receipt,
+        profile,
+        root_sha=sealed["root_commit_sha"],
+        tree_sha=sealed["root_tree_sha"],
     )
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="new_repo.py",
-        description="Birth a non-Constellation Quantum-L9 Python repository in one command.",
-    )
-    parser.add_argument("--repo", required=True, help="GitHub repository name")
-    parser.add_argument("--pkg", required=True, help="snake_case Python package name")
-    parser.add_argument("--desc", required=True, help="one-line repository description")
-    parser.add_argument("--org", default=DEFAULT_ORG)
-    parser.add_argument("--payload", default=None, help="product files to overlay on the scaffold")
-    parser.add_argument(
-        "--payload-contract",
-        default=None,
-        help=(
-            "compiled l9.birth-payload/v1 authorizing the payload "
-            "(required when the payload is repository-shaped; see compile_birth_payload.py)"
-        ),
-    )
-    parser.add_argument("--work-dir", default=os.environ.get("WORK_DIR") or str(default_work_dir()))
-    parser.add_argument("--template-src", default=str(TEMPLATE_ROOT))
-    parser.add_argument(
-        "--org-profile-src",
-        default=None,
-        help=f"local {ORG_PROFILE_REPO} checkout (skips the gh read; enables an offline birth)",
-    )
-    parser.add_argument("--repo-class", default=BIRTH_PROFILE_CLASS)
-    parser.add_argument(
-        "--no-remote",
-        action="store_true",
-        help="stop after stage 5 — assemble, finalize, and validate locally only",
-    )
-    parser.add_argument("--private", action="store_true", help="create the repository private")
-    parser.add_argument(
-        "--keep",
-        action="store_true",
-        help="keep the work directory on failure (default: keep; kept for symmetry)",
-    )
-    parser.add_argument("--receipt", default=None, help="write the birth receipt JSON here")
-    parser.add_argument(
-        "--bootstrap-timeout",
-        type=int,
-        default=180,
-        help="seconds to wait for the remote to become readable during attestation",
-    )
-    return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
         cfg = build_config(parse_args(argv))
-    except (BirthError, prov.ProvenanceError) as exc:
-        print(f"BIRTH FAIL (preflight): {exc}", file=sys.stderr)
-        return 2
-
-    receipt = BirthReceipt(
-        org=cfg.org,
-        repository=cfg.repo,
-        package=cfg.pkg,
-        description=cfg.desc,
-        payload=str(cfg.payload) if cfg.payload else "",
-        workdir=str(cfg.dest),
-        born_at=datetime.now(UTC).isoformat(timespec="seconds"),
-    )
-    receipt.template_sha = git_head(cfg.template_src)
-    # What the template CHECKOUT says, recorded so a failure before stage 5 still
-    # reports something. Stage 5 replaces it with the version the recorded commit
-    # actually carries, and refuses the birth when the two disagree.
-    version_file = cfg.template_src / prov.TEMPLATE_VERSION_PATH
-    if version_file.is_file():
-        receipt.template_version = version_file.read_text(encoding="utf-8").strip()
-
-    profile: dict = {"name": cfg.repo_class, "forbid": []}
-    try:
-        stage_preflight(cfg, receipt)
-        stage_assemble(cfg, receipt)
-        stage_finalize(cfg, receipt)
-        profile = stage_apply_org_profile(cfg, receipt)
-        stage_stamp_provenance(cfg, receipt, profile)
-        stage_validate(cfg, receipt)
-        if cfg.remote:
-            stage_create(cfg, receipt)
-            # Published, not born. Everything from here decides which.
-            receipt.state = canonical_ci.PROVISIONAL
-            stage_remote_bootstrap(cfg, receipt, profile)
-            stage_verify_ci_enrollment(cfg, receipt)
-            stage_attest(cfg, receipt, profile)
-            # Birth ends PROVISIONAL. Not caution — arithmetic: required
-            # workflows never run on push, and a root commit has no base branch
-            # to be a pull request against, so nothing can have evaluated this
-            # commit yet. BORN is earned by the first pull request that passes.
-            receipt.state = (
-                canonical_ci.PROVISIONAL if not receipt.failed else canonical_ci.QUARANTINED
-            )
-            receipt.ci["state"] = receipt.state
-        else:
-            receipt.record("github.create", "repository created", "SKIP", "--no-remote")
-            receipt.state = canonical_ci.LOCAL
+        receipt = all(cfg)
     except (BirthError, prov.ProvenanceError, canonical_ci.CanonicalCIError) as exc:
-        receipt.record("birth.error", "birth", "FAIL", str(exc).splitlines()[0][:120])
-        print(render_receipt(receipt))
         print(f"BIRTH FAIL: {exc}", file=sys.stderr)
-        _write_receipt(cfg, receipt)
         return 1
-
     print(render_receipt(receipt))
-    _write_receipt(cfg, receipt)
     return 1 if receipt.failed else 0
-
-
-def _write_receipt(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    path = cfg.receipt_path or (cfg.work_dir / f"{cfg.repo}-birth-receipt.json")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(receipt.to_dict(), indent=2) + "\n", encoding="utf-8")
-        print(f"birth receipt: {path}")
-    except OSError as exc:
-        print(f"warning: could not write birth receipt to {path}: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":
