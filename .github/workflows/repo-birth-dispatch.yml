@@ -58,14 +58,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  birth:
-    name: Birth ${{ inputs.repo_name }}
+  prepare:
+    name: Prepare ${{ inputs.repo_name }}
     runs-on: ubuntu-latest
-    environment: repo-birth
     timeout-minutes: 30
+    outputs:
+      factory_sha: ${{ steps.factory.outputs.sha }}
+      governance_sha: ${{ steps.governance.outputs.sha }}
+      payload_sha: ${{ steps.payload.outputs.sha }}
     steps:
-      - name: Checkout template
+      - name: Checkout factory
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Record factory SHA
+        id: factory
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
@@ -75,15 +82,16 @@ jobs:
       - name: Sync locked factory dependencies
         run: uv sync --extra dev --frozen --no-install-project --no-build
 
-      - name: Mint read-only source token
-        id: source_token
-        if: inputs.payload_repo != ''
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.BIRTH_APP_ID }}
-          private-key: ${{ secrets.BIRTH_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          permission-contents: read
+      - name: Fetch organization policy at exact SHA
+        id: org_policy
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/org-github"
+          git clone --no-checkout https://github.com/Quantum-L9/.github.git "$dest"
+          git -C "$dest" fetch --depth 1 origin main
+          git -C "$dest" checkout --detach FETCH_HEAD
+          echo "root=$dest" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git -C "$dest" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Fetch governance
         id: governance
@@ -99,6 +107,17 @@ jobs:
           git -C "$dest" fetch --depth 1 origin "$ref"
           git -C "$dest" checkout --detach FETCH_HEAD
           echo "root=$dest" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git -C "$dest" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Mint read-only source token
+        id: source_token
+        if: inputs.payload_repo != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.BIRTH_APP_ID }}
+          private-key: ${{ secrets.BIRTH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
 
       - name: Fetch payload with read-only authority
         id: payload
@@ -138,7 +157,7 @@ jobs:
           echo "contract=$contract" >> "$GITHUB_OUTPUT"
           echo "sha=$(git -C "$dest" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: PREPARE, validate, and seal without privileged birth authority
+      - name: PREPARE and seal without privileged birth authority
         env:
           BIRTH_ORG: ${{ github.repository_owner }}
           BIRTH_REPO: ${{ inputs.repo_name }}
@@ -149,18 +168,73 @@ jobs:
           BIRTH_PAYLOAD: ${{ steps.payload.outputs.root }}
           BIRTH_PAYLOAD_CONTRACT: ${{ steps.payload.outputs.contract }}
           L9_GOV_ROOT: ${{ steps.governance.outputs.root }}
+          L9_BIRTH_GOVERNANCE_SHA: ${{ steps.governance.outputs.sha }}
+          L9_BIRTH_PAYLOAD_REPOSITORY: ${{ inputs.payload_repo }}
+          L9_BIRTH_PAYLOAD_REQUESTED_REF: ${{ inputs.payload_ref }}
+          L9_BIRTH_PAYLOAD_RESOLVED_SHA: ${{ steps.payload.outputs.sha }}
         run: |
           set -euo pipefail
           unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
-          args=(prepare --repo "$BIRTH_REPO" --pkg "$BIRTH_PKG" --desc "$BIRTH_DESC" --org "$BIRTH_ORG" --work-dir "$RUNNER_TEMP/births" --handoff "$RUNNER_TEMP/birth-handoff.json")
+          args=(prepare --repo "$BIRTH_REPO" --pkg "$BIRTH_PKG" --desc "$BIRTH_DESC" --org "$BIRTH_ORG" --work-dir "$RUNNER_TEMP/births" --handoff "$RUNNER_TEMP/birth-handoff.json" --org-profile-src "${{ steps.org_policy.outputs.root }}")
           [ -z "$BIRTH_CLASS" ] || args+=(--repo-class "$BIRTH_CLASS")
           [ "$BIRTH_VISIBILITY" != private ] || args+=(--private)
           [ -z "${BIRTH_PAYLOAD:-}" ] || args+=(--payload "$BIRTH_PAYLOAD")
           [ -z "${BIRTH_PAYLOAD_CONTRACT:-}" ] || args+=(--payload-contract "$BIRTH_PAYLOAD_CONTRACT")
-          .venv/bin/python scripts/birth-runner/birth_boundary.py "${args[@]}"
+          .venv/bin/python -I scripts/birth-runner/birth_boundary.py "${args[@]}"
+          tar -C "$RUNNER_TEMP/births" -czf "$RUNNER_TEMP/sealed-birth.tgz" "$BIRTH_REPO"
 
-      # PRIVILEGE BOUNDARY. No product/dependency/toolchain execution is allowed below.
-      - name: Mint privileged publication token after seal
+      - name: Upload sealed birth handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sealed-birth-${{ inputs.repo_name }}
+          path: |
+            ${{ runner.temp }}/birth-handoff.json
+            ${{ runner.temp }}/sealed-birth.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ inputs.repo_name }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: repo-birth
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted factory
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.prepare.outputs.factory_sha }}
+
+      - name: Verify trusted factory SHA
+        run: test "$(git rev-parse HEAD)" = "${{ needs.prepare.outputs.factory_sha }}"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
+        with:
+          python-version: "3.12"
+
+      - name: Build trusted factory environment
+        run: uv sync --extra dev --frozen --no-install-project --no-build
+
+      - name: Download sealed birth handoff
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e
+        with:
+          name: sealed-birth-${{ inputs.repo_name }}
+          path: ${{ runner.temp }}/sealed-input
+
+      - name: Materialize sealed birth artifact as data
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/births"
+          tar -C "$RUNNER_TEMP/births" -xzf "$RUNNER_TEMP/sealed-input/sealed-birth.tgz"
+          cp "$RUNNER_TEMP/sealed-input/birth-handoff.json" "$RUNNER_TEMP/birth-handoff.json"
+
+      - name: Verify sealed artifact before authority exists
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
+          .venv/bin/python -I scripts/birth-runner/birth_boundary.py verify --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}"
+
+      - name: Mint privileged publication token after fresh-runner verification
         id: publish_token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -178,9 +252,9 @@ jobs:
           L9_BIRTH_CI_UNVERIFIED: ${{ inputs.ci_unverified_reason }}
         run: |
           set -euo pipefail
-          python3 -I scripts/birth-runner/birth_boundary.py publish --handoff "$RUNNER_TEMP/birth-handoff.json"
+          .venv/bin/python -I scripts/birth-runner/birth_boundary.py publish --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}"
 
-      - name: Upload birth evidence
+      - name: Upload final birth evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
