@@ -66,6 +66,9 @@ jobs:
       factory_sha: ${{ steps.factory.outputs.sha }}
       governance_sha: ${{ steps.governance.outputs.sha }}
       payload_sha: ${{ steps.payload.outputs.sha }}
+      handoff_digest: ${{ steps.anchor.outputs.handoff_digest }}
+      root_sha: ${{ steps.anchor.outputs.root_sha }}
+      tree_sha: ${{ steps.anchor.outputs.tree_sha }}
     steps:
       - name: Checkout factory
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -103,20 +106,10 @@ jobs:
           git -C "$dest" checkout --detach FETCH_HEAD
           echo "root=$dest" >> "$GITHUB_OUTPUT"
           echo "sha=$(git -C "$dest" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Mint read-only source token
-        id: source_token
-        if: inputs.payload_repo != ''
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.BIRTH_APP_ID }}
-          private-key: ${{ secrets.BIRTH_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          permission-contents: read
-      - name: Fetch payload with read-only authority
+      - name: Fetch payload read-only
         id: payload
         if: inputs.payload_repo != ''
         env:
-          SOURCE_TOKEN: ${{ steps.source_token.outputs.token }}
           PAYLOAD_REPO: ${{ inputs.payload_repo }}
           PAYLOAD_REF: ${{ inputs.payload_ref }}
           PAYLOAD_SUBPATH: ${{ inputs.payload_subpath }}
@@ -131,9 +124,8 @@ jobs:
             case "$p" in /*) echo "payload paths must be relative" >&2; exit 2;; esac
           done
           dest="$RUNNER_TEMP/payload-src"
-          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
-          git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$dest"
-          git -C "$dest" -c "http.extraheader=$header" fetch --depth 1 origin "$PAYLOAD_REF"
+          git clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$dest"
+          git -C "$dest" fetch --depth 1 origin "$PAYLOAD_REF"
           git -C "$dest" checkout --detach FETCH_HEAD
           root="$dest"; [ -z "$PAYLOAD_SUBPATH" ] || root="$dest/$PAYLOAD_SUBPATH"
           [ -d "$root" ] || { echo "payload_subpath is not a directory" >&2; exit 2; }
@@ -167,6 +159,18 @@ jobs:
           [ -z "${BIRTH_PAYLOAD_CONTRACT:-}" ] || args+=(--payload-contract "$BIRTH_PAYLOAD_CONTRACT")
           .venv/bin/python -I scripts/birth-runner/birth_boundary.py "${args[@]}"
           tar -C "$RUNNER_TEMP/births" -czf "$RUNNER_TEMP/sealed-birth.tgz" "$BIRTH_REPO"
+      - name: Anchor sealed state outside uploaded artifact
+        id: anchor
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, pathlib
+          p = pathlib.Path("${{ runner.temp }}/birth-handoff.json")
+          h = json.loads(p.read_text())
+          print(f"handoff_digest={h['handoff_digest']}")
+          print(f"root_sha={h['prepared']['root_commit_sha']}")
+          print(f"tree_sha={h['prepared']['root_tree_sha']}")
+          PY
       - name: Record source provenance
         run: |
           {
@@ -176,6 +180,9 @@ jobs:
             echo "- governance: ${{ steps.governance.outputs.sha }}"
             echo "- payload requested ref: ${{ inputs.payload_ref }}"
             echo "- payload resolved SHA: ${{ steps.payload.outputs.sha }}"
+            echo "- handoff digest: ${{ steps.anchor.outputs.handoff_digest }}"
+            echo "- root SHA: ${{ steps.anchor.outputs.root_sha }}"
+            echo "- tree SHA: ${{ steps.anchor.outputs.tree_sha }}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload sealed birth handoff
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -216,11 +223,20 @@ jobs:
           mkdir -p "$RUNNER_TEMP/births"
           tar -C "$RUNNER_TEMP/births" -xzf "$RUNNER_TEMP/sealed-input/sealed-birth.tgz"
           cp "$RUNNER_TEMP/sealed-input/birth-handoff.json" "$RUNNER_TEMP/birth-handoff.json"
-      - name: Verify sealed artifact before authority exists
+      - name: Verify sealed artifact against PREPARE job outputs
+        env:
+          EXPECTED_HANDOFF_DIGEST: ${{ needs.prepare.outputs.handoff_digest }}
+          EXPECTED_ROOT_SHA: ${{ needs.prepare.outputs.root_sha }}
+          EXPECTED_TREE_SHA: ${{ needs.prepare.outputs.tree_sha }}
         run: |
           set -euo pipefail
           unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
-          .venv/bin/python -I scripts/birth-runner/birth_boundary.py verify --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}"
+          .venv/bin/python -I scripts/birth-runner/birth_boundary.py verify \
+            --handoff "$RUNNER_TEMP/birth-handoff.json" \
+            --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}" \
+            --expected-handoff-digest "$EXPECTED_HANDOFF_DIGEST" \
+            --expected-root-sha "$EXPECTED_ROOT_SHA" \
+            --expected-tree-sha "$EXPECTED_TREE_SHA"
       - name: Bind trusted control-plane executables before authority exists
         run: |
           set -euo pipefail
@@ -236,7 +252,6 @@ jobs:
           done
           control_path="$(dirname "$git_path"):$(dirname "$gh_path")"
           echo "L9_BIRTH_CONTROL_PATH=$control_path" >> "$GITHUB_ENV"
-          printf 'trusted git=%s\ntrusted gh=%s\n' "$git_path" "$gh_path" >> "$GITHUB_STEP_SUMMARY"
       - name: Mint privileged publication token after verification
         id: publish_token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
