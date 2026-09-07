@@ -59,18 +59,12 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
         return
 
 
-def _write_prepare_anchor(handoff: dict[str, Any]) -> None:
-    """Export trusted PREPARE facts before this process exits.
-
-    GitHub captures step outputs outside the uploaded artifact. A product-spawned
-    process may mutate files after PREPARE returns, but it cannot redefine the
-    already-emitted expected digest/root/tree that PUBLISH compares against.
-    """
-    output = (os.environ.get("GITHUB_OUTPUT") or "").strip()
-    if not output:
+def _write_prepare_anchor(handoff: dict[str, Any], output_path: str | None) -> None:
+    """Export trusted PREPARE facts through a channel hidden from product code."""
+    if not output_path:
         return
     prepared = handoff["prepared"]
-    with Path(output).open("a", encoding="utf-8") as stream:
+    with Path(output_path).open("a", encoding="utf-8") as stream:
         stream.write(f"handoff_digest={handoff['handoff_digest']}\n")
         stream.write(f"root_sha={prepared['root_commit_sha']}\n")
         stream.write(f"tree_sha={prepared['root_tree_sha']}\n")
@@ -159,6 +153,11 @@ def _prepare_argv(args: argparse.Namespace) -> list[str]:
 def prepare(args: argparse.Namespace) -> int:
     nr.assert_prepare_unprivileged()
     cfg = nr.build_config(nr.parse_args(_prepare_argv(args)))
+    # GITHUB_OUTPUT is an integrity channel for the trusted boundary process.
+    # Remove it before any product-controlled subprocess can inherit it. A
+    # background descendant therefore cannot rewrite the expected anchor that
+    # the publish job receives through needs.prepare.outputs.*.
+    github_output = os.environ.pop("GITHUB_OUTPUT", None)
     receipt, profile, sealed = nr.prepare(cfg)
     request_basis = {
         "repository": cfg.slug,
@@ -200,7 +199,7 @@ def prepare(args: argparse.Namespace) -> int:
     }
     handoff["handoff_digest"] = _sha256(handoff)
     _write_json(args.handoff, handoff)
-    _write_prepare_anchor(handoff)
+    _write_prepare_anchor(handoff, github_output)
     print(f"PREPARED SEALED {cfg.slug} {sealed['root_commit_sha']}")
     print(f"handoff: {args.handoff}")
     return 0
@@ -268,11 +267,7 @@ def verify(args: argparse.Namespace) -> int:
     _assert_expected(str(prepared["root_commit_sha"]), args.expected_root_sha, "root SHA")
     _assert_expected(str(prepared["root_tree_sha"]), args.expected_tree_sha, "tree SHA")
     root = _resolve_root(handoff, args.root)
-    nr.verify_sealed(
-        root,
-        str(prepared["root_commit_sha"]),
-        str(prepared["root_tree_sha"]),
-    )
+    nr.verify_sealed(root, str(prepared["root_commit_sha"]), str(prepared["root_tree_sha"]))
     print(f"VERIFIED SEALED {handoff['repository']} {prepared['root_commit_sha']}")
     return 0
 
