@@ -339,22 +339,54 @@ def publish(
 
 def _trusted_control_path() -> str:
     """Capture trusted tool locations before any product-controlled execution."""
-    tools: list[str] = []
+    directories: list[str] = []
     for name in ("git", "gh"):
         resolved = shutil.which(name)
         if not resolved:
             raise BirthError(f"{name} not found on PATH")
-        tools.append(str(Path(resolved).resolve().parent))
-    return os.pathsep.join(dict.fromkeys(tools))
+        directories.append(str(Path(resolved).resolve().parent))
+    return os.pathsep.join(dict.fromkeys(directories))
+
+
+def _direct_org_profile(cfg: BirthConfig) -> BirthConfig:
+    """Materialize org policy locally before direct PREPARE drops all auth."""
+    if cfg.org_profile_src is not None:
+        return cfg
+    git = shutil.which("git")
+    if not git:
+        raise BirthError("git not found on PATH")
+    dest = cfg.work_dir / ".direct-org-profile"
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [str(Path(git).resolve()), "clone", "--depth", "1", f"https://github.com/{ORG_PROFILE_REPO}.git", str(dest)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=sanitized_control_env(),
+    )
+    if proc.returncode != 0:
+        detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
+        raise BirthError(f"cannot materialize organization profile for direct birth: {detail[-1200:]}")
+    return replace(cfg, org_profile_src=dest)
+
+
+def _restore_auth(saved: dict[str, str | None]) -> None:
+    for key, value in saved.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
 
 
 def all(cfg: BirthConfig) -> BirthReceipt:
     """Local/debug compatibility topology using the same canonical phases.
 
-    Production must use the fresh-runner workflow. For the direct Makefile path,
-    capture publication authority and trusted control tools before PREPARE, remove
-    all publication credentials from the environment while product code runs,
-    then restore authority only after the sealed root exists.
+    Production must use the fresh-runner workflow. The direct path captures
+    publication authority and trusted tools, strips all GitHub auth, materializes
+    organization policy locally, runs PREPARE, then restores authority only after
+    the exact sealed root exists.
     """
     control_path = _trusted_control_path()
     saved = {
@@ -362,45 +394,42 @@ def all(cfg: BirthConfig) -> BirthReceipt:
         "GH_TOKEN": os.environ.pop("GH_TOKEN", None),
         "GITHUB_TOKEN": os.environ.pop("GITHUB_TOKEN", None),
     }
-    local_cfg = replace(cfg, remote=False) if cfg.remote else cfg
     try:
+        prepared_cfg = _direct_org_profile(cfg) if cfg.remote else cfg
+        local_cfg = replace(prepared_cfg, remote=False) if cfg.remote else prepared_cfg
         receipt, profile, sealed = prepare(local_cfg)
-    finally:
-        # PREPARE never receives publication credentials, even if validation
-        # launches descendants. Restore them only after PREPARE has terminated.
-        pass
+    except Exception:
+        _restore_auth(saved)
+        raise
 
     if not cfg.remote:
         receipt.record("github.create", "repository created", "SKIP", "--no-remote")
         receipt.state = canonical_ci.LOCAL
         _write_receipt(cfg, receipt)
-        for key, value in saved.items():
-            if value is not None:
-                os.environ[key] = value
+        _restore_auth(saved)
         return receipt
 
     token = saved[PRIVILEGED_TOKEN_ENV] or saved["GH_TOKEN"] or saved["GITHUB_TOKEN"]
     if not token:
+        _restore_auth(saved)
         raise BirthError(
             "remote all() requires GitHub publication authority; "
             "production callers should use the two-job dispatch boundary"
         )
     os.environ[PRIVILEGED_TOKEN_ENV] = token
     os.environ[CONTROL_PATH_ENV] = control_path
+    publish_cfg = replace(prepared_cfg, remote=True)
     try:
         return publish(
-            cfg,
+            publish_cfg,
             receipt,
             profile,
             root_sha=sealed["root_commit_sha"],
             tree_sha=sealed["root_tree_sha"],
         )
     finally:
-        os.environ.pop(PRIVILEGED_TOKEN_ENV, None)
         os.environ.pop(CONTROL_PATH_ENV, None)
-        for key, value in saved.items():
-            if value is not None:
-                os.environ[key] = value
+        _restore_auth(saved)
 
 
 def main(argv: list[str] | None = None) -> int:
