@@ -59,6 +59,23 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
         return
 
 
+def _write_prepare_anchor(handoff: dict[str, Any]) -> None:
+    """Export trusted PREPARE facts before this process exits.
+
+    GitHub captures step outputs outside the uploaded artifact. A product-spawned
+    process may mutate files after PREPARE returns, but it cannot redefine the
+    already-emitted expected digest/root/tree that PUBLISH compares against.
+    """
+    output = (os.environ.get("GITHUB_OUTPUT") or "").strip()
+    if not output:
+        return
+    prepared = handoff["prepared"]
+    with Path(output).open("a", encoding="utf-8") as stream:
+        stream.write(f"handoff_digest={handoff['handoff_digest']}\n")
+        stream.write(f"root_sha={prepared['root_commit_sha']}\n")
+        stream.write(f"tree_sha={prepared['root_tree_sha']}\n")
+
+
 def _validate_handoff(value: dict[str, Any]) -> None:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     errors = sorted(Draft202012Validator(schema).iter_errors(value), key=lambda e: list(e.path))
@@ -183,6 +200,7 @@ def prepare(args: argparse.Namespace) -> int:
     }
     handoff["handoff_digest"] = _sha256(handoff)
     _write_json(args.handoff, handoff)
+    _write_prepare_anchor(handoff)
     print(f"PREPARED SEALED {cfg.slug} {sealed['root_commit_sha']}")
     print(f"handoff: {args.handoff}")
     return 0
@@ -238,10 +256,18 @@ def _resolve_root(handoff: dict[str, Any], explicit: Path | None) -> Path:
     raise BoundaryError("sealed root is not materialized on this runner")
 
 
+def _assert_expected(value: str, expected: str | None, label: str) -> None:
+    if expected is not None and value != expected:
+        raise BoundaryError(f"{label} does not match trusted PREPARE output")
+
+
 def verify(args: argparse.Namespace) -> int:
     handoff = _load_handoff(args.handoff)
-    root = _resolve_root(handoff, args.root)
     prepared = handoff["prepared"]
+    _assert_expected(str(handoff["handoff_digest"]), args.expected_handoff_digest, "handoff digest")
+    _assert_expected(str(prepared["root_commit_sha"]), args.expected_root_sha, "root SHA")
+    _assert_expected(str(prepared["root_tree_sha"]), args.expected_tree_sha, "tree SHA")
+    root = _resolve_root(handoff, args.root)
     nr.verify_sealed(
         root,
         str(prepared["root_commit_sha"]),
@@ -290,6 +316,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     check = sub.add_parser("verify")
     check.add_argument("--handoff", type=Path, required=True)
     check.add_argument("--root", type=Path)
+    check.add_argument("--expected-handoff-digest")
+    check.add_argument("--expected-root-sha")
+    check.add_argument("--expected-tree-sha")
 
     pub = sub.add_parser("publish")
     pub.add_argument("--handoff", type=Path, required=True)
