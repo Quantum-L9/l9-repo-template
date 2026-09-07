@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -188,7 +190,11 @@ def verify_sealed(root: Path, root_sha: str, tree_sha: str) -> None:
 def _resolve_control_tool(tool: str) -> str:
     if tool not in ALLOWED_PUBLISH_TOOLS:
         raise BirthError(f"PUBLISH refused non-control-plane executable: {tool}")
-    roots = [Path(value).resolve() for value in os.environ.get(CONTROL_PATH_ENV, "").split(os.pathsep) if value]
+    roots = [
+        Path(value).resolve()
+        for value in os.environ.get(CONTROL_PATH_ENV, "").split(os.pathsep)
+        if value
+    ]
     if not roots:
         raise BirthError(f"{CONTROL_PATH_ENV} must be bound before privileged PUBLISH")
     for root in roots:
@@ -319,32 +325,82 @@ def publish(
             canonical_ci.PROVISIONAL if not receipt.failed else canonical_ci.QUARANTINED
         )
         receipt.ci["state"] = receipt.state
+    except (BirthError, prov.ProvenanceError, canonical_ci.CanonicalCIError) as exc:
+        receipt.record("birth.error", "birth", "FAIL", str(exc).splitlines()[0][:120])
+        if receipt.state == canonical_ci.PROVISIONAL:
+            receipt.state = canonical_ci.QUARANTINED
+        receipt.ci["state"] = receipt.state
+        raise
     finally:
         _stages.run = original_run
-    _write_receipt(cfg, receipt)
+        _write_receipt(cfg, receipt)
     return receipt
 
 
+def _trusted_control_path() -> str:
+    """Capture trusted tool locations before any product-controlled execution."""
+    tools: list[str] = []
+    for name in ("git", "gh"):
+        resolved = shutil.which(name)
+        if not resolved:
+            raise BirthError(f"{name} not found on PATH")
+        tools.append(str(Path(resolved).resolve().parent))
+    return os.pathsep.join(dict.fromkeys(tools))
+
+
 def all(cfg: BirthConfig) -> BirthReceipt:
-    """Local/debug compatibility topology using the same canonical phases."""
-    receipt, profile, sealed = prepare(cfg)
+    """Local/debug compatibility topology using the same canonical phases.
+
+    Production must use the fresh-runner workflow. For the direct Makefile path,
+    capture publication authority and trusted control tools before PREPARE, remove
+    all publication credentials from the environment while product code runs,
+    then restore authority only after the sealed root exists.
+    """
+    control_path = _trusted_control_path()
+    saved = {
+        PRIVILEGED_TOKEN_ENV: os.environ.pop(PRIVILEGED_TOKEN_ENV, None),
+        "GH_TOKEN": os.environ.pop("GH_TOKEN", None),
+        "GITHUB_TOKEN": os.environ.pop("GITHUB_TOKEN", None),
+    }
+    local_cfg = replace(cfg, remote=False) if cfg.remote else cfg
+    try:
+        receipt, profile, sealed = prepare(local_cfg)
+    finally:
+        # PREPARE never receives publication credentials, even if validation
+        # launches descendants. Restore them only after PREPARE has terminated.
+        pass
+
     if not cfg.remote:
         receipt.record("github.create", "repository created", "SKIP", "--no-remote")
         receipt.state = canonical_ci.LOCAL
         _write_receipt(cfg, receipt)
+        for key, value in saved.items():
+            if value is not None:
+                os.environ[key] = value
         return receipt
-    if not (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip():
+
+    token = saved[PRIVILEGED_TOKEN_ENV] or saved["GH_TOKEN"] or saved["GITHUB_TOKEN"]
+    if not token:
         raise BirthError(
-            "remote all() requires L9_BIRTH_PRIVILEGED_TOKEN after PREPARE; "
-            "production callers must use the two-job dispatch boundary"
+            "remote all() requires GitHub publication authority; "
+            "production callers should use the two-job dispatch boundary"
         )
-    return publish(
-        cfg,
-        receipt,
-        profile,
-        root_sha=sealed["root_commit_sha"],
-        tree_sha=sealed["root_tree_sha"],
-    )
+    os.environ[PRIVILEGED_TOKEN_ENV] = token
+    os.environ[CONTROL_PATH_ENV] = control_path
+    try:
+        return publish(
+            cfg,
+            receipt,
+            profile,
+            root_sha=sealed["root_commit_sha"],
+            tree_sha=sealed["root_tree_sha"],
+        )
+    finally:
+        os.environ.pop(PRIVILEGED_TOKEN_ENV, None)
+        os.environ.pop(CONTROL_PATH_ENV, None)
+        for key, value in saved.items():
+            if value is not None:
+                os.environ[key] = value
 
 
 def main(argv: list[str] | None = None) -> int:
