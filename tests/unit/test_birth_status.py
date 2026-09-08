@@ -16,7 +16,6 @@ _SPEC.loader.exec_module(status)
 
 SLUG = "Quantum-L9/IdeaOS"
 BORN_AT = "2026-09-08T00:53:27+00:00"
-ROOT_SHA = "a" * 40
 PR_SHA = "b" * 40
 OTHER_SHA = "c" * 40
 RULESET_ID = 21895545
@@ -92,10 +91,9 @@ def _run(
 
 
 class FakeApi:
-    def __init__(self, runs: list[dict], *, enrolled: bool = True, root_parents: list | None = None):
+    def __init__(self, runs: list[dict], *, enrolled: bool = True):
         self.runs = runs
         self.enrolled = enrolled
-        self.root_parents = [] if root_parents is None else root_parents
         self.calls: list[str] = []
 
     def json(self, path: str):
@@ -108,10 +106,6 @@ class FakeApi:
             return _detail()
         if path == f"repos/{SLUG}/actions/runs?per_page=100&page=1":
             return {"workflow_runs": self.runs}
-        if path == f"repos/{SLUG}/git/commits/{ROOT_SHA}":
-            return {"sha": ROOT_SHA, "parents": self.root_parents}
-        if path == f"repos/{SLUG}/git/commits/{OTHER_SHA}":
-            return {"sha": OTHER_SHA, "parents": [{"sha": ROOT_SHA}]}
         raise AssertionError(f"unexpected API path: {path}")
 
     def text(self, path: str) -> str:
@@ -125,10 +119,26 @@ def test_ideaos_shape_becomes_born_from_required_workflow_pr_success() -> None:
     result = status.derive_status(SLUG, api_json=api.json, api_text=api.text)
     assert result["state"] == "BORN"
     assert result["canonical_ci"]["enrolled"] is True
+    assert result["canonical_ci"]["accepted_events"] == ["merge_group", "pull_request"]
     assert result["evidence"]["event"] == "pull_request"
     assert result["evidence"]["head_sha"] == PR_SHA
     assert result["evidence"]["run_id"] == 1
     assert result["birth_receipt"]["immutable"] is True
+
+
+def test_required_workflow_merge_group_success_can_earn_born() -> None:
+    api = FakeApi([_run(event="merge_group", head_branch="gh-readonly-queue/main/pr-1")])
+    result = status.derive_status(SLUG, api_json=api.json, api_text=api.text)
+    assert result["state"] == "BORN"
+    assert result["evidence"]["event"] == "merge_group"
+    assert "merge group" in result["detail"]
+
+
+def test_push_is_not_required_workflow_lifecycle_evidence() -> None:
+    api = FakeApi([_run(event="push", head_sha=OTHER_SHA, head_branch="main")])
+    result = status.derive_status(SLUG, api_json=api.json, api_text=api.text)
+    assert result["state"] == "PROVISIONAL"
+    assert result["evidence"] is None
 
 
 def test_consumer_workflow_with_same_path_is_not_required_workflow_evidence() -> None:
@@ -176,33 +186,6 @@ def test_later_failure_does_not_unbirth_repository_after_success() -> None:
     result = status.derive_status(SLUG, api_json=api.json, api_text=api.text)
     assert result["state"] == "BORN"
     assert result["evidence"]["run_id"] == 1
-
-
-def test_genesis_push_can_earn_born_only_when_it_is_required_and_zero_parent() -> None:
-    genesis = _run(
-        event="push",
-        head_sha=ROOT_SHA,
-        head_branch="main",
-        created_at="2026-09-08T00:53:40Z",
-    )
-    api = FakeApi([genesis])
-    result = status.derive_status(SLUG, api_json=api.json, api_text=api.text)
-    assert result["state"] == "BORN"
-    assert result["evidence"]["event"] == "push"
-    assert f"repos/{SLUG}/git/commits/{ROOT_SHA}" in api.calls
-
-
-def test_normal_default_branch_push_is_not_genesis_evidence() -> None:
-    later_push = _run(
-        event="push",
-        head_sha=OTHER_SHA,
-        head_branch="main",
-        created_at="2026-09-08T02:00:00Z",
-    )
-    api = FakeApi([later_push])
-    result = status.derive_status(SLUG, api_json=api.json, api_text=api.text)
-    assert result["state"] == "PROVISIONAL"
-    assert result["evidence"] is None
 
 
 def test_pre_birth_run_is_ignored() -> None:
