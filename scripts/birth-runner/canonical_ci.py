@@ -1,45 +1,42 @@
 #!/usr/bin/env python3
 """Canonical CI binding, correlation, and birth state.
 
-A repository that exists is not a repository that is born. Creating the remote,
-pushing the root commit, and applying organization settings prove that GitHub
-accepted some bytes — none of it proves the code was ever evaluated. This module
-holds the part that does.
+A repository that exists is not automatically born. Creation proves GitHub
+accepted bytes; lifecycle closure requires current organization enrollment and
+an observed canonical CI success.
 
     LOCAL        assembled and locally validated; nothing published
     PROVISIONAL  published and enrolled with the canonical authority
-    BORN         canonical CI evaluated a commit of this repository and succeeded
-    QUARANTINED  published, and enrolment is missing or canonical CI failed
+    BORN         canonical required-workflow CI evaluated the repository and succeeded
+    QUARANTINED  published, and enrollment is missing or accepted CI evidence failed
 
-Birth ends at PROVISIONAL, never BORN. That is not caution, it is arithmetic:
+The publish transaction itself ends at PROVISIONAL because the organization
+ruleset deliberately uses `do_not_enforce_on_create: true`. That keeps repository
+creation possible while proving the newborn is enrolled for subsequent governed
+events.
 
-  * GitHub required workflows run on `pull_request`, `pull_request_target` and
-    `merge_group`. They never run on `push`.
-  * A pull request needs a base branch, and at birth the root commit is the only
-    commit that exists — there is nothing for it to be a pull request against.
+`l9-ci-core` now declares a native default-branch `push` lane as well as
+`pull_request`. The external GitHub required-workflow runtime decides whether a
+genesis push is actually instantiated. The birth control plane must never assume
+that external behavior: an exact required-workflow push may earn BORN only when
+it is observed and correlated to the zero-parent root commit. Otherwise a later
+required-workflow pull-request success can earn BORN.
 
-So a newborn's root commit cannot be evaluated before it lands, by this mechanism
-or any other. Claiming otherwise would make every real birth QUARANTINED. Birth
-therefore proves ENROLMENT — that the organisation ruleset requires the canonical
-workflow for this repository — and the first real pull request earns BORN.
+Ownership:
 
-Ownership, unchanged by this module:
+    GitHub organization ruleset  owns CI targeting and the required-workflow binding
+    l9-ci-core                   owns CI implementation and execution semantics
+    consumer repository          owns no L9 CI caller or Core pin
+    l9-repo-template             owns birth orchestration and lifecycle correlation
 
-    l9-ci-core           owns CI implementation and execution semantics
-    the newborn          owns only the minimal binding that invokes it
-    l9-repo-template     owns birth orchestration and this verification
+Nothing here copies, reimplements, or second-guesses CI. It answers questions
+about somebody else's CI: is this repository reachable by the canonical
+authority, did a run evaluate the exact revision being claimed, and did it
+succeed.
 
-Nothing here copies, reimplements, or second-guesses CI. It answers three
-questions about someone else's CI: is this repository reachable by it, did it
-run for this exact commit, and did it succeed.
-
-Birth uses the first question only — `enrollment_from_rulesets`. The run
-correlation below (`select_birth_run`, `verdict_for_run`, `timeout_verdict`) is
-for the PROVISIONAL -> BORN transition, which birth cannot perform: it needs a
-pull request, and at birth none exists. It is kept here, tested, because the
-rule it encodes is the easy thing to get wrong — a stale success, a run on
-another branch, or a run for another commit must never be accepted as evidence
-for this one.
+Birth publication uses `enrollment_from_rulesets`. Run-correlation helpers remain
+here for lifecycle reconciliation. A stale success, a run on another branch, or
+a run for another commit must never be accepted as evidence for this one.
 """
 
 from __future__ import annotations
@@ -58,18 +55,18 @@ CI_AUTHORITY_WORKFLOW = ".github/workflows/org-ci.yml"
 
 # A required-workflow rule names the workflow's home by numeric repository id,
 # not by name. The id is what makes the rule point at `l9-ci-core` rather than at
-# any other repository that happens to keep a file at the same path — so it is
-# the field enrolment is decided on. `Quantum-L9/l9-ci-core`, id:
+# any other repository that happens to keep a file at the same path, so it is
+# the field enrollment is decided on. `Quantum-L9/l9-ci-core`, id:
 CI_AUTHORITY_REPOSITORY_ID = 1285564308
 
-# The ref the organisation ruleset must pin. A rule that resolves the canonical
+# The ref the organization ruleset must pin. A rule that resolves the canonical
 # workflow from some other branch or tag is a different workflow.
 CI_AUTHORITY_REF = "refs/heads/main"
 
 WORKFLOW_DIR = ".github/workflows"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
-# `owner/repo/.github/workflows/name.yml@ref` — the only shape GitHub accepts for
+# `owner/repo/.github/workflows/name.yml@ref` is the only shape GitHub accepts for
 # a cross-repository reusable-workflow reference.
 USES_RE = re.compile(
     r"^(?P<owner>[A-Za-z0-9._-]+)/(?P<repo>[A-Za-z0-9._-]+)/"
@@ -88,7 +85,7 @@ class CanonicalCIError(RuntimeError):
 
 @dataclass(frozen=True)
 class Binding:
-    """One reusable-workflow reference found in a newborn's own workflows."""
+    """One observed CI binding, from a consumer workflow or organization ruleset."""
 
     workflow_file: str
     job: str
@@ -110,7 +107,7 @@ class Binding:
 
 @dataclass
 class CIVerdict:
-    """What was observed about canonical CI for one root commit."""
+    """What was observed about canonical CI for one exact revision."""
 
     state: str
     detail: str = ""
@@ -123,9 +120,9 @@ class CIVerdict:
     checked: list[str] = field(default_factory=list)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Binding discovery — structural, never grep
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Binding discovery: structural, never grep
+# -----------------------------------------------------------------------------
 
 
 def _load_yaml(text: str) -> Any:
@@ -201,11 +198,10 @@ def workflow_is_canonical(workflow: Any) -> bool:
     """Does one entry of a `workflows` rule name the canonical CI entrypoint?
 
     All three fields are load-bearing, and `repository_id` most of all. The path
-    `.github/workflows/org-ci.yml` is not owned by anything — any repository in
-    the organisation may hold a file there, and a rule pointing at that file in
-    the wrong repository would enforce someone else's CI under the canonical
-    name. So ownership is read from the numeric id GitHub records, never
-    synthesised from the path.
+    `.github/workflows/org-ci.yml` is not owned by anything. Any repository in
+    the organization may hold a file there, and a rule pointing at that file in
+    the wrong repository would enforce somebody else's CI under the canonical
+    name. Ownership is therefore read from the numeric id GitHub records.
     """
     if not isinstance(workflow, dict):
         return False
@@ -220,25 +216,20 @@ def workflow_is_canonical(workflow: Any) -> bool:
 
 
 def enrollment_in_ruleset(detail: Any) -> Binding | None:
-    """Enrolment as read from ONE hydrated ruleset, or None.
+    """Enrollment as read from one hydrated ruleset, or None.
 
-    `detail` is a full ruleset representation — the shape returned by
+    `detail` is a full ruleset representation, the shape returned by
     `repos/{slug}/rulesets/{id}`, which is the only shape that carries `rules`.
     Every condition is re-read here rather than trusted from the listing that
     selected this ruleset, because the listing is a summary and the full
     representation is the authority.
 
-    Enrolment requires all of:
+    Enrollment requires all of:
 
-      * `source_type` Organization — a repository-sourced ruleset is the
-        repository enrolling itself, which is the consumer-owned enforcement
-        `l9-ci-core/.l9/org-runtime-contract.yaml` prohibits;
-      * `enforcement` active — an `evaluate` ruleset reports and permits, so it
-        makes nothing required;
-      * a `workflows` rule whose `do_not_enforce_on_create` is true, without
-        which the required workflow blocks the newborn's own creation;
-      * an entry in that rule naming the canonical authority by repository id,
-        path, and ref.
+      * `source_type` Organization;
+      * `enforcement` active;
+      * a `workflows` rule whose `do_not_enforce_on_create` is true;
+      * an entry naming the canonical authority by repository id, path and ref.
     """
     if not isinstance(detail, dict):
         return None
@@ -268,25 +259,19 @@ def enrollment_in_ruleset(detail: Any) -> Binding | None:
 
 
 def enrollment_from_rulesets(rulesets: Any, *, fetch_detail: DetailFetcher) -> Binding | None:
-    """The organisation ruleset that requires canonical CI for a repository.
+    """The organization ruleset that requires canonical CI for a repository.
 
     `rulesets` is `repos/{slug}/rulesets?includes_parents=true`. That response is
-    a list of SUMMARIES: it carries `id`, `name`, `source_type` and `enforcement`
-    but not `rules`. Deciding enrolment from it alone can only ever answer "no",
-    which is how a correctly enrolled repository reads as unenrolled. So each
-    candidate is hydrated by id, and the decision is made on the full
-    representation.
+    a list of summaries: it carries `id`, `name`, `source_type` and `enforcement`
+    but not `rules`. Each candidate therefore has to be hydrated by id before the
+    enrollment decision is made.
 
-    Only Organization-sourced, actively enforced summaries are hydrated: a
-    repository-sourced or `evaluate` ruleset could not be enrolment whatever its
-    rules say, so its detail is never needed and its unreadability proves
-    nothing.
+    Only Organization-sourced, actively enforced summaries are hydrated. A
+    repository-sourced or `evaluate` ruleset could not be canonical enrollment.
 
     Raises `CanonicalCIError` when a candidate's detail cannot be read or has
-    disappeared between the listing and the fetch. A ruleset that applies to this
-    repository and whose rules are unknown leaves enrolment UNDETERMINABLE, and
-    undeterminable is not enrolled — it is not "no" either, so it is never
-    quietly reported as one.
+    disappeared between listing and fetch. A ruleset whose rules are unknown
+    leaves enrollment undeterminable and must not be quietly reported as absent.
     """
     if not isinstance(rulesets, list):
         return None
@@ -321,9 +306,10 @@ def enrollment_from_rulesets(rulesets: Any, *, fetch_detail: DetailFetcher) -> B
 def assert_binding_authorized(root: Path) -> list[Binding]:
     """BIRTH-CI-001 / BIRTH-CI-004, evaluated on the assembled tree.
 
-    Raises when a repository declares CI that is not the canonical authority.
-    An unauthorized binding is worse than none: it looks like enrollment and
-    evaluates something else.
+    Absence of a consumer L9 workflow is allowed and expected under organization
+    enforcement. A consumer workflow that points at a non-canonical Quantum-L9
+    CI authority fails closed because it looks governed while evaluating
+    something else.
     """
     all_bindings = discover_bindings(root)
     canonical = [b for b in all_bindings if b.is_canonical]
@@ -341,18 +327,18 @@ def assert_binding_authorized(root: Path) -> list[Binding]:
     return canonical
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Run correlation — the run must be THIS commit's
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Run correlation: the run must be this exact revision's
+# -----------------------------------------------------------------------------
 
 
 def run_matches_root(entry: Any, *, root_sha: str, default_branch: str = "main") -> bool:
     """Is this Actions run an evaluation of exactly `root_sha`?
 
     "Some run passed recently" is not evidence. A run counts only when its head
-    SHA is the root commit. Branch is checked too, because a run for the same
-    SHA on another ref is a different event, and a run that reports no SHA at
-    all is never accepted.
+    SHA is the root commit. Branch is checked too because a run for the same SHA
+    on another ref is a different event, and a run that reports no SHA at all is
+    never accepted.
     """
     if not isinstance(entry, dict):
         return False
@@ -366,12 +352,10 @@ def run_matches_root(entry: Any, *, root_sha: str, default_branch: str = "main")
 def select_birth_run(
     runs: Any, *, root_sha: str, default_branch: str = "main"
 ) -> dict[str, Any] | None:
-    """The newest run that evaluates this root commit, or None.
+    """The newest run that evaluates this exact root commit, or None.
 
-    Never falls back to "the newest successful run". A stale success, a run on
-    another branch, and a run for another commit all return None, which is what
-    keeps a green-looking repository from being declared born on someone else's
-    evidence.
+    Never falls back to the newest successful run. A stale success, a run on
+    another branch and a run for another commit all return None.
     """
     if not isinstance(runs, list):
         return None
@@ -415,11 +399,7 @@ def verdict_for_run(entry: dict[str, Any], *, root_sha: str) -> CIVerdict:
 
 
 def timeout_verdict(root_sha: str, timeout_s: int, *, saw_run: bool) -> CIVerdict:
-    """Distinguish "never started" from "started and did not finish".
-
-    The two failures have different causes and different fixes, and a single
-    "CI did not pass" message hides which one happened.
-    """
+    """Distinguish never-started from started-but-not-finished."""
     if saw_run:
         detail = (
             f"canonical CI started for {root_sha[:12]} but did not conclude in {timeout_s}s "
@@ -434,7 +414,7 @@ def timeout_verdict(root_sha: str, timeout_s: int, *, saw_run: bool) -> CIVerdic
 
 
 def ci_provenance(verdict: CIVerdict) -> dict[str, Any]:
-    """The birth record's CI block. Only observed values; never a placeholder."""
+    """The birth record's CI block. Only observed values, never placeholders."""
     block: dict[str, Any] = {
         "authority_repo": verdict.authority_repo,
         "workflow": verdict.workflow,
