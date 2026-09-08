@@ -34,7 +34,7 @@ _OPERATIONS=(
 _OPERATION_BY_MODE={x.mode:x for x in _OPERATIONS}
 
 @lru_cache(maxsize=1)
-def _assert_operation_registry():
+def _assert_operation_registry() -> None:
     if len(_OPERATION_BY_MODE)!=len(_OPERATIONS): raise IdeaOSError("duplicate IdeaOS runtime operation mode")
     schemas=schema_documents(); req=schemas["ideaos_run_request.schema.json"]
     declared=set(req["properties"]["mode"]["enum"]); registered=set(_OPERATION_BY_MODE)

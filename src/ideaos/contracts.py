@@ -17,7 +17,9 @@ def _docs() -> dict[str, Any]:
         if sid in ids: raise PolicyError(f'duplicate schema id {sid}')
         Draft202012Validator.check_schema(raw); out[p.name]=raw; ids[sid]=p.name
     return out
-def schema_documents() -> dict[str, Any]: return json.loads(json.dumps(_docs()))
+def schema_documents() -> dict[str, Any]:
+    copied: dict[str, Any] = json.loads(json.dumps(_docs()))
+    return copied
 @lru_cache(maxsize=1)
 def registry() -> Registry:
     r=Registry()
