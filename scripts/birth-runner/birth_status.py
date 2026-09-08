@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
-"""Derive current repository-birth lifecycle state from live GitHub evidence.
+"""Derive repository-birth lifecycle state from live GitHub evidence.
 
-The immutable birth receipt answers what happened at creation time. This command
-answers a different question: what is the repository's lifecycle state now?
-
-Authority order:
-  1. the repository's immutable .l9/birth-receipt.json
-  2. the active organization required-workflow ruleset
-  3. exact GitHub Actions runs of the canonical required workflow
-
-A consumer repository never needs to ship a Core workflow. The organization
-ruleset owns the binding. This command is read-only and never rewrites the birth
-receipt or any repository file.
+The immutable birth receipt records creation provenance. Lifecycle state is
+separate live truth derived from current organization enrollment plus canonical
+required-workflow executions. Consumer repositories never ship a Core workflow.
 """
 from __future__ import annotations
 
@@ -31,6 +23,7 @@ SCHEMA = "l9.repo-birth-status/v1"
 DEFAULT_ORG = "Quantum-L9"
 REQUIRED_WORKFLOW_URL_TOKEN = "/actions/required_workflows/"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+REQUIRED_WORKFLOW_EVENTS = frozenset({"pull_request", "merge_group"})
 TERMINAL_FAILURES = frozenset(
     {"action_required", "cancelled", "failure", "stale", "startup_failure", "timed_out"}
 )
@@ -164,7 +157,7 @@ def current_enrollment(slug: str, api_json: JsonApi):
 def is_required_core_run(run: Any, *, born_at: datetime) -> bool:
     if not isinstance(run, dict):
         return False
-    if str(run.get("event") or "") not in {"push", "pull_request"}:
+    if str(run.get("event") or "") not in REQUIRED_WORKFLOW_EVENTS:
         return False
     if str(run.get("path") or "") != canonical_ci.CI_AUTHORITY_WORKFLOW:
         return False
@@ -178,34 +171,6 @@ def is_required_core_run(run: Any, *, born_at: datetime) -> bool:
     except BirthStatusError:
         return False
     return created_at >= born_at
-
-
-def is_zero_parent_commit(slug: str, sha: str, api_json: JsonApi) -> bool:
-    doc = api_json(f"repos/{slug}/git/commits/{sha}")
-    if not isinstance(doc, dict) or str(doc.get("sha") or "") != sha:
-        return False
-    parents = doc.get("parents")
-    return isinstance(parents, list) and len(parents) == 0
-
-
-def run_is_lifecycle_evidence(
-    slug: str,
-    run: dict[str, Any],
-    *,
-    born_at: datetime,
-    default_branch: str,
-    api_json: JsonApi,
-) -> bool:
-    if not is_required_core_run(run, born_at=born_at):
-        return False
-    event = str(run.get("event") or "")
-    if event == "pull_request":
-        return True
-    if event != "push":
-        return False
-    if str(run.get("head_branch") or "") != default_branch:
-        return False
-    return is_zero_parent_commit(slug, str(run.get("head_sha") or ""), api_json)
 
 
 def evidence_from_run(run: dict[str, Any]) -> RunEvidence:
@@ -252,29 +217,11 @@ def list_post_birth_runs(slug: str, born_at: datetime, api_json: JsonApi) -> lis
     return found
 
 
-def lifecycle_runs(
-    slug: str,
-    runs: list[dict[str, Any]],
-    *,
-    born_at: datetime,
-    default_branch: str,
-    api_json: JsonApi,
-) -> list[dict[str, Any]]:
-    accepted: list[dict[str, Any]] = []
-    for run in runs:
-        if run_is_lifecycle_evidence(
-            slug,
-            run,
-            born_at=born_at,
-            default_branch=default_branch,
-            api_json=api_json,
-        ):
-            accepted.append(run)
-    return accepted
-
-
 def classify_runs(runs: list[dict[str, Any]]) -> tuple[str, RunEvidence | None, str]:
-    ordered = sorted(runs, key=lambda run: (str(run.get("created_at") or ""), int(run.get("id") or 0)))
+    ordered = sorted(
+        runs,
+        key=lambda run: (str(run.get("created_at") or ""), int(run.get("id") or 0)),
+    )
     successful = [
         run
         for run in ordered
@@ -283,7 +230,7 @@ def classify_runs(runs: list[dict[str, Any]]) -> tuple[str, RunEvidence | None, 
     ]
     if successful:
         evidence = evidence_from_run(successful[0])
-        source = "genesis push" if evidence.event == "push" else "pull request"
+        source = "merge group" if evidence.event == "merge_group" else "pull request"
         return "BORN", evidence, f"canonical Core CI passed the post-birth {source}"
 
     terminal_failures = [
@@ -319,7 +266,7 @@ def derive_status(
     born_at = parse_time(str(receipt.get("born_at") or ""))
     enrollment = current_enrollment(slug, api_json)
 
-    base: dict[str, Any] = {
+    result: dict[str, Any] = {
         "schema": SCHEMA,
         "repository": slug,
         "default_branch": default_branch,
@@ -335,31 +282,25 @@ def derive_status(
             "authority_ref": canonical_ci.CI_AUTHORITY_REF,
             "enrolled": enrollment is not None,
             "enrollment": enrollment.workflow_file if enrollment is not None else None,
+            "accepted_events": sorted(REQUIRED_WORKFLOW_EVENTS),
         },
         "evidence": None,
     }
 
     if enrollment is None:
-        base.update(
+        result.update(
             state="QUARANTINED",
             detail="canonical organization required-workflow enrollment is missing",
         )
-        return base
+        return result
 
     candidates = list_post_birth_runs(slug, born_at, api_json)
-    accepted = lifecycle_runs(
-        slug,
-        candidates,
-        born_at=born_at,
-        default_branch=default_branch,
-        api_json=api_json,
-    )
-    state, evidence, detail = classify_runs(accepted)
-    base["state"] = state
-    base["detail"] = detail
+    state, evidence, detail = classify_runs(candidates)
+    result["state"] = state
+    result["detail"] = detail
     if evidence is not None:
-        base["evidence"] = evidence.to_dict()
-    return base
+        result["evidence"] = evidence.to_dict()
+    return result
 
 
 def render_human(status: dict[str, Any]) -> str:
