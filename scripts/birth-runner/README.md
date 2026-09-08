@@ -1,76 +1,145 @@
-# Museum birth-runner
+# Repository birth runner
 
-## `make new-repo` — the birth primitive
+## Public operator / agent front door
+
+Use `make birth` for production remote birth. It dispatches the canonical
+`repo-birth-dispatch.yml` workflow and therefore crosses the PREPARE -> PUBLISH
+fresh-runner privilege boundary introduced by PR A. The caller never mints the
+publication token and never runs privileged publication locally.
 
 ```bash
-make birth-payload SOURCE=/path/to/l9-observability-core OUT=/tmp/obs.payload.json
+make birth \
+  REPO=idea-runtime \
+  PKG=idea_runtime \
+  DESC="Idea runtime" \
+  VISIBILITY=private
+```
+
+For an authoritative product payload already committed in Quantum-L9:
+
+```bash
+make birth \
+  REPO=idea-runtime \
+  PKG=idea_runtime \
+  DESC="Idea runtime" \
+  PAYLOAD_REPO=Quantum-L9/idea-runtime-source \
+  PAYLOAD_REF=<immutable-or-approved-ref> \
+  PAYLOAD_CONTRACT_PATH=path/to/birth.payload.json
+```
+
+Optional dispatch inputs are exposed as Make variables:
+
+| Make variable | Workflow input |
+|---|---|
+| `VISIBILITY` | `visibility` (`private` by default) |
+| `CLASS` | `repo_class` |
+| `CI_UNVERIFIED_REASON` | `ci_unverified_reason` |
+| `GOVERNANCE_REF` | `governance_ref` |
+| `PAYLOAD_REPO` | `payload_repo` |
+| `PAYLOAD_REF` | `payload_ref` |
+| `PAYLOAD_SUBPATH` | `payload_subpath` |
+| `PAYLOAD_CONTRACT_PATH` | `payload_contract_path` |
+| `FACTORY_REF` | workflow ref (`main` by default; useful for stacked factory testing) |
+
+`make birth` returning successfully means GitHub accepted the birth request. It
+does not mean the repository has already reached the lifecycle state `BORN`.
+Query live truth separately:
+
+```bash
+make birth-status REPO=Quantum-L9/idea-runtime
+make birth-status REPO=Quantum-L9/idea-runtime JSON=1
+```
+
+`birth-status` is read-only. It never updates `.l9/birth-receipt.json`.
+
+## Lifecycle truth
+
+The birth receipt is immutable historical provenance. Lifecycle status is live,
+derived truth.
+
+```text
+birth receipt   = what happened at creation
+org ruleset     = whether canonical CI currently governs the repository
+Core CI run     = whether canonical CI actually evaluated the repository
+birth-status    = current derived lifecycle state
+```
+
+States:
+
+| State | Meaning |
+|---|---|
+| `LOCAL` | assembled and locally validated, not published |
+| `PROVISIONAL` | published and enrolled, but no accepted canonical lifecycle success is yet observable |
+| `BORN` | canonical required-workflow CI produced an accepted success |
+| `QUARANTINED` | enrollment is absent or an accepted canonical lifecycle run failed before any success was earned |
+
+Accepted lifecycle evidence is deliberately limited to the events GitHub's
+organization required-workflow ruleset actually instantiates for governed
+repositories: `pull_request` and `merge_group`. A downstream repository `push`
+does not fan out through that ruleset and therefore cannot earn `BORN` status.
+Core may declare native `push` for its own direct/reusable execution surfaces,
+but birth lifecycle truth does not reinterpret that as organization-required
+workflow evidence.
+
+The repository does **not** own a Core caller workflow. Enrollment comes from the
+active organization required-workflow ruleset pointing at:
+
+```text
+Quantum-L9/l9-ci-core/.github/workflows/org-ci.yml@refs/heads/main
+```
+
+A newborn with no `.github/workflows` directory can therefore be exactly correct.
+
+## `make new-repo` is a lower-level compatibility surface
+
+`make new-repo` remains useful for local/debug work and compatibility tests:
+
+```bash
+make birth-payload SOURCE=/path/to/source OUT=/tmp/source.payload.json
 
 make new-repo \
-  REPO=l9-observability-core \
-  PKG=l9_observability_core \
-  DESC="Canonical backend-neutral observability domain contracts" \
-  PAYLOAD=/path/to/l9-observability-core \
-  PAYLOAD_CONTRACT=/tmp/obs.payload.json
+  REPO=example \
+  PKG=example \
+  DESC="Example" \
+  PAYLOAD=/path/to/source \
+  PAYLOAD_CONTRACT=/tmp/source.payload.json
 ```
 
-`new_repo.py` is the orchestrator: an eight-stage state machine that preflights,
-assembles, finalizes (`uv lock` included), applies the current
-`Quantum-L9/.github` birth profile, validates the newborn **before** anything is
-created, creates and pushes it, invokes the org bootstrap immediately instead of
-waiting for the hourly sweep, and then reads the remote back to attest it.
+`new_repo.py` owns the canonical birth state machine. PR A splits production
+execution across PREPARE/seal and PUBLISH so product-controlled code cannot run
+with repository-creation authority. The direct `all()` path remains a guarded
+compatibility topology, not the mobile production front door.
 
-Full contract: [`docs/ops/REPO_BIRTH.md`](../../docs/ops/REPO_BIRTH.md).
-
-`PAYLOAD` is additive when it is a fragment and **authoritative** when it is a
-standalone repository — see
-[`payload-ownership.yaml`](payload-ownership.yaml), which declares what a
-product inherits from this template and what it does not. Absence is meaningless
-in an overlay and meaningful in a repository: a product that ships no Dockerfile
-is not handed the template's.
-
-An authoritative payload is **compiled**, never inferred.
+An authoritative payload is compiled, never inferred.
 [`compile_birth_payload.py`](compile_birth_payload.py) reads a clean git snapshot
-of the actual source repository and emits an `l9.birth-payload/v1` manifest —
-which files, from which revision, at which hashes. Stage 1 recomputes that
-manifest against the source tree and stops the birth on any disagreement
-([`verify_birth_payload.py`](verify_birth_payload.py)). The contract carries
-evidence only: the bytes stay in the source repository, and nothing about CI,
-capabilities, or birth provenance appears in it.
+of the source repository and emits an `l9.birth-payload/v1` manifest. Stage 1
+recomputes that manifest against the source tree and stops on disagreement via
+[`verify_birth_payload.py`](verify_birth_payload.py).
 
 | File | Role |
-|------|------|
-| [`compile_birth_payload.py`](compile_birth_payload.py) | compiler — snapshot to manifest |
-| [`verify_birth_payload.py`](verify_birth_payload.py) | consumer-side reproduction of that manifest |
-| [`schemas/birth-payload.schema.json`](schemas/birth-payload.schema.json) | published `l9.birth-payload/v1` contract |
-| [`payload_ownership.py`](payload_ownership.py) | the one reader of `payload-ownership.yaml` |
+|---|---|
+| [`birth_frontdoor.py`](birth_frontdoor.py) | public remote dispatch client |
+| [`birth_status.py`](birth_status.py) | read-only lifecycle reconciler |
+| [`new_repo.py`](new_repo.py) | canonical birth engine |
+| [`canonical_ci.py`](canonical_ci.py) | CI enrollment and run-correlation law |
+| [`compile_birth_payload.py`](compile_birth_payload.py) | payload compiler |
+| [`verify_birth_payload.py`](verify_birth_payload.py) | payload reproducer |
+| [`schemas/birth-payload.schema.json`](schemas/birth-payload.schema.json) | `l9.birth-payload/v1` contract |
+| [`payload_ownership.py`](payload_ownership.py) | payload ownership reader |
 
-Useful flags for local work:
+Useful direct/debug flags on `new_repo.py`:
 
 | Flag | Effect |
-|------|--------|
-| `--no-remote` | stop after stage 5 — assemble, finalize, validate only |
-| `--org-profile-src <dir>` | read the class contract from a local `.github` checkout (offline) |
-| `--receipt <path>` | write the birth receipt JSON somewhere specific |
+|---|---|
+| `--no-remote` | assemble, finalize and validate without publication |
+| `--org-profile-src <dir>` | read the class contract from a local `.github` checkout |
+| `--receipt <path>` | write the external birth execution receipt to a chosen path |
 
-## Staged scripts (debugging surfaces)
+## Staged scripts are debugging surfaces only
 
-The four numbered scripts below predate `make new-repo` and remain for
-debugging one stage at a time. They do **not** apply the org birth profile and
-do **not** attest the remote — they are not a birth.
-
-### Config fields
-
-```yaml
-org: "Quantum-L9"
-repo_name: "my-side-project"
-package_name: "my_side_project"
-description: "One-line description"
-work_dir: "/tmp/l9-museum-births"
-template_repo: "Quantum-L9/l9-repo-template"  # optional
-template_src: ""  # optional local path; skips clone when set
-```
-
-### Run
+The numbered scripts below predate the canonical birth engine and remain for
+one-stage debugging. They do not apply the full org birth profile and do not
+attest the remote. They are not a production birth.
 
 ```bash
 export PLAY_DIR=/tmp/museum-birth-demo
@@ -80,7 +149,7 @@ cp config.template.yaml "$PLAY_DIR/config.yaml"
 bash 01_preflight.sh
 bash 02_bootstrap.sh
 bash 03_verify.sh
-# optional:
+# optional debug push only:
 PUSH=1 bash 04_push.sh
 ```
 
