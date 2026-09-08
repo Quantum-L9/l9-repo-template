@@ -73,11 +73,13 @@ States:
 | `BORN` | canonical required-workflow CI produced an accepted success |
 | `QUARANTINED` | enrollment is absent or an accepted canonical lifecycle run failed before any success was earned |
 
-The currently proven GitHub path is a required-workflow `pull_request` run after
-birth. `l9-ci-core` also declares a default-branch native `push` lane. The status
-reader is ready to accept a genesis push only when GitHub actually emits that
-required-workflow run and its head commit is provably zero-parent. A normal later
-default-branch push never counts as genesis evidence.
+Accepted lifecycle evidence is deliberately limited to the events GitHub's
+organization required-workflow ruleset actually instantiates for governed
+repositories: `pull_request` and `merge_group`. A downstream repository `push`
+does not fan out through that ruleset and therefore cannot earn `BORN` status.
+Core may declare native `push` for its own direct/reusable execution surfaces,
+but birth lifecycle truth does not reinterpret that as organization-required
+workflow evidence.
 
 The repository does **not** own a Core caller workflow. Enrollment comes from the
 active organization required-workflow ruleset pointing at:
