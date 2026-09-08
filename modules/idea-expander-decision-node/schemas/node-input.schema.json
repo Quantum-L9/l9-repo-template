@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/decision_node_input.schema.json",
+  "title": "IdeaExpanderDecisionNodeInput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "expansion_packet", "expansion_gate_receipt", "decision_context"],
+  "properties": {
+    "schema": {"const": "ideaos.decision-node-input/v3"},
+    "expansion_packet": {"$ref": "https://quantum-l9.local/ideaos/schemas/expansion_packet.schema.json"},
+    "expansion_gate_receipt": {"$ref": "https://quantum-l9.local/ideaos/schemas/expansion_gate_receipt.schema.json"},
+    "decision_context": {"$ref": "https://quantum-l9.local/ideaos/schemas/decision_context.schema.json"}
+  }
+}

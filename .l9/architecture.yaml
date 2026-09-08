@@ -1,0 +1,35 @@
+schema: l9.architecture-spec/v1
+metadata:
+  repository: Quantum-L9/IdeaOS
+  status: authoritative
+  role: non-constellation-python-product
+identity:
+  role: ideaos-lifecycle-runtime
+  description: >
+    IdeaOS decides whether an idea should be built and hands an authorized
+    decision downstream. It is not a Constellation node and not a shared
+    constellation_* dependency.
+sibling_templates:
+  nodes: Quantum-L9/L9-Node-Template
+  constellation_deps: Quantum-L9/Constellation.PackageTemplate
+boundaries:
+  owns:
+    - idea lifecycle create -> expand -> decide -> execute
+    - expansion gate and decision handoff
+    - IdeaExecutionPacket emission
+  does_not_own:
+    - Constellation node birth / Gate routing / TransportPacket handlers
+    - constellation_* dependency package factory
+    - Cursor-Governance control plane implementation
+    - organization CI distribution, targeting, versioning, or enforcement
+    - Website-Bot or Program Execution execution
+org_birth_profile:
+  class: non_constellation_python
+  authority: Quantum-L9/.github
+  contract: policies/repo-classes.yml
+  marker: .l9/org-birth-profile.yaml
+ci_ownership:
+  execution_semantics: Quantum-L9/l9-ci-core
+  organization_control: Quantum-L9/l9-ci-control-plane
+  organization_defaults: Quantum-L9/.github
+  distribution_model: repository_must_not_distribute_org_ci

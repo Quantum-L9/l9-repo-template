@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/ideaos_run_request.schema.json",
+  "title": "IdeaOSRunRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request_id",
+    "objective",
+    "mode",
+    "inputs",
+    "constraints",
+    "context_refs",
+    "authority_rules",
+    "trace_id",
+    "validation_profile",
+    "output_contract"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ideaos.run-request/v1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mode": {
+      "enum": [
+        "route",
+        "evaluate",
+        "execution_packet",
+        "commercial_research",
+        "expansion_gate",
+        "decision_handoff"
+      ]
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact"
+      ],
+      "properties": {
+        "artifact": {
+          "type": "object"
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "context_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "authority_rules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validation_profile": {
+      "const": "strict"
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "decision_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "produced_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "require_ready": {
+          "type": "boolean"
+        },
+        "require_execution": {
+          "type": "boolean"
+        }
+      }
+    },
+    "output_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_name"
+      ],
+      "properties": {
+        "schema_name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

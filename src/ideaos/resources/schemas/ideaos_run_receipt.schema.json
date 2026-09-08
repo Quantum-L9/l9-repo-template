@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.local/ideaos/schemas/ideaos_run_receipt.schema.json",
+  "title": "IdeaOSRunReceipt",
+  "description": "The record of one IdeaOSRuntime.execute call. Its shape is pinned by the receipt literal in runtime.py: every key here is one the runtime always writes, and stop_reason is the only conditional one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request_id",
+    "trace_id",
+    "mode",
+    "objective",
+    "status",
+    "input_digest",
+    "output_digest",
+    "output_schema",
+    "output",
+    "validation",
+    "constraints",
+    "context_refs",
+    "authority_rules",
+    "provenance"
+  ],
+  "properties": {
+    "schema": { "const": "ideaos.run-receipt/v1" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "trace_id": { "type": "string", "minLength": 1 },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "route",
+        "evaluate",
+        "execution_packet",
+        "commercial_research",
+        "expansion_gate",
+        "decision_handoff"
+      ]
+    },
+    "objective": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["succeeded", "blocked"] },
+    "stop_reason": {
+      "type": "string",
+      "description": "Present only when status is blocked. The runtime emits exactly these three.",
+      "enum": [
+        "PROMOTION_NOT_READY",
+        "NO_EXECUTION_REQUIRED",
+        "EXPANSION_NOT_READY"
+      ]
+    },
+    "input_digest": { "$ref": "#/$defs/digest" },
+    "output_digest": { "$ref": "#/$defs/digest" },
+    "output_schema": { "type": "string", "pattern": "^[a-z_]+\\.schema\\.json$" },
+    "output": { "type": "object" },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "input_schema", "output_schema"],
+      "properties": {
+        "profile": { "const": "strict" },
+        "input_schema": { "type": "string", "pattern": "^[a-z_]+\\.schema\\.json$" },
+        "output_schema": { "type": "string", "pattern": "^[a-z_]+\\.schema\\.json$" }
+      }
+    },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "context_refs": { "type": "array", "items": { "type": "string" } },
+    "authority_rules": { "type": "array", "items": { "type": "string" } },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "runtime_version", "request_digest"],
+      "properties": {
+        "producer": { "const": "ideaos.runtime" },
+        "runtime_version": { "type": "string", "minLength": 1 },
+        "request_digest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "A blocked run must say why, and a succeeded run must not invent a reason.",
+      "if": { "properties": { "status": { "const": "blocked" } }, "required": ["status"] },
+      "then": { "required": ["stop_reason"] },
+      "else": { "not": { "required": ["stop_reason"] } }
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "description": "semantic_digest() output.",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}
