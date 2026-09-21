@@ -7,6 +7,7 @@ Quantum-L9/l9-repo-template. The workflow owns the fresh-runner PREPARE ->
 PUBLISH privilege boundary; this client never mints publication authority and
 never copies CI into the newborn.
 """
+
 from __future__ import annotations
 
 import argparse
