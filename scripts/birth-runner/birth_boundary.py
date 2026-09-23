@@ -6,6 +6,7 @@ publish, and all. This adapter only converts CLI arguments to the engine model,
 serializes/validates ``l9.repo-birth-handoff/v1``, and reconstructs that model
 on a fresh PUBLISH runner.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -13,6 +14,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,7 @@ from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = Path(__file__).resolve().parent / "schemas" / "birth-handoff.schema.json"
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 
 
 class BoundaryError(RuntimeError):
@@ -47,6 +50,19 @@ def _canonical_bytes(value: object) -> bytes:
 
 def _sha256(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _trusted_base(fallback: Path) -> Path:
+    """The directory every handoff and sealed-root path must stay inside."""
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    return Path(runner_temp).resolve() if runner_temp else fallback.resolve()
+
+
+def _confine(path: Path, base: Path, label: str) -> Path:
+    resolved = path.resolve()
+    if resolved != base and base not in resolved.parents:
+        raise BoundaryError(f"{label} must stay inside {base}")
+    return resolved
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
@@ -86,56 +102,72 @@ def _validate_handoff(value: dict[str, Any]) -> None:
         raise BoundaryError("birth handoff digest mismatch")
 
 
+def _text(mapping: dict[str, Any], key: str, default: str = "") -> str:
+    value = mapping.get(key)
+    return str(value) if value else default
+
+
+def _mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
+    value = data.get(key)
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _receipt_from_dict(data: dict[str, Any]) -> Any:
-    product = data.get("product") or {}
-    template = data.get("template") or {}
-    organization = data.get("organization") or {}
-    repository = str(product.get("repository") or "")
-    owner, _, name = repository.partition("/")
+    product = _mapping(data, "product")
+    template = _mapping(data, "template")
+    organization = _mapping(data, "organization")
+    owner, _, name = _text(product, "repository").partition("/")
     receipt = nr.BirthReceipt(
         org=owner,
         repository=name or owner,
-        package=str(product.get("package") or ""),
-        description=str(product.get("description") or ""),
-        template_repo=str(template.get("repository") or "Quantum-L9/l9-repo-template"),
-        template_sha=str(template.get("sha") or "unknown"),
-        template_version=str(template.get("template_version") or "unknown"),
-        org_profile_repo=str(organization.get("repository") or nr.ORG_PROFILE_REPO),
-        org_profile_sha=str(organization.get("sha") or "unknown"),
-        birth_profile=str(organization.get("birth_profile") or ""),
-        payload=str(product.get("payload") or ""),
-        payload_mode=str(product.get("payload_mode") or "none"),
-        payload_contract=str(product.get("payload_contract") or ""),
-        payload_source=dict(product.get("payload_source") or {}),
-        workdir=str(data.get("workdir") or ""),
-        head_sha=str(data.get("head_sha") or "unknown"),
-        born_at=str(data.get("born_at") or ""),
-        manifest_sha256=str(data.get("manifest_sha256") or ""),
-        birth_receipt=dict(data.get("birth_receipt") or {}),
+        package=_text(product, "package"),
+        description=_text(product, "description"),
+        template_repo=_text(template, "repository", "Quantum-L9/l9-repo-template"),
+        template_sha=_text(template, "sha", "unknown"),
+        template_version=_text(template, "template_version", "unknown"),
+        org_profile_repo=_text(organization, "repository", nr.ORG_PROFILE_REPO),
+        org_profile_sha=_text(organization, "sha", "unknown"),
+        birth_profile=_text(organization, "birth_profile"),
+        payload=_text(product, "payload"),
+        payload_mode=_text(product, "payload_mode", "none"),
+        payload_contract=_text(product, "payload_contract"),
+        payload_source=_mapping(product, "payload_source"),
+        workdir=_text(data, "workdir"),
+        head_sha=_text(data, "head_sha", "unknown"),
+        born_at=_text(data, "born_at"),
+        manifest_sha256=_text(data, "manifest_sha256"),
+        birth_receipt=_mapping(data, "birth_receipt"),
         materialized=list(data.get("materialized") or []),
-        state=str(data.get("state") or nr.canonical_ci.LOCAL),
-        ci=dict(data.get("ci") or {}),
+        state=_text(data, "state", nr.canonical_ci.LOCAL),
+        ci=_mapping(data, "ci"),
     )
     for stage in data.get("stages") or []:
         if isinstance(stage, dict):
             receipt.record(
-                str(stage.get("key") or "unknown"),
-                str(stage.get("label") or "unknown"),
-                str(stage.get("status") or "UNKNOWN"),
-                str(stage.get("detail") or ""),
+                _text(stage, "key", "unknown"),
+                _text(stage, "label", "unknown"),
+                _text(stage, "status", "UNKNOWN"),
+                _text(stage, "detail"),
             )
     return receipt
 
 
 def _prepare_argv(args: argparse.Namespace) -> list[str]:
     argv = [
-        "--repo", args.repo,
-        "--pkg", args.pkg,
-        "--desc", args.desc,
-        "--org", args.org,
-        "--work-dir", str(args.work_dir),
-        "--template-src", str(args.template_src),
-        "--repo-class", args.repo_class,
+        "--repo",
+        args.repo,
+        "--pkg",
+        args.pkg,
+        "--desc",
+        args.desc,
+        "--org",
+        args.org,
+        "--work-dir",
+        str(args.work_dir),
+        "--template-src",
+        str(args.template_src),
+        "--repo-class",
+        args.repo_class,
         "--no-remote",
         "--keep",
     ]
@@ -152,13 +184,20 @@ def _prepare_argv(args: argparse.Namespace) -> list[str]:
 
 def prepare(args: argparse.Namespace) -> int:
     nr.assert_prepare_unprivileged()
+    handoff_path = _confine(
+        args.handoff, _trusted_base(args.work_dir.resolve().parent), "handoff path"
+    )
     cfg = nr.build_config(nr.parse_args(_prepare_argv(args)))
     # GITHUB_OUTPUT is an integrity channel for the trusted boundary process.
-    # Remove it before any product-controlled subprocess can inherit it. A
-    # background descendant therefore cannot rewrite the expected anchor that
-    # the publish job receives through needs.prepare.outputs.*.
+    # Removing it from the mapping keeps it out of every product-controlled
+    # child environment, but the kernel still shows this process's startup
+    # environment to same-UID descendants, so hiding is not the boundary. The
+    # boundary is that nr.prepare() terminates every product descendant before
+    # the seal, and the anchor below is refused while any survives: nothing
+    # product-controlled is alive to recover the path or rewrite the outputs.
     github_output = os.environ.pop("GITHUB_OUTPUT", None)
     receipt, profile, sealed = nr.prepare(cfg)
+    nr.assert_no_product_descendants("PREPARE anchor")
     request_basis = {
         "repository": cfg.slug,
         "package": cfg.pkg,
@@ -198,10 +237,10 @@ def prepare(args: argparse.Namespace) -> int:
         "receipt": receipt.to_dict(),
     }
     handoff["handoff_digest"] = _sha256(handoff)
-    _write_json(args.handoff, handoff)
+    _write_json(handoff_path, handoff)
     _write_prepare_anchor(handoff, github_output)
     print(f"PREPARED SEALED {cfg.slug} {sealed['root_commit_sha']}")
-    print(f"handoff: {args.handoff}")
+    print(f"handoff: {handoff_path}")
     return 0
 
 
@@ -240,19 +279,33 @@ def _cfg_from_handoff(handoff: dict[str, Any], root: Path) -> Any:
     )
 
 
-def _resolve_root(handoff: dict[str, Any], explicit: Path | None) -> Path:
+def _repo_name(handoff: dict[str, Any]) -> str:
+    owner, _, name = str(handoff.get("repository") or "").partition("/")
+    if not NAME_RE.match(owner) or not NAME_RE.match(name):
+        raise BoundaryError("handoff repository must be a plain owner/name")
+    return name
+
+
+def _resolve_root(handoff: dict[str, Any], explicit: Path | None, base: Path) -> Path:
+    """Locate the sealed root strictly inside the trusted base directory.
+
+    The handoff is untrusted data on the fresh runner: only a validated
+    repository name, never a recorded path, may select the directory.
+    """
     if explicit is not None:
-        return explicit.resolve()
-    prepared = handoff.get("prepared") or {}
-    recorded = Path(str(prepared.get("root_path") or ""))
-    candidate = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "births" / Path(
-        str(handoff["repository"])
-    ).name
-    if candidate.is_dir():
-        return candidate.resolve()
-    if recorded.is_dir():
-        return recorded.resolve()
-    raise BoundaryError("sealed root is not materialized on this runner")
+        root = _confine(explicit, base, "sealed root")
+    else:
+        root = _confine(base / "births" / _repo_name(handoff), base, "sealed root")
+    if not root.is_dir():
+        raise BoundaryError("sealed root is not materialized on this runner")
+    return root
+
+
+def _publish_base(args: argparse.Namespace) -> Path:
+    fallback = (
+        args.root.resolve().parents[1] if args.root is not None else args.handoff.resolve().parent
+    )
+    return _trusted_base(fallback)
 
 
 def _assert_expected(value: str, expected: str | None, label: str) -> None:
@@ -261,20 +314,22 @@ def _assert_expected(value: str, expected: str | None, label: str) -> None:
 
 
 def verify(args: argparse.Namespace) -> int:
-    handoff = _load_handoff(args.handoff)
+    base = _publish_base(args)
+    handoff = _load_handoff(_confine(args.handoff, base, "handoff path"))
     prepared = handoff["prepared"]
     _assert_expected(str(handoff["handoff_digest"]), args.expected_handoff_digest, "handoff digest")
     _assert_expected(str(prepared["root_commit_sha"]), args.expected_root_sha, "root SHA")
     _assert_expected(str(prepared["root_tree_sha"]), args.expected_tree_sha, "tree SHA")
-    root = _resolve_root(handoff, args.root)
+    root = _resolve_root(handoff, args.root, base)
     nr.verify_sealed(root, str(prepared["root_commit_sha"]), str(prepared["root_tree_sha"]))
     print(f"VERIFIED SEALED {handoff['repository']} {prepared['root_commit_sha']}")
     return 0
 
 
 def publish(args: argparse.Namespace) -> int:
-    handoff = _load_handoff(args.handoff)
-    root = _resolve_root(handoff, args.root)
+    base = _publish_base(args)
+    handoff = _load_handoff(_confine(args.handoff, base, "handoff path"))
+    root = _resolve_root(handoff, args.root, base)
     prepared = handoff["prepared"]
     receipt = _receipt_from_dict(dict(handoff["receipt"]))
     cfg = _cfg_from_handoff(handoff, root)

@@ -1,9 +1,14 @@
-#!/usr/bin/env python3
-"""One-command repository birth for non-Constellation Quantum-L9 Python repos.
+"""Stage implementations for non-Constellation Quantum-L9 Python repository birth.
 
-`make new-repo` runs this. When it returns PASS the repository is *born* — not
-"created, now go do seven other things". The eight stages below are a state
-machine, and every one of them either passes or stops the birth.
+IMPLEMENTATION-ONLY MODULE. It has no entry point: no ``main()``, no
+module-execution block, and no stage that creates or pushes a remote. ``new_repo.py``
+owns the birth state machine (prepare -> seal -> publish) and is the only
+module that sequences these stages or holds publication authority. Executing
+this file directly defines functions and exits; it births nothing.
+
+`make new-repo` runs the canonical engine. When it returns PASS the repository
+is *born* — not "created, now go do seven other things". The stages below are a
+state machine, and every one of them either passes or stops the birth.
 
     [1] PREFLIGHT              tools, auth, identity validation, name is free
                                + the compiled payload, reproduced against its source
@@ -1646,62 +1651,6 @@ def _validate_ci_binding(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     )
 
 
-def stage_create(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Create the remote and push the finalized initial repository."""
-    run(["git", "add", "-A"], cwd=cfg.dest)
-    # The root commit carries the record too. Three independently comparable
-    # things come out of one birth — the commit, the receipt, and the contents
-    # the receipt's manifest digest covers — and a mismatch between any two of
-    # them means the birth is not what it says it is.
-    message = "\n".join(
-        [
-            f"chore: birth {cfg.slug} from l9-repo-template@{receipt.template_sha[:12]}",
-            "",
-            *prov.commit_trailers(receipt.birth_receipt),
-        ]
-    )
-    run(
-        [
-            "git",
-            "-c",
-            "user.name=L9 Birth Runner",
-            "-c",
-            "user.email=noreply@quantum-l9.invalid",
-            "commit",
-            "-q",
-            "-m",
-            message,
-        ],
-        cwd=cfg.dest,
-    )
-    receipt.head_sha = git_head(cfg.dest)
-    # The root commit only becomes checkable once it exists, so the full
-    # three-way proof runs here — before anything is pushed, not after.
-    _verify_provenance(cfg, receipt, "github.provenance", "birth record proved")
-
-    visibility = "--private" if cfg.private else "--public"
-    # One command owns all three: create the remote repository, create the
-    # `origin` remote for this working tree, and push the initial commit.
-    run(
-        [
-            "gh",
-            "repo",
-            "create",
-            cfg.slug,
-            visibility,
-            "--description",
-            cfg.desc,
-            "--source",
-            str(cfg.dest),
-            "--remote",
-            "origin",
-            "--push",
-        ]
-    )
-    receipt.record("github.create", "repository created", "PASS", cfg.slug)
-    receipt.record("github.push", "initial push", "PASS", receipt.head_sha[:12])
-
-
 def _newest_dispatch_run(workflow: str, since: str) -> dict | None:
     """The most recent workflow_dispatch run of `workflow` created at/after `since`.
 
@@ -2203,68 +2152,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    try:
-        cfg = build_config(parse_args(argv))
-    except (BirthError, prov.ProvenanceError) as exc:
-        print(f"BIRTH FAIL (preflight): {exc}", file=sys.stderr)
-        return 2
-
-    receipt = BirthReceipt(
-        org=cfg.org,
-        repository=cfg.repo,
-        package=cfg.pkg,
-        description=cfg.desc,
-        payload=str(cfg.payload) if cfg.payload else "",
-        workdir=str(cfg.dest),
-        born_at=datetime.now(UTC).isoformat(timespec="seconds"),
-    )
-    receipt.template_sha = git_head(cfg.template_src)
-    # What the template CHECKOUT says, recorded so a failure before stage 5 still
-    # reports something. Stage 5 replaces it with the version the recorded commit
-    # actually carries, and refuses the birth when the two disagree.
-    version_file = cfg.template_src / prov.TEMPLATE_VERSION_PATH
-    if version_file.is_file():
-        receipt.template_version = version_file.read_text(encoding="utf-8").strip()
-
-    profile: dict = {"name": cfg.repo_class, "forbid": []}
-    try:
-        stage_preflight(cfg, receipt)
-        stage_assemble(cfg, receipt)
-        stage_finalize(cfg, receipt)
-        profile = stage_apply_org_profile(cfg, receipt)
-        stage_stamp_provenance(cfg, receipt, profile)
-        stage_validate(cfg, receipt)
-        if cfg.remote:
-            stage_create(cfg, receipt)
-            # Published, not born. Everything from here decides which.
-            receipt.state = canonical_ci.PROVISIONAL
-            stage_remote_bootstrap(cfg, receipt, profile)
-            stage_verify_ci_enrollment(cfg, receipt)
-            stage_attest(cfg, receipt, profile)
-            # Birth ends PROVISIONAL. Not caution — arithmetic: required
-            # workflows never run on push, and a root commit has no base branch
-            # to be a pull request against, so nothing can have evaluated this
-            # commit yet. BORN is earned by the first pull request that passes.
-            receipt.state = (
-                canonical_ci.PROVISIONAL if not receipt.failed else canonical_ci.QUARANTINED
-            )
-            receipt.ci["state"] = receipt.state
-        else:
-            receipt.record("github.create", "repository created", "SKIP", "--no-remote")
-            receipt.state = canonical_ci.LOCAL
-    except (BirthError, prov.ProvenanceError, canonical_ci.CanonicalCIError) as exc:
-        receipt.record("birth.error", "birth", "FAIL", str(exc).splitlines()[0][:120])
-        print(render_receipt(receipt))
-        print(f"BIRTH FAIL: {exc}", file=sys.stderr)
-        _write_receipt(cfg, receipt)
-        return 1
-
-    print(render_receipt(receipt))
-    _write_receipt(cfg, receipt)
-    return 1 if receipt.failed else 0
-
-
 def _write_receipt(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     path = cfg.receipt_path or (cfg.work_dir / f"{cfg.repo}-birth-receipt.json")
     try:
@@ -2273,7 +2160,3 @@ def _write_receipt(cfg: BirthConfig, receipt: BirthReceipt) -> None:
         print(f"birth receipt: {path}")
     except OSError as exc:
         print(f"warning: could not write birth receipt to {path}: {exc}", file=sys.stderr)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

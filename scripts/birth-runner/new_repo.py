@@ -7,19 +7,34 @@ an independently invokable orchestrator. Both ``make new-repo`` and the dispatch
 adapter enter only through the phase functions defined here:
 
     prepare() -> seal() -> publish()
-                     \-> all()  (local/debug compatibility topology)
+                      `-> all()  (local/debug compatibility topology)
 
 Production dispatch crosses a fresh-runner boundary between seal and publish.
 No product-controlled process is executed by publish().
+
+Two isolation rules hold inside the engine itself:
+
+* PREPARE becomes the child subreaper before any product-controlled stage runs,
+  so every orphaned product process reparents here instead of escaping to init.
+  After validation and before the seal, every surviving descendant is killed
+  and the sweep repeats until a full scan finds none. Only then does trusted
+  Git seal the root, and only then does the boundary emit the PREPARE anchor.
+* Every privileged Git invocation first replaces the archived ``.git/config``
+  with the minimal trusted configuration and runs with a pinned environment
+  that carries no publication token and no global or system Git configuration.
 """
+
 from __future__ import annotations
 
+import ctypes
 import importlib.util
 import os
 import shutil
+import signal
 import subprocess
 import sys
-from dataclasses import replace
+import time
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -40,9 +55,167 @@ for _name in dir(_stages):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_stages, _name)
 
+# Explicit bindings for every stage-module name this engine uses directly, so
+# the engine reads as ordinary Python to linters and reviewers rather than
+# relying on the dynamic re-export above for its own definitions.
+UTC = _stages.UTC
+datetime = _stages.datetime
+BirthConfig = _stages.BirthConfig
+BirthError = _stages.BirthError
+BirthReceipt = _stages.BirthReceipt
+ORG_PROFILE_REPO = _stages.ORG_PROFILE_REPO
+SHA_RE = _stages.SHA_RE
+canonical_ci = _stages.canonical_ci
+prov = _stages.prov
+build_config = _stages.build_config
+git_head = _stages.git_head
+parse_args = _stages.parse_args
+render_receipt = _stages.render_receipt
+stage_apply_org_profile = _stages.stage_apply_org_profile
+stage_assemble = _stages.stage_assemble
+stage_attest = _stages.stage_attest
+stage_finalize = _stages.stage_finalize
+stage_preflight = _stages.stage_preflight
+stage_remote_bootstrap = _stages.stage_remote_bootstrap
+stage_stamp_provenance = _stages.stage_stamp_provenance
+stage_validate = _stages.stage_validate
+stage_verify_ci_enrollment = _stages.stage_verify_ci_enrollment
+_verify_provenance = _stages._verify_provenance
+_write_receipt = _stages._write_receipt
+
 PRIVILEGED_TOKEN_ENV = "L9_BIRTH_PRIVILEGED_TOKEN"
 CONTROL_PATH_ENV = "L9_BIRTH_CONTROL_PATH"
 ALLOWED_PUBLISH_TOOLS = frozenset({"git", "gh"})
+STRIPPED_AUTH_ENV = frozenset({"GH_TOKEN", "GITHUB_TOKEN", PRIVILEGED_TOKEN_ENV})
+PR_SET_CHILD_SUBREAPER = 36
+PROC = Path("/proc")
+
+CREATE_KEY = "github.create"
+CREATE_LABEL = "repository created"
+PUSH_KEY = "github.push"
+PUSH_LABEL = "initial push"
+
+
+@dataclass(frozen=True)
+class TrustedTool:
+    """An executable bound before product code ran, with its file fingerprint."""
+
+    path: str
+    fingerprint: tuple[int, int, int, int]
+
+
+def _fingerprint(path: Path) -> tuple[int, int, int, int]:
+    info = path.stat()
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+def _mutable_birth_roots(cfg: BirthConfig | None) -> list[Path]:
+    roots: list[Path] = []
+    for key in ("RUNNER_TEMP", "GITHUB_WORKSPACE"):
+        value = os.environ.get(key)
+        if value:
+            roots.append(Path(value).resolve())
+    if cfg is not None:
+        roots.append(cfg.work_dir.resolve())
+    return roots
+
+
+def bind_git(cfg: BirthConfig | None = None) -> TrustedTool:
+    """Bind the Git executable before product code can influence PATH or files."""
+    resolved = shutil.which("git")
+    if not resolved:
+        raise BirthError("git not found on PATH")
+    path = Path(resolved).resolve()
+    for root in _mutable_birth_roots(cfg):
+        if path == root or root in path.parents:
+            raise BirthError(f"refusing git executable from mutable birth root: {path}")
+    return TrustedTool(path=str(path), fingerprint=_fingerprint(path))
+
+
+def _assert_tool_unchanged(tool: TrustedTool) -> None:
+    if _fingerprint(Path(tool.path)) != tool.fingerprint:
+        raise BirthError(f"trusted executable changed after binding: {tool.path}")
+
+
+def _become_subreaper() -> bool:
+    """Reparent every orphaned descendant to this process (Linux only)."""
+    if sys.platform != "linux":
+        return False
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        raise BirthError(f"cannot become child subreaper: {os.strerror(ctypes.get_errno())}")
+    return True
+
+
+def _process_table() -> dict[int, list[int]]:
+    children: dict[int, list[int]] = {}
+    for entry in os.listdir(PROC):
+        if not entry.isdigit():
+            continue
+        try:
+            stat = (PROC / entry / "stat").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        fields = stat.rpartition(")")[2].split()
+        if len(fields) < 2:
+            continue
+        children.setdefault(int(fields[1]), []).append(int(entry))
+    return children
+
+
+def product_descendants(pid: int | None = None) -> list[int]:
+    """Every process descended from ``pid`` according to /proc (Linux only)."""
+    if sys.platform != "linux":
+        return []
+    table = _process_table()
+    found: list[int] = []
+    queue = [pid or os.getpid()]
+    while queue:
+        parent = queue.pop()
+        for child in table.get(parent, []):
+            found.append(child)
+            queue.append(child)
+    return found
+
+
+def _reap_children() -> None:
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid == 0:
+            return
+
+
+def terminate_product_descendants(*, rounds: int = 100, settle: float = 0.05) -> int:
+    """SIGKILL every descendant until one full scan of /proc finds none.
+
+    The engine is the child subreaper, so a product process that double-forked,
+    called ``setsid`` or otherwise tried to outlive validation still reparents
+    here and is found by the next scan. A subtree that keeps respawning past
+    ``rounds`` fails the birth closed rather than sealing beside a live attacker.
+    """
+    killed = 0
+    for _ in range(rounds):
+        victims = product_descendants()
+        if not victims:
+            return killed
+        for pid in victims:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                continue
+        killed += len(victims)
+        time.sleep(settle)
+        _reap_children()
+    raise BirthError("product descendants survived the isolation sweep")
+
+
+def assert_no_product_descendants(context: str) -> None:
+    alive = product_descendants()
+    if alive:
+        raise BirthError(f"{context}: product descendants are still alive: {alive[:8]}")
 
 
 def new_receipt(cfg: BirthConfig) -> BirthReceipt:
@@ -71,18 +244,41 @@ def assert_prepare_unprivileged() -> None:
 
 
 def sanitized_control_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The process environment minus inherited Git state and every GitHub token.
+
+    The privileged publication token is stripped too: only ``control_run`` hands
+    it to ``gh``, so no Git child process ever carries it.
+    """
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith("GIT_") and key not in {"GH_TOKEN", "GITHUB_TOKEN"}
+        if not key.startswith("GIT_") and key not in STRIPPED_AUTH_ENV
     }
     if extra:
         env.update(extra)
     return env
 
 
+def trusted_git_env() -> dict[str, str]:
+    """Sanitized environment pinned so Git reads no global or system config."""
+    env = sanitized_control_env()
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
 def sanitize_git_config(root: Path) -> None:
-    config = root / ".git" / "config"
+    """Replace the whole local Git configuration with the trusted minimum.
+
+    Hooks, ``core.fsmonitor``, credential helpers, aliases, includes, filters,
+    and every other product-writable execution surface live in this file.
+    Rewriting it is the boundary; checking individual keys is not.
+    """
+    git_dir = root / ".git"
+    if not git_dir.is_dir():
+        raise BirthError("prepared repository has no .git directory")
+    config = git_dir / "config"
     if not config.is_file():
         raise BirthError("prepared repository has no .git/config")
     filemode = "true" if os.name != "nt" else "false"
@@ -92,16 +288,42 @@ def sanitize_git_config(root: Path) -> None:
         f"\tfilemode = {filemode}\n"
         "\tbare = false\n"
         "\tlogallrefupdates = true\n"
+        "\tfsmonitor = false\n"
         f"\thooksPath = {os.devnull}\n",
         encoding="utf-8",
     )
+    worktree_config = git_dir / "config.worktree"
+    if worktree_config.exists():
+        worktree_config.unlink()
 
 
-def seal(cfg: BirthConfig, receipt: BirthReceipt) -> dict[str, str]:
+def _git(
+    tool: TrustedTool, args: list[str], *, cwd: Path, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Run the bound Git executable with an exact trusted environment."""
+    _assert_tool_unchanged(tool)
+    proc = subprocess.run(
+        [tool.path, *args],
+        cwd=str(cwd),
+        check=False,
+        capture_output=True,
+        text=True,
+        env=trusted_git_env(),
+    )
+    if check and proc.returncode != 0:
+        detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
+        raise BirthError(f"git {' '.join(args)} failed ({proc.returncode})\n{detail[-1600:]}")
+    return proc
+
+
+def seal(
+    cfg: BirthConfig, receipt: BirthReceipt, *, git: TrustedTool | None = None
+) -> dict[str, str]:
     """Seal the validated newborn into one root commit before privilege exists."""
     assert_prepare_unprivileged()
+    tool = git or bind_git(cfg)
     sanitize_git_config(cfg.dest)
-    run(["git", "add", "-A"], cwd=cfg.dest, env=sanitized_control_env())
+    _git(tool, ["add", "-A"], cwd=cfg.dest)
     message = "\n".join(
         [
             f"chore: birth {cfg.slug} from l9-repo-template@{receipt.template_sha[:12]}",
@@ -109,9 +331,9 @@ def seal(cfg: BirthConfig, receipt: BirthReceipt) -> dict[str, str]:
             *prov.commit_trailers(receipt.birth_receipt),
         ]
     )
-    run(
+    _git(
+        tool,
         [
-            "git",
             "-c",
             f"core.hooksPath={os.devnull}",
             "-c",
@@ -124,24 +346,13 @@ def seal(cfg: BirthConfig, receipt: BirthReceipt) -> dict[str, str]:
             message,
         ],
         cwd=cfg.dest,
-        env=sanitized_control_env(),
     )
-    root_sha = run(
-        ["git", "rev-parse", "HEAD"], cwd=cfg.dest, env=sanitized_control_env()
-    ).stdout.strip()
-    tree_sha = run(
-        ["git", "rev-parse", "HEAD^{tree}"], cwd=cfg.dest, env=sanitized_control_env()
-    ).stdout.strip()
-    parents = run(
-        ["git", "rev-list", "--parents", "-n", "1", "HEAD"],
-        cwd=cfg.dest,
-        env=sanitized_control_env(),
-    ).stdout.split()
+    root_sha = _git(tool, ["rev-parse", "HEAD"], cwd=cfg.dest).stdout.strip()
+    tree_sha = _git(tool, ["rev-parse", "HEAD^{tree}"], cwd=cfg.dest).stdout.strip()
+    parents = _git(tool, ["rev-list", "--parents", "-n", "1", "HEAD"], cwd=cfg.dest).stdout.split()
     if len(parents) != 1:
         raise BirthError("sealed birth commit is not a root commit")
-    if run(
-        ["git", "status", "--porcelain"], cwd=cfg.dest, env=sanitized_control_env()
-    ).stdout.strip():
+    if _git(tool, ["status", "--porcelain"], cwd=cfg.dest).stdout.strip():
         raise BirthError("prepared repository is dirty after root seal")
     receipt.head_sha = root_sha
     _verify_provenance(cfg, receipt, "seal.provenance", "sealed birth record proved")
@@ -151,8 +362,16 @@ def seal(cfg: BirthConfig, receipt: BirthReceipt) -> dict[str, str]:
 def prepare(
     cfg: BirthConfig, receipt: BirthReceipt | None = None
 ) -> tuple[BirthReceipt, dict[str, Any], dict[str, str]]:
-    """Run every product-controlled stage, validate, and seal exact Git state."""
+    """Run every product-controlled stage, validate, isolate, and seal exact Git state.
+
+    Trusted Git is bound and this process becomes the child subreaper before the
+    first product-controlled stage. After validation every surviving product
+    descendant is terminated; nothing product-controlled is alive when the root
+    is sealed or when the boundary later emits the PREPARE anchor.
+    """
     assert_prepare_unprivileged()
+    git = bind_git(cfg)
+    isolated = _become_subreaper()
     receipt = receipt or new_receipt(cfg)
     stage_preflight(cfg, receipt)
     stage_assemble(cfg, receipt)
@@ -160,29 +379,47 @@ def prepare(
     profile = stage_apply_org_profile(cfg, receipt)
     stage_stamp_provenance(cfg, receipt, profile)
     stage_validate(cfg, receipt)
-    sealed = seal(cfg, receipt)
+    if isolated:
+        killed = terminate_product_descendants()
+        receipt.record(
+            "prepare.isolation",
+            "product isolation",
+            "PASS",
+            f"{killed} surviving product process(es) terminated before seal",
+        )
+    else:
+        receipt.record(
+            "prepare.isolation",
+            "product isolation",
+            "SKIP",
+            "no child-subreaper support on this platform; direct path only",
+        )
+    sealed = seal(cfg, receipt, git=git)
     receipt.state = "SEALED"
     _write_receipt(cfg, receipt)
     return receipt, profile, sealed
 
 
-def verify_sealed(root: Path, root_sha: str, tree_sha: str) -> None:
-    """Verify PREPARE output as untrusted data on the fresh publish runner."""
-    env = sanitized_control_env()
-    head = run(["git", "rev-parse", "HEAD"], cwd=root, env=env).stdout.strip()
+def verify_sealed(
+    root: Path, root_sha: str, tree_sha: str, *, git: TrustedTool | None = None
+) -> None:
+    """Verify PREPARE output as untrusted data with trusted Git configuration.
+
+    The archived ``.git`` directory is product-influenced data. Its configuration
+    is replaced before the first Git command runs, so no archived hook, monitor,
+    helper, alias, or include can execute, with or without publication authority.
+    """
+    sanitize_git_config(root)
+    tool = git or bind_git()
+    head = _git(tool, ["rev-parse", "HEAD"], cwd=root).stdout.strip()
     if head != root_sha:
         raise BirthError("prepared HEAD changed after seal")
-    tree = run(["git", "rev-parse", "HEAD^{tree}"], cwd=root, env=env).stdout.strip()
+    tree = _git(tool, ["rev-parse", "HEAD^{tree}"], cwd=root).stdout.strip()
     if tree != tree_sha:
         raise BirthError("prepared tree changed after seal")
-    if run(["git", "status", "--porcelain"], cwd=root, env=env).stdout.strip():
+    if _git(tool, ["status", "--porcelain"], cwd=root).stdout.strip():
         raise BirthError("prepared working tree changed after seal")
-    hooks = run(
-        ["git", "config", "--local", "--get", "core.hooksPath"],
-        cwd=root,
-        check=False,
-        env=env,
-    )
+    hooks = _git(tool, ["config", "--local", "--get", "core.hooksPath"], cwd=root, check=False)
     if hooks.returncode != 0 or (hooks.stdout or "").strip() != os.devnull:
         raise BirthError("prepared repository does not disable Git hooks")
 
@@ -208,6 +445,12 @@ def _resolve_control_tool(tool: str) -> str:
     raise BirthError(f"trusted {tool} executable is not present in {CONTROL_PATH_ENV}")
 
 
+def control_git() -> TrustedTool:
+    """The Git executable bound through the trusted control path."""
+    path = Path(_resolve_control_tool("git"))
+    return TrustedTool(path=str(path), fingerprint=_fingerprint(path))
+
+
 def control_run(
     cmd: list[str],
     *,
@@ -216,15 +459,22 @@ def control_run(
     capture: bool = True,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """Run a control-plane tool; only ``gh`` ever receives the publication token."""
     tool = Path(cmd[0]).name
     executable = _resolve_control_tool(tool)
-    merged = sanitized_control_env()
+    merged = trusted_git_env()
     merged["PATH"] = os.environ.get(CONTROL_PATH_ENV, "")
     token = (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip()
-    if token:
+    if token and tool == "gh":
         merged["GH_TOKEN"] = token
     if env:
-        merged.update({key: value for key, value in env.items() if key not in {"GH_TOKEN", "PATH"}})
+        merged.update(
+            {
+                key: value
+                for key, value in env.items()
+                if key not in STRIPPED_AUTH_ENV and key != "PATH" and not key.startswith("GIT_")
+            }
+        )
     proc = subprocess.run(
         [executable, *cmd[1:]],
         cwd=str(cwd) if cwd else None,
@@ -240,9 +490,7 @@ def control_run(
 
 
 def _remote_head_control(slug: str) -> str | None:
-    proc = control_run(
-        ["gh", "api", f"repos/{slug}/commits/main", "--jq", ".sha"], check=False
-    )
+    proc = control_run(["gh", "api", f"repos/{slug}/commits/main", "--jq", ".sha"], check=False)
     value = (proc.stdout or "").strip()
     return value if SHA_RE.match(value) else None
 
@@ -253,8 +501,8 @@ def publish_root(cfg: BirthConfig, receipt: BirthReceipt, root_sha: str) -> None
     if existing.returncode == 0:
         head = _remote_head_control(cfg.slug)
         if head == root_sha:
-            receipt.record("github.create", "repository created", "PASS", "already exact")
-            receipt.record("github.push", "initial push", "PASS", root_sha[:12])
+            receipt.record(CREATE_KEY, CREATE_LABEL, "PASS", "already exact")
+            receipt.record(PUSH_KEY, PUSH_LABEL, "PASS", root_sha[:12])
             return
         state = "QUARANTINED_PARTIAL_CREATE" if head is None else "CONFLICT"
         receipt.state = state
@@ -279,8 +527,8 @@ def publish_root(cfg: BirthConfig, receipt: BirthReceipt, root_sha: str) -> None
         check=False,
     )
     if proc.returncode == 0:
-        receipt.record("github.create", "repository created", "PASS", cfg.slug)
-        receipt.record("github.push", "initial push", "PASS", root_sha[:12])
+        receipt.record(CREATE_KEY, CREATE_LABEL, "PASS", cfg.slug)
+        receipt.record(PUSH_KEY, PUSH_LABEL, "PASS", root_sha[:12])
         return
     probe = control_run(["gh", "repo", "view", cfg.slug, "--json", "name"], check=False)
     if probe.returncode != 0:
@@ -288,10 +536,8 @@ def publish_root(cfg: BirthConfig, receipt: BirthReceipt, root_sha: str) -> None
         raise BirthError("publication failed and target repository is absent; safe to retry")
     head = _remote_head_control(cfg.slug)
     if head == root_sha:
-        receipt.record(
-            "github.create", "repository created", "PASS", "recovered after command failure"
-        )
-        receipt.record("github.push", "initial push", "PASS", root_sha[:12])
+        receipt.record(CREATE_KEY, CREATE_LABEL, "PASS", "recovered after command failure")
+        receipt.record(PUSH_KEY, PUSH_LABEL, "PASS", root_sha[:12])
         return
     receipt.state = "QUARANTINED_PARTIAL_CREATE"
     raise BirthError(
@@ -310,9 +556,11 @@ def publish(
     """Publish and remotely attest a previously sealed root."""
     if not (os.environ.get(PRIVILEGED_TOKEN_ENV) or "").strip():
         raise BirthError(f"{PRIVILEGED_TOKEN_ENV} is required for PUBLISH")
-    _resolve_control_tool("git")
+    git = control_git()
     _resolve_control_tool("gh")
-    verify_sealed(cfg.dest, root_sha, tree_sha)
+    # Trusted configuration is rebuilt inside verify_sealed before the first
+    # privileged Git command; Git children never see the publication token.
+    verify_sealed(cfg.dest, root_sha, tree_sha, git=git)
     original_run = _stages.run
     _stages.run = control_run
     try:
@@ -321,9 +569,7 @@ def publish(
         stage_remote_bootstrap(cfg, receipt, profile)
         stage_verify_ci_enrollment(cfg, receipt)
         stage_attest(cfg, receipt, profile)
-        receipt.state = (
-            canonical_ci.PROVISIONAL if not receipt.failed else canonical_ci.QUARANTINED
-        )
+        receipt.state = canonical_ci.PROVISIONAL if not receipt.failed else canonical_ci.QUARANTINED
         receipt.ci["state"] = receipt.state
     except (BirthError, prov.ProvenanceError, canonical_ci.CanonicalCIError) as exc:
         receipt.record("birth.error", "birth", "FAIL", str(exc).splitlines()[0][:120])
@@ -360,7 +606,14 @@ def _direct_org_profile(cfg: BirthConfig) -> BirthConfig:
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
-        [str(Path(git).resolve()), "clone", "--depth", "1", f"https://github.com/{ORG_PROFILE_REPO}.git", str(dest)],
+        [
+            str(Path(git).resolve()),
+            "clone",
+            "--depth",
+            "1",
+            f"https://github.com/{ORG_PROFILE_REPO}.git",
+            str(dest),
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -368,7 +621,9 @@ def _direct_org_profile(cfg: BirthConfig) -> BirthConfig:
     )
     if proc.returncode != 0:
         detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
-        raise BirthError(f"cannot materialize organization profile for direct birth: {detail[-1200:]}")
+        raise BirthError(
+            f"cannot materialize organization profile for direct birth: {detail[-1200:]}"
+        )
     return replace(cfg, org_profile_src=dest)
 
 
@@ -403,7 +658,7 @@ def all(cfg: BirthConfig) -> BirthReceipt:
         raise
 
     if not cfg.remote:
-        receipt.record("github.create", "repository created", "SKIP", "--no-remote")
+        receipt.record(CREATE_KEY, CREATE_LABEL, "SKIP", "--no-remote")
         receipt.state = canonical_ci.LOCAL
         _write_receipt(cfg, receipt)
         _restore_auth(saved)

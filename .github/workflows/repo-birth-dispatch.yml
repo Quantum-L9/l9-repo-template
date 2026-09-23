@@ -161,10 +161,11 @@ jobs:
           L9_BIRTH_PAYLOAD_REPOSITORY: ${{ inputs.payload_repo }}
           L9_BIRTH_PAYLOAD_REQUESTED_REF: ${{ inputs.payload_ref }}
           L9_BIRTH_PAYLOAD_RESOLVED_SHA: ${{ steps.payload.outputs.sha }}
+          ORG_POLICY_ROOT: ${{ steps.org_policy.outputs.root }}
         run: |
           set -euo pipefail
           unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
-          args=(prepare --repo "$BIRTH_REPO" --pkg "$BIRTH_PKG" --desc "$BIRTH_DESC" --org "$BIRTH_ORG" --work-dir "$RUNNER_TEMP/births" --handoff "$RUNNER_TEMP/birth-handoff.json" --org-profile-src "${{ steps.org_policy.outputs.root }}")
+          args=(prepare --repo "$BIRTH_REPO" --pkg "$BIRTH_PKG" --desc "$BIRTH_DESC" --org "$BIRTH_ORG" --work-dir "$RUNNER_TEMP/births" --handoff "$RUNNER_TEMP/birth-handoff.json" --org-profile-src "$ORG_POLICY_ROOT")
           [ -z "$BIRTH_CLASS" ] || args+=(--repo-class "$BIRTH_CLASS")
           [ "$BIRTH_VISIBILITY" != private ] || args+=(--private)
           [ -z "${BIRTH_PAYLOAD:-}" ] || args+=(--payload "$BIRTH_PAYLOAD")
@@ -172,17 +173,26 @@ jobs:
           .venv/bin/python -I scripts/birth-runner/birth_boundary.py "${args[@]}"
           tar -C "$RUNNER_TEMP/births" -czf "$RUNNER_TEMP/sealed-birth.tgz" "$BIRTH_REPO"
       - name: Record source provenance
+        env:
+          FACTORY_SHA: ${{ steps.factory.outputs.sha }}
+          ORG_POLICY_SHA: ${{ steps.org_policy.outputs.sha }}
+          GOVERNANCE_SHA: ${{ steps.governance.outputs.sha }}
+          PAYLOAD_REQUESTED_REF: ${{ inputs.payload_ref }}
+          PAYLOAD_SHA: ${{ steps.payload.outputs.sha }}
+          HANDOFF_DIGEST: ${{ steps.prepare_birth.outputs.handoff_digest }}
+          ROOT_SHA: ${{ steps.prepare_birth.outputs.root_sha }}
+          TREE_SHA: ${{ steps.prepare_birth.outputs.tree_sha }}
         run: |
           {
             echo "### Sealed birth provenance"
-            echo "- factory: ${{ steps.factory.outputs.sha }}"
-            echo "- organization policy: ${{ steps.org_policy.outputs.sha }}"
-            echo "- governance: ${{ steps.governance.outputs.sha }}"
-            echo "- payload requested ref: ${{ inputs.payload_ref }}"
-            echo "- payload resolved SHA: ${{ steps.payload.outputs.sha }}"
-            echo "- handoff digest: ${{ steps.prepare_birth.outputs.handoff_digest }}"
-            echo "- root SHA: ${{ steps.prepare_birth.outputs.root_sha }}"
-            echo "- tree SHA: ${{ steps.prepare_birth.outputs.tree_sha }}"
+            echo "- factory: $FACTORY_SHA"
+            echo "- organization policy: $ORG_POLICY_SHA"
+            echo "- governance: $GOVERNANCE_SHA"
+            echo "- payload requested ref: $PAYLOAD_REQUESTED_REF"
+            echo "- payload resolved SHA: $PAYLOAD_SHA"
+            echo "- handoff digest: $HANDOFF_DIGEST"
+            echo "- root SHA: $ROOT_SHA"
+            echo "- tree SHA: $TREE_SHA"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload sealed birth handoff
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -205,7 +215,9 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.factory_sha }}
       - name: Verify trusted factory SHA
-        run: test "$(git rev-parse HEAD)" = "${{ needs.prepare.outputs.factory_sha }}"
+        env:
+          EXPECTED_FACTORY_SHA: ${{ needs.prepare.outputs.factory_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_FACTORY_SHA"
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
         with:
@@ -228,12 +240,13 @@ jobs:
           EXPECTED_HANDOFF_DIGEST: ${{ needs.prepare.outputs.handoff_digest }}
           EXPECTED_ROOT_SHA: ${{ needs.prepare.outputs.root_sha }}
           EXPECTED_TREE_SHA: ${{ needs.prepare.outputs.tree_sha }}
+          BIRTH_REPO: ${{ inputs.repo_name }}
         run: |
           set -euo pipefail
           unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
           .venv/bin/python -I scripts/birth-runner/birth_boundary.py verify \
             --handoff "$RUNNER_TEMP/birth-handoff.json" \
-            --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}" \
+            --root "$RUNNER_TEMP/births/$BIRTH_REPO" \
             --expected-handoff-digest "$EXPECTED_HANDOFF_DIGEST" \
             --expected-root-sha "$EXPECTED_ROOT_SHA" \
             --expected-tree-sha "$EXPECTED_TREE_SHA"
@@ -267,10 +280,11 @@ jobs:
         env:
           L9_BIRTH_PRIVILEGED_TOKEN: ${{ steps.publish_token.outputs.token }}
           L9_BIRTH_CI_UNVERIFIED: ${{ inputs.ci_unverified_reason }}
+          BIRTH_REPO: ${{ inputs.repo_name }}
         run: |
           set -euo pipefail
           export PATH="$L9_BIRTH_CONTROL_PATH"
-          .venv/bin/python -I scripts/birth-runner/birth_boundary.py publish --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/${{ inputs.repo_name }}"
+          .venv/bin/python -I scripts/birth-runner/birth_boundary.py publish --handoff "$RUNNER_TEMP/birth-handoff.json" --root "$RUNNER_TEMP/births/$BIRTH_REPO"
       - name: Upload final birth evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
