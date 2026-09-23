@@ -83,6 +83,27 @@ stage_verify_ci_enrollment = _stages.stage_verify_ci_enrollment
 _verify_provenance = _stages._verify_provenance
 _write_receipt = _stages._write_receipt
 
+_legacy_run = _stages.run
+_engine = globals()
+
+
+def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    """The engine's single subprocess seam.
+
+    Every stage resolves ``run`` through this module, so replacing the
+    engine's ``run`` (``publish()`` installs ``control_run``; tests install a
+    fake) is the one injection point. The default is the stage module's
+    plain runner.
+    """
+    return _legacy_run(cmd, **kwargs)
+
+
+def _stage_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    return _engine["run"](cmd, **kwargs)
+
+
+_stages.run = _stage_run
+
 PRIVILEGED_TOKEN_ENV = "L9_BIRTH_PRIVILEGED_TOKEN"
 CONTROL_PATH_ENV = "L9_BIRTH_CONTROL_PATH"
 ALLOWED_PUBLISH_TOOLS = frozenset({"git", "gh"})
@@ -561,8 +582,8 @@ def publish(
     # Trusted configuration is rebuilt inside verify_sealed before the first
     # privileged Git command; Git children never see the publication token.
     verify_sealed(cfg.dest, root_sha, tree_sha, git=git)
-    original_run = _stages.run
-    _stages.run = control_run
+    original_run = _engine["run"]
+    _engine["run"] = control_run
     try:
         publish_root(cfg, receipt, root_sha)
         receipt.state = canonical_ci.PROVISIONAL
@@ -578,7 +599,7 @@ def publish(
         receipt.ci["state"] = receipt.state
         raise
     finally:
-        _stages.run = original_run
+        _engine["run"] = original_run
         _write_receipt(cfg, receipt)
     return receipt
 
