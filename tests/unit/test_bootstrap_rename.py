@@ -176,6 +176,7 @@ def test_refuse_existing_target(tmp_path: Path) -> None:
 SENTINEL_FILES = (
     "scripts/bootstrap_rename.py",
     "scripts/birth-runner/new_repo.py",
+    "scripts/birth-runner/new_repo_legacy.py",
     "tests/unit/test_bootstrap_rename.py",
     "tests/unit/test_new_repo_orchestrator.py",
     "tests/integration/test_new_repo_local_birth.py",
@@ -224,6 +225,7 @@ def test_renamed_orchestrator_still_rejects_the_sentinel(tmp_path: Path) -> None
         tmp_path,
         (
             "scripts/birth-runner/new_repo.py",
+            "scripts/birth-runner/new_repo_legacy.py",
             "scripts/birth-runner/birth_provenance.py",
             "scripts/birth-runner/canonical_ci.py",
             "scripts/birth-runner/payload_ownership.py",

@@ -27,6 +27,13 @@ assert _SPEC.loader is not None
 new_repo = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = new_repo
 _SPEC.loader.exec_module(new_repo)
+
+
+def _stage_source() -> str:
+    """Stage table the engine loads. The facade in new_repo.py does not contain it."""
+    return Path(new_repo._stages.__file__).read_text(encoding="utf-8")
+
+
 # The engine locates its provenance module relative to its own file, so reading
 # it back off the loaded engine is what guarantees the test and the birth are
 # talking about the same module rather than two copies that agree for now.
@@ -326,11 +333,11 @@ class TestMypyIsNotPretendedToBeAutoFixable:
     """
 
     def test_install_types_is_not_invoked(self) -> None:
-        source = Path(new_repo.__file__).read_text(encoding="utf-8")
+        source = _stage_source()
         assert '"--install-types"' not in source
 
     def test_stage_five_still_typechecks(self) -> None:
-        source = Path(new_repo.__file__).read_text(encoding="utf-8")
+        source = _stage_source()
         assert '("validate.typecheck", "typecheck", [str(python), "-m", "mypy", "src"])' in source
 
 
@@ -381,7 +388,7 @@ class TestBirthNormalisesBeforeItAttests:
         describe the newborn's bytes. Fixing after any of them would leave the
         root commit's own attestation describing a tree that no longer exists.
         """
-        source = Path(new_repo.__file__).read_text(encoding="utf-8")
+        source = _stage_source()
         autofix = source.index('"finalize.autofix"')
         manifest = source.index('"finalize.manifest"')
         assert autofix < manifest
@@ -392,7 +399,7 @@ class TestBirthNormalisesBeforeItAttests:
         And stage 5 must still *check* after the fix: without that, a lint error
         ruff cannot fix would sail into a published repository.
         """
-        source = Path(new_repo.__file__).read_text(encoding="utf-8")
+        source = _stage_source()
         # The quoted form is the argument; the bare word appears in the comment
         # explaining why it is not passed, so matching that would be self-tripping.
         assert '"--unsafe-fixes"' not in source
@@ -579,11 +586,11 @@ class TestAuthPreflightUsesRest:
     def test_preflight_does_not_shell_to_gh_auth_status(self) -> None:
         # Assert on the argv literal, not on prose: the comment above the fix
         # names `gh auth status` deliberately, to say why it is not used.
-        source = (REPO / "scripts" / "birth-runner" / "new_repo.py").read_text(encoding="utf-8")
+        source = _stage_source()
         assert '"auth", "status"' not in source
 
     def test_preflight_probes_rest_instead(self) -> None:
-        source = (REPO / "scripts" / "birth-runner" / "new_repo.py").read_text(encoding="utf-8")
+        source = _stage_source()
         assert '["gh", "api", "user", "--jq", ".login"]' in source
 
 
