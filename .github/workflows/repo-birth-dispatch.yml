@@ -71,7 +71,7 @@ jobs:
       tree_sha: ${{ steps.prepare_birth.outputs.tree_sha }}
     steps:
       - name: Checkout factory
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Record factory SHA
         id: factory
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -211,7 +211,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout trusted factory at PREPARE SHA
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.prepare.outputs.factory_sha }}
       - name: Verify trusted factory SHA
