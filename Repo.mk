@@ -2,6 +2,8 @@
 PKG_APP ?= l9_example_pkg.app:app
 GOV_ROOT ?= $(HOME)/.cursor-governance
 OPEN_PR ?= 0
+FACTORY_REF ?= main
+VISIBILITY ?= private
 
 # Prefer local venv for facade + product recipes (L9_REPO uses deferred PYTHON).
 ifneq ($(wildcard $(CURDIR)/.venv/bin/python),)
@@ -12,7 +14,7 @@ PYTHON ?= python3
 .PHONY: help install-dev setup-hooks lint lint-fix typecheck inventory-check hygiene-check \
 	check-rules render-rules check-config reconcile-config verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
-	new-repo birth-payload birth-payload-check birth-check birth-preflight \
+	birth birth-status new-repo birth-payload birth-payload-check birth-check birth-preflight \
 	birth-bootstrap birth-verify \
 	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
 
@@ -101,11 +103,37 @@ obs-ps: ## Show optional local obs stack status
 	docker compose -f observability/docker-compose.observability.yml ps
 
 # ─── Repository birth ────────────────────────────────────────────────────────
-# One command. When it returns PASS the repository is born, not "created, now
-# go do seven other things". uv lock, the org birth profile, and the full
-# product gate are birth invariants, not steps an author remembers.
-#
-# The three targets below stay as debugging surfaces for the individual stages.
+# `birth` is the public remote operator/agent front door. It dispatches the
+# canonical two-runner factory workflow; it does not run privileged birth in the
+# caller's process. `birth-status` is a read-only lifecycle query. `new-repo`
+# remains the direct/debug compatibility primitive and must not become the mobile
+# production entrypoint.
+
+birth: ## Dispatch secure factory birth (REPO= PKG= DESC= [VISIBILITY=private|public] [PAYLOAD_REPO= PAYLOAD_REF=])
+	@test -n "$(REPO)" || (echo "usage: make birth REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD_REPO=Quantum-L9/repo PAYLOAD_REF=<ref>]" >&2; exit 2)
+	@test -n "$(PKG)"  || (echo "usage: make birth REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD_REPO=Quantum-L9/repo PAYLOAD_REF=<ref>]" >&2; exit 2)
+	@test -n "$(DESC)" || (echo "usage: make birth REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD_REPO=Quantum-L9/repo PAYLOAD_REF=<ref>]" >&2; exit 2)
+	$(PYTHON) scripts/birth-runner/birth_frontdoor.py \
+		--repo "$(REPO)" \
+		--pkg "$(PKG)" \
+		--desc "$(DESC)" \
+		--visibility "$(VISIBILITY)" \
+		--factory-ref "$(FACTORY_REF)" \
+		$(if $(CLASS),--repo-class "$(CLASS)",) \
+		$(if $(CI_UNVERIFIED_REASON),--ci-unverified-reason "$(CI_UNVERIFIED_REASON)",) \
+		$(if $(GOVERNANCE_REF),--governance-ref "$(GOVERNANCE_REF)",) \
+		$(if $(PAYLOAD_REPO),--payload-repo "$(PAYLOAD_REPO)",) \
+		$(if $(PAYLOAD_REF),--payload-ref "$(PAYLOAD_REF)",) \
+		$(if $(PAYLOAD_SUBPATH),--payload-subpath "$(PAYLOAD_SUBPATH)",) \
+		$(if $(PAYLOAD_CONTRACT_PATH),--payload-contract-path "$(PAYLOAD_CONTRACT_PATH)",)
+
+birth-status: ## Derive live lifecycle truth (REPO=<name|owner/name> [JSON=1])
+	@test -n "$(REPO)" || (echo "usage: make birth-status REPO=<name|owner/name> [JSON=1]" >&2; exit 2)
+	$(PYTHON) scripts/birth-runner/birth_status.py \
+		--repo "$(REPO)" \
+		$(if $(JSON),--json,)
+
+# The targets below stay as lower-level/debugging surfaces.
 birth-payload: ## Compile a birth payload (SOURCE=<clean checkout> OUT=<payload.json> [MODE=])
 	@test -n "$(SOURCE)" || (echo "usage: make birth-payload SOURCE=<checkout> OUT=<payload.json>" >&2; exit 2)
 	@test -n "$(OUT)"    || (echo "usage: make birth-payload SOURCE=<checkout> OUT=<payload.json>" >&2; exit 2)
@@ -123,7 +151,7 @@ birth-payload-check: ## Reproduce a compiled payload against its source (PAYLOAD
 		--source "$(SOURCE)" \
 		$(if $(PKG),--pkg "$(PKG)",)
 
-new-repo: ## Birth a repository (REPO= PKG= DESC= [PAYLOAD= PAYLOAD_CONTRACT=] [ORG=] [WORK_DIR=] [NO_REMOTE=1])
+new-repo: ## Direct/debug birth primitive (REPO= PKG= DESC= [PAYLOAD= PAYLOAD_CONTRACT=] [ORG=] [WORK_DIR=] [NO_REMOTE=1])
 	@test -n "$(REPO)" || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
 	@test -n "$(PKG)"  || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
 	@test -n "$(DESC)" || (echo "usage: make new-repo REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD=<dir>]" >&2; exit 2)
