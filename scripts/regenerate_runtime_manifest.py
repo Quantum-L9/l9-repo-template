@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Regenerate MANIFEST.sha256 for repository-execution runtime surfaces.
 
-A change to any hashed input, including Repo.mk, is incomplete until this
-script rewrites the manifest. Repository verification fails closed on a mismatch.
+A bump of any hashed input, including requirements-repo-runtime.txt, is
+incomplete until this script rewrites the manifest. Repository verification
+compares those digests and fails closed on a mismatch.
 """
 
 from __future__ import annotations
