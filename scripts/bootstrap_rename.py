@@ -48,6 +48,7 @@ SKIP_REL_PATHS = {
     "tests/integration/test_new_repo_local_birth.py",
     "scripts/bootstrap_rename.py",
     "scripts/birth-runner/new_repo.py",
+    "scripts/birth-runner/new_repo_legacy.py",
     "scripts/render_cursor_rules.py",
     "MANIFEST.sha256",
     "docs/repository-execution-runtime.md",
