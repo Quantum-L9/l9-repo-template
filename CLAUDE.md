@@ -33,10 +33,16 @@ This is a thin Claude-specific overlay. It does not replace or duplicate
 
 ## L9 alignment law
 
-- Preserve the declared non-Constellation product boundary. This repository is
-  not the Constellation node scaffold and is not the `constellation_*`
-  dependency scaffold. Those responsibilities remain with the sibling
-  templates named in `.l9/architecture.yaml`.
+- This repository is the generic L9 repository birth factory. It owns how a
+  repository is born, not what semantic product is born. Product semantics
+  (ProductTopology, ProductManifest, ProductKind, archetypes) are upstream
+  inputs owned by `Quantum-L9/.github` `semantics/` and the product semantic
+  owner. Never infer ProductKind from repository shape, package contents, SDK
+  presence, Gate presence, repo class, or template ancestry.
+- The Python/FastAPI content under `src/` is a reference/example payload, not
+  factory law. SDK compatibility of a born product is product-owned.
+- The birthing adapter does not exist yet; `.l9/architecture.yaml` only names
+  that boundary. Do not implement or simulate it here.
 - Extend existing surfaces. Do not create parallel runners, duplicate configs,
   duplicate agent law, or repository-local copies of centrally owned CI logic.
 - A repository-shaped birth payload owns its product surfaces; do not restore

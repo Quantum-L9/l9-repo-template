@@ -1,11 +1,11 @@
 schema: l9.sdk-compatibility/v1
 repository: Quantum-L9/l9-repo-template
-role: non-constellation-python-museum
+role: l9-repo-birth-factory
 notes: >
-  This template does not require constellation-node-sdk. Node and dep
-  compatibility belongs to sibling templates.
-deferred:
-  constellation_nodes: Quantum-L9/L9-Node-Template
-  constellation_deps: Quantum-L9/Constellation.PackageTemplate
+  The factory itself requires no L9 SDK. SDK compatibility of a born product
+  (Gate SDK, constellation node SDK, or none) is product-owned: it is declared
+  by the product's resolved semantics and carried in the product payload, never
+  decided or inferred by this repository.
+born_product_sdk_compatibility: product_owned
 python: ">=3.12"
 package_manager: uv
