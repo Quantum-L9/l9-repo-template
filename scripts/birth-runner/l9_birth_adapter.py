@@ -201,9 +201,7 @@ class AdapterInputError(RuntimeError):
     """An artifact could not be read at all. Distinct from an inadmissible one."""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Artifacts and results
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def artifact_digest(data: bytes) -> str:
@@ -288,9 +286,7 @@ class BindingResult:
         return "\n".join(lines)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # The binding document contract, enforced without a schema library
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _closed_object(errors: list[str], doc: Mapping, key: str, allowed: tuple[str, ...]):
@@ -372,9 +368,7 @@ def load_binding(path: Path) -> dict[str, object]:
     return load_artifact(path).document
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # The checks
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _explicit_token(value: object) -> bool:
@@ -385,6 +379,74 @@ def _explicit_token(value: object) -> bool:
     one, and this adapter will never fill one in.
     """
     return isinstance(value, str) and bool(value.strip()) and value.strip().lower() != "unknown"
+
+
+def _incomplete(failures: list[Failure], detail: str) -> None:
+    failures.append(Failure("MANIFEST_INCOMPLETE", detail))
+
+
+def _check_manifest_structure(manifest: Mapping[str, object], failures: list[Failure]) -> None:
+    """Structural completeness against the upstream schema's `required` lists."""
+    missing = sorted(set(MANIFEST_REQUIRED_KEYS) - set(manifest))
+    if missing:
+        _incomplete(failures, f"manifest is missing required key(s): {', '.join(missing)}")
+    for key, required in (
+        ("product", MANIFEST_PRODUCT_KEYS),
+        ("source_topology", MANIFEST_TOPOLOGY_KEYS),
+        ("compiler", MANIFEST_COMPILER_KEYS),
+    ):
+        if key not in manifest:
+            continue
+        block = manifest[key]
+        if not isinstance(block, dict):
+            _incomplete(failures, f"manifest.{key} is not an object")
+            continue
+        absent = sorted(set(required) - set(block))
+        if absent:
+            _incomplete(failures, f"manifest.{key} is missing required key(s): {', '.join(absent)}")
+    digest = manifest.get("manifest_digest")
+    if "manifest_digest" in manifest and (not isinstance(digest, str) or not digest.strip()):
+        _incomplete(failures, "manifest.manifest_digest is not a non-empty string")
+
+
+def _check_manifest_resolved(manifest: Mapping[str, object], failures: list[Failure]) -> None:
+    """Fail closed on any unresolved entry: upstream defines no severity to read."""
+    if "unresolved" not in manifest:
+        return
+    unresolved = manifest["unresolved"]
+    if not isinstance(unresolved, list):
+        _incomplete(failures, "manifest.unresolved is not an array")
+    elif unresolved:
+        failures.append(
+            Failure(
+                "MANIFEST_UNRESOLVED",
+                f"manifest carries {len(unresolved)} unresolved entr"
+                f"{'y' if len(unresolved) == 1 else 'ies'} — every unresolved entry is hard "
+                "at this boundary, and birth does not lower an unresolved manifest",
+            )
+        )
+
+
+def _check_manifest_product(manifest: Mapping[str, object], failures: list[Failure]) -> None:
+    """ProductKind and archetype are explicit upstream or the realization is refused."""
+    product = manifest.get("product")
+    if not isinstance(product, dict):
+        return
+    if not _explicit_token(product.get("kind")):
+        failures.append(
+            Failure(
+                "PRODUCT_KIND_NOT_EXPLICIT",
+                "manifest.product.kind is not an explicit ProductKind — the kind is "
+                "resolved upstream and is never inferred or supplied at this boundary",
+            )
+        )
+    if not _explicit_token(product.get("archetype_ref")):
+        failures.append(
+            Failure(
+                "PRODUCT_ARCHETYPE_NOT_EXPLICIT",
+                "manifest.product.archetype_ref is not an explicit archetype reference",
+            )
+        )
 
 
 def _check_manifest(manifest: Mapping[str, object], failures: list[Failure]) -> bool:
@@ -402,68 +464,9 @@ def _check_manifest(manifest: Mapping[str, object], failures: list[Failure]) -> 
             )
         )
         return False
-
-    missing = sorted(set(MANIFEST_REQUIRED_KEYS) - set(manifest))
-    if missing:
-        failures.append(
-            Failure(
-                "MANIFEST_INCOMPLETE", f"manifest is missing required key(s): {', '.join(missing)}"
-            )
-        )
-    for key, required in (
-        ("product", MANIFEST_PRODUCT_KEYS),
-        ("source_topology", MANIFEST_TOPOLOGY_KEYS),
-        ("compiler", MANIFEST_COMPILER_KEYS),
-    ):
-        block = manifest.get(key)
-        if key in manifest and not isinstance(block, dict):
-            failures.append(Failure("MANIFEST_INCOMPLETE", f"manifest.{key} is not an object"))
-        elif isinstance(block, dict):
-            absent = sorted(set(required) - set(block))
-            if absent:
-                failures.append(
-                    Failure(
-                        "MANIFEST_INCOMPLETE",
-                        f"manifest.{key} is missing required key(s): {', '.join(absent)}",
-                    )
-                )
-    digest = manifest.get("manifest_digest")
-    if "manifest_digest" in manifest and (not isinstance(digest, str) or not digest.strip()):
-        failures.append(
-            Failure("MANIFEST_INCOMPLETE", "manifest.manifest_digest is not a non-empty string")
-        )
-
-    unresolved = manifest.get("unresolved")
-    if "unresolved" in manifest:
-        if not isinstance(unresolved, list):
-            failures.append(Failure("MANIFEST_INCOMPLETE", "manifest.unresolved is not an array"))
-        elif unresolved:
-            failures.append(
-                Failure(
-                    "MANIFEST_UNRESOLVED",
-                    f"manifest carries {len(unresolved)} unresolved entr"
-                    f"{'y' if len(unresolved) == 1 else 'ies'} — every unresolved entry is hard "
-                    "at this boundary, and birth does not lower an unresolved manifest",
-                )
-            )
-
-    product = manifest.get("product")
-    if isinstance(product, dict):
-        if not _explicit_token(product.get("kind")):
-            failures.append(
-                Failure(
-                    "PRODUCT_KIND_NOT_EXPLICIT",
-                    "manifest.product.kind is not an explicit ProductKind — the kind is "
-                    "resolved upstream and is never inferred or supplied at this boundary",
-                )
-            )
-        if not _explicit_token(product.get("archetype_ref")):
-            failures.append(
-                Failure(
-                    "PRODUCT_ARCHETYPE_NOT_EXPLICIT",
-                    "manifest.product.archetype_ref is not an explicit archetype reference",
-                )
-            )
+    _check_manifest_structure(manifest, failures)
+    _check_manifest_resolved(manifest, failures)
+    _check_manifest_product(manifest, failures)
     return True
 
 
@@ -511,6 +514,65 @@ def _check_manifest_coordinates(
                 )
 
 
+def _malformed_contract(failures: list[Failure], detail: str) -> None:
+    failures.append(Failure("BIRTH_CONTRACT_MALFORMED", detail))
+
+
+def _check_contract_source(binding: Mapping, source: object, failures: list[Failure]) -> None:
+    """The contract binds the clean snapshot the binding names, coordinate for coordinate."""
+    if not isinstance(source, dict):
+        _malformed_contract(failures, "birth contract has no source block")
+        return
+    if source.get("clean") is not True:
+        failures.append(
+            Failure(
+                "BIRTH_CONTRACT_SOURCE_NOT_CLEAN",
+                "birth contract does not attest a clean source snapshot",
+            )
+        )
+    for key in BINDING_SECTIONS["source"]:
+        if source.get(key) != binding["source"][key]:
+            failures.append(
+                Failure(
+                    "BIRTH_CONTRACT_SOURCE_MISMATCH",
+                    f"binding names source {key} {binding['source'][key]!r}, "
+                    f"the birth contract binds {source.get(key)!r}",
+                )
+            )
+
+
+def _check_contract_factory(binding: Mapping, factory: object, failures: list[Failure]) -> None:
+    if not isinstance(factory, dict) or not isinstance(factory.get("revision"), str):
+        _malformed_contract(failures, "birth contract names no factory revision")
+    elif factory["revision"] != binding["factory"]["revision"]:
+        failures.append(
+            Failure(
+                "FACTORY_COORDINATE_MISMATCH",
+                f"binding names factory revision {binding['factory']['revision']}, "
+                f"the birth contract was packaged against {factory['revision']}",
+            )
+        )
+
+
+def _check_contract_payload(binding: Mapping, payload: object, failures: list[Failure]) -> None:
+    if not isinstance(payload, dict):
+        _malformed_contract(failures, "birth contract has no payload block")
+        return
+    if payload.get("schema") != PAYLOAD_SCHEMA:
+        _malformed_contract(
+            failures,
+            f"birth contract payload schema {payload.get('schema')!r} is not {PAYLOAD_SCHEMA}",
+        )
+    if payload.get("digest") != binding["payload"]["digest"]:
+        failures.append(
+            Failure(
+                "BIRTH_CONTRACT_PAYLOAD_MISMATCH",
+                f"binding names payload {binding['payload']['digest']}, "
+                f"the birth contract references {payload.get('digest')!r}",
+            )
+        )
+
+
 def _check_birth_contract(binding: Mapping, contract: Artifact, failures: list[Failure]) -> None:
     document = contract.document
     schema = document.get("schema")
@@ -531,61 +593,9 @@ def _check_birth_contract(binding: Mapping, contract: Artifact, failures: list[F
                 f"the artifact hashes to {contract.digest}",
             )
         )
-
-    source = document.get("source")
-    if not isinstance(source, dict):
-        failures.append(Failure("BIRTH_CONTRACT_MALFORMED", "birth contract has no source block"))
-    else:
-        if source.get("clean") is not True:
-            failures.append(
-                Failure(
-                    "BIRTH_CONTRACT_SOURCE_NOT_CLEAN",
-                    "birth contract does not attest a clean source snapshot",
-                )
-            )
-        for key in BINDING_SECTIONS["source"]:
-            if source.get(key) != binding["source"][key]:
-                failures.append(
-                    Failure(
-                        "BIRTH_CONTRACT_SOURCE_MISMATCH",
-                        f"binding names source {key} {binding['source'][key]!r}, "
-                        f"the birth contract binds {source.get(key)!r}",
-                    )
-                )
-
-    factory = document.get("factory")
-    if not isinstance(factory, dict) or not isinstance(factory.get("revision"), str):
-        failures.append(
-            Failure("BIRTH_CONTRACT_MALFORMED", "birth contract names no factory revision")
-        )
-    elif factory["revision"] != binding["factory"]["revision"]:
-        failures.append(
-            Failure(
-                "FACTORY_COORDINATE_MISMATCH",
-                f"binding names factory revision {binding['factory']['revision']}, "
-                f"the birth contract was packaged against {factory['revision']}",
-            )
-        )
-
-    payload = document.get("payload")
-    if not isinstance(payload, dict):
-        failures.append(Failure("BIRTH_CONTRACT_MALFORMED", "birth contract has no payload block"))
-        return
-    if payload.get("schema") != PAYLOAD_SCHEMA:
-        failures.append(
-            Failure(
-                "BIRTH_CONTRACT_MALFORMED",
-                f"birth contract payload schema {payload.get('schema')!r} is not {PAYLOAD_SCHEMA}",
-            )
-        )
-    if payload.get("digest") != binding["payload"]["digest"]:
-        failures.append(
-            Failure(
-                "BIRTH_CONTRACT_PAYLOAD_MISMATCH",
-                f"binding names payload {binding['payload']['digest']}, "
-                f"the birth contract references {payload.get('digest')!r}",
-            )
-        )
+    _check_contract_source(binding, document.get("source"), failures)
+    _check_contract_factory(binding, document.get("factory"), failures)
+    _check_contract_payload(binding, document.get("payload"), failures)
 
 
 def _check_payload(binding: Mapping, payload: Artifact, failures: list[Failure]) -> None:
@@ -681,9 +691,7 @@ def bind(
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Entry point
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

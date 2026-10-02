@@ -263,7 +263,10 @@ class TestAConsistentRealizationIsAdmissible:
         }
 
     def test_binding_is_deterministic(self, case: Case) -> None:
-        assert case.bind().to_dict() == case.bind().to_dict()
+        """Two independently built, identical realizations bind to one result."""
+        first = case.bind().to_dict()
+        second = Case().bind().to_dict()
+        assert first == second
 
 
 # ─────────────────────────────────────────────────────────────────────────────
