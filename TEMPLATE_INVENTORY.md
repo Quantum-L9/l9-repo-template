@@ -1,14 +1,19 @@
 # Template inventory
 
-Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own nodes and deps.
+Identity: generic **L9 repository birth factory**. This repository owns how an
+L9 repository is born; product semantics (ProductTopology, ProductManifest,
+ProductKind, archetypes) are upstream inputs owned by `Quantum-L9/.github`
+`semantics/` and the product semantic owner.
 
 ## Source pins (harvest)
 
 | Source | SHA | Role |
 |--------|-----|------|
-| Quantum-L9/L9-Node-Template | `8999fd1` (tree at mine) | DX gold only — REJECT_WRONG_PRODUCT for node/codegen surfaces |
-| Quantum-L9/Constellation.PackageTemplate | `dcb5d24` (tree at mine) | DX gold only — REJECT_WRONG_PRODUCT for constellation_* birth plays |
 | Quantum-L9/l9-ci-core | `l9_ci_core_harvest_revision` in `.l9/runtime-provenance.yaml` | `tools/l9_repo` vendored |
+| Quantum-L9/.github | recorded per birth in `.l9/org-birth-profile.yaml` (`org_policy_sha`) | repo-class resolver + seed payload builder, invoked at birth, never copied |
+
+Earlier DX harvests from retired sibling templates are history, not law: no
+active surface delegates a product kind to them.
 
 ## Surfaces
 
@@ -30,36 +35,42 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 | `.github/workflows/codeql.yml` | Repository-local CI orchestration | REJECT_DUPLICATED_CONTROL | CI targeting/execution belongs to the central control plane |
 | `.github/codeql/codeql-config.yml` | Local CodeQL query policy | REJECT_DUPLICATED_CONTROL | shared CodeQL policy is centrally owned |
 | Alembic (`alembic.ini` / `alembic/`) | Database migration runtime | CONDITIONAL_CARTRIDGE | add only when a downstream repo declares a database/SQLAlchemy capability |
-| `scripts/inventory_check.py` | Layout + mention drift | PORT_SURGICAL | Node-Template verify_contracts idea |
-| `scripts/repo_hygiene_audit.py` | eval/exec/print + scaffold bans | PORT_SURGICAL | Node-Template audit_engine (generic) |
+| `scripts/inventory_check.py` | Chassis layout + discovery wiring + org-CI denial; product-kind-neutral | ALREADY_HAVE | this repo |
+| `scripts/repo_hygiene_audit.py` | eval/exec/print ban + single task runner; product-kind-neutral | ALREADY_HAVE | this repo |
 | `scripts/reconcile_plugin_config.py` | Chassis metadata describes THIS repo, not the template | ALREADY_HAVE | this repo |
-| `scripts/birth-runner/new_repo.py` | One-command birth state machine (9 stages) | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/new_repo.py` | Birth state machine (prepare → seal → publish) | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/new_repo_legacy.py` | Stage implementations; resolves the org class through `Quantum-L9/.github` `ops/repo-class-profile.js` | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/birth_provenance.py` | Birth-record shapes + digests, shared by engine and checker | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/verify_birth_integrity.py` | P0 proof that a repo is what its birth record claims | ALREADY_HAVE | this repo |
-| `scripts/birth-runner/payload-ownership.yaml` | Authoritative-vs-additive product/chassis ownership | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/payload-ownership.yaml` | Authoritative-vs-additive product/chassis ownership (`repository_shape` is payload-authority evidence only) | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/canonical_ci.py` | Birth state machine + canonical-CI correlation (BIRTH-CI-001..005) | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/payload_ownership.py` | One reader for that contract, shared by engine and compiler | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/compile_birth_payload.py` | Compiles `l9.birth-payload/v1` from an immutable source snapshot | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/verify_birth_payload.py` | Reproduces a compiled payload against its source before assembly | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/schemas/birth-payload.schema.json` | Published `l9.birth-payload/v1` contract | ALREADY_HAVE | this repo |
-| `scripts/birth-runner/0*.sh` | Staged debugging surfaces | PORT_SURGICAL | PackageTemplate dep-build-runner mechanics |
-| `.l9/org-birth-profile.yaml` | Declares the org repo class; carries the immutable `birth:` record in a newborn | ALREADY_HAVE | Quantum-L9/.github contract |
-| `src/*/settings|errors|health|retry.py` | Optional package helpers | PORT_SURGICAL | PackageTemplate concepts |
-| `.cursor/rules/templates/l9-python-repo.mdc.template` | Generic agent rule | PORT_SURGICAL | Node-Template contract rule rewrite |
-| `.cursor/rules/templates/fastapi.mdc.template` | FastAPI conventions — `L9_RENDER_REQUIRES: app_entrypoint` | PORT_SURGICAL | Node-Template fastapi rule |
-| `observability/` | Opt-in local obs compose | ALREADY_HAVE | file-inv |
-| `plugin-config.yaml` + render | Parametric Cursor rules | ALREADY_HAVE | file-inv DX |
-| `create_node_app` / Gate handlers / `spec.yaml` Gate registration | — | REJECT_WRONG_PRODUCT | belongs in L9-Node-Template |
-| `enginehandlers` / `nodespec` / `contracts/` | — | REJECT_WRONG_PRODUCT | Node-Template legacy |
-| PacketEnvelope / Gate peer-HTTP museum gates | — | REJECT_WRONG_PRODUCT | node/SDK law |
-| Justfile | — | REJECT | dual runner |
+| `scripts/birth-runner/birth_frontdoor.py` | Remote birth front door (`make birth`) | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/0*.sh` | Staged debugging surfaces | ALREADY_HAVE | this repo |
+| `.l9/org-birth-profile.yaml` | Declares the org repo class (an organization birth class, not a ProductKind); carries the immutable `birth:` record in a newborn | ALREADY_HAVE | Quantum-L9/.github contract |
+| `src/*/settings|errors|health|retry.py` | Reference-payload helpers | REFERENCE_PAYLOAD | this repo |
+| `.cursor/rules/templates/l9-python-repo.mdc.template` | Generic chassis agent rule | ALREADY_HAVE | this repo |
+| `.cursor/rules/templates/fastapi.mdc.template` | FastAPI conventions for the reference payload — `L9_RENDER_REQUIRES: app_entrypoint` | REFERENCE_PAYLOAD | this repo |
+| `observability/` | Opt-in local obs compose | REFERENCE_PAYLOAD | this repo |
+| `plugin-config.yaml` + render | Parametric Cursor rules | ALREADY_HAVE | this repo |
+| Justfile | — | REJECT | dual runner beside `make` |
 | Fix-B OTel Python package | — | REJECT | compose-only obs |
-| PackageTemplate plays / PyPI release | — | REJECT_WRONG_PRODUCT | dep factory |
-| Museum-owned parallel CI | — | REJECT | organization CI control plane owns CI targeting |
+| Factory-owned parallel CI | — | REJECT | organization CI control plane owns CI targeting |
+| Birthing adapter / ProductTopology loader / ProductManifest loader / ProductKind inference | — | NOT_HERE | separate future campaign; boundary named in `.l9/architecture.yaml` |
+
+## Product-kind neutrality
+
+Node-, Dependency-, engine-, contract-, nodespec-, Gate- and SDK-shaped surfaces
+are legitimate products of this factory. No chassis check denies them by shape.
+What a born repository *is* comes from its resolved product semantics upstream.
 
 ## Deny at repo root
 
-`engine/`, `chassis/`, `domains/`, `client/`, `database/`, `deploy/`, `example_service/`, `contracts/`, `Justfile`
+`Justfile`, and every organization-CI distribution path named in
+`scripts/inventory_check.py` `DENY_CI_DISTRIBUTION`.
 
 `tools/` allowed only for `tools/l9_repo/` + `tools/check_workflow_integrity.py`.
 
@@ -68,7 +79,7 @@ Identity: **non-Constellation** Quantum-L9 Python museum. Sibling templates own 
 `CLAUDE.md`, `llms.txt`, `bootstrap.sh`, `.gitattributes`, pre-commit,
 `.gitleaks.toml`, and `.coderabbit.yaml` are repository chassis surfaces. The
 birth payload ownership contract keeps them when an authoritative product
-payload replaces the example product tree.
+payload replaces the reference product tree.
 
 Gitleaks uses the built-in detection corpus with a thin repo-local extension.
 Semgrep stays repo-local only for a small high-signal generic rule set that
@@ -81,9 +92,9 @@ on repository-local CI orchestration.
 Alembic and generated `requirements.txt` exports are downstream capability
 surfaces, not base-template dependency authorities.
 
-## Inherited organization defaults
+## Organization-owned surfaces
 
-GitHub inherits these surfaces from `Quantum-L9/.github` organization defaults
+GitHub inherits these from `Quantum-L9/.github` organization defaults
 automatically — this repository does not carry copies:
 
 - `CODE_OF_CONDUCT.md` (root)
@@ -95,11 +106,17 @@ Repository-local copies of these names remain a supported explicit override:
 a repository that needs different content adds its own file and GitHub prefers it.
 
 `CONTRIBUTING.md`, `SECURITY.md`, and `SUPPORT.md` are kept repository-local.
-`.github/CODEOWNERS`, `dependabot.yml`, and `labels.yml` are not inheritable and
-stay repo-local.
+
+`.github/CODEOWNERS`, `.github/dependabot.yml`, and `.github/labels.yml` are
+organization MATERIALIZE destinations. This repository keeps its own copies for
+itself, but the template copy contributes **none** of them to a newborn
+(`TEMPLATE_EXCLUDE_ORG_OWNED`): stage 4 writes the organization's current files
+from the pinned `Quantum-L9/.github` checkout, and an explicit product-payload
+copy still wins because MATERIALIZE is missing-only.
 
 Which organization capabilities a repository receives is decided by its class
 in `Quantum-L9/.github` `policies/repo-classes.yml`, declared here in
-`.l9/org-birth-profile.yaml`. The `non_constellation_python` class FORBIDs the
+`.l9/org-birth-profile.yaml` and resolved at birth by the organization's own
+`ops/repo-class-profile.js`. The `non_constellation_python` class FORBIDs the
 legacy organization-CI distribution set, so the organization seeder cannot
 write a file this template then fails closed on.
