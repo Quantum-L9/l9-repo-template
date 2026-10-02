@@ -1,12 +1,12 @@
 <!-- L9_RENDERED
 template: .cursor/rules/templates/fastapi.mdc.template
-template_sha256: 6d2836a1c221ecf61b54dccc757ec204ce58800e2460dd267eba5c3b7b19e0be
+template_sha256: 2d8aa969519235544d607a8784e96c64d3358df4783b3761982779ac2bf5e6a2
 config: plugin-config.yaml
 config_sha256: 1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19
-render_id: 3de0199ad4cfa8766abd2e08530331847933a4695ae497986510f0435b2984f2
+render_id: 53ee9df981fe010c7edc74c37a09c52cc52dac93e4b2cafb658c55bdcdf460c4
 /L9_RENDERED -->
 ---
-description: "l9-repo-template FastAPI conventions — generated from museum cartridge"
+description: "l9-repo-template FastAPI conventions — generated for the reference payload"
 globs: ["src/**/*.py"]
 alwaysApply: false
 ---
@@ -21,7 +21,6 @@ alwaysApply: false
 - Prefer `APIRouter` with explicit `prefix` and `tags` as the app grows.
 - Keep business logic out of route handlers; delegate to modules.
 - Keep `GET /v1/health` (or `/healthz`) cheap and unauthenticated.
-- This is **not** a Gate worker — do not require `GATE_URL` or constellation-node-sdk.
 
 ## Hygiene
 

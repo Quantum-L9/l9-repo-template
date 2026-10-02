@@ -40,15 +40,26 @@ ACTIVE_LAW = (
     "scripts/repo_hygiene_audit.py",
     ".cursor/rules/templates/l9-python-repo.mdc.template",
     ".cursor/rules/templates/l9-agents.mdc.template",
+    ".cursor/rules/templates/fastapi.mdc.template",
     ".cursor/rules/l9-python-repo.mdc",
     ".cursor/rules/l9-agents.mdc",
+    ".cursor/rules/fastapi.mdc",
+    "llms.txt",
+    "docs/LIFECYCLE.md",
 )
 
+# Matched case-insensitively. Retired sibling routing, the museum identity, and
+# product-kind-specific factory law (a rule telling a born product whether it is
+# or is not a Gate worker, or which SDK it must not depend on) must not return.
 RETIRED_SIBLING_TERMS = (
     "L9-Node-Template",
     "Constellation.PackageTemplate",
     "quantum-l9-python-museum",
+    "museum",
     "sibling template",
+    "GATE_URL",
+    "constellation-node-sdk",
+    "not a Gate worker",
 )
 
 # Surfaces the museum rejected as "wrong product". A generic factory must not
@@ -77,9 +88,11 @@ def test_factory_identity_docs() -> None:
 
 @pytest.mark.parametrize("rel", ACTIVE_LAW)
 def test_active_law_does_not_delegate_to_retired_siblings(rel: str) -> None:
-    text = (REPO / rel).read_text(encoding="utf-8")
+    text = (REPO / rel).read_text(encoding="utf-8").lower()
     for term in RETIRED_SIBLING_TERMS:
-        assert term not in text, f"{rel} still carries retired sibling-template term {term!r}"
+        assert term.lower() not in text, (
+            f"{rel} still carries retired sibling-template or product-kind-specific term {term!r}"
+        )
 
 
 def test_product_kind_is_declared_upstream_not_inferred() -> None:
