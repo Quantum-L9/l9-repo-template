@@ -2,28 +2,66 @@ schema: l9.architecture-spec/v1
 metadata:
   repository: Quantum-L9/l9-repo-template
   status: authoritative
-  role: non-constellation-python-template
+  role: l9-repo-birth-factory
 identity:
-  role: quantum-l9-python-museum
+  role: l9-repo-birth-factory
   description: >
-    Thin Quantum-L9 Python GitHub Template for runtimes, side projects, and
-    experiments outside Constellation. Does not own Constellation nodes or
-    constellation_* dependency birth.
-sibling_templates:
-  nodes: Quantum-L9/L9-Node-Template
-  constellation_deps: Quantum-L9/Constellation.PackageTemplate
+    Generic L9 repository birth factory. Owns HOW an L9 repository is born:
+    deterministic assembly, chassis application, compiled-payload production
+    and verification, birth provenance, lifecycle orchestration, local
+    pre-publication validation, publication of the sealed root, invocation of
+    organization-owned bootstrap, and remote attestation. It does not own WHAT
+    semantic product is being born.
+product_semantics:
+  position: upstream_input
+  rule: >
+    ProductTopology, ProductManifest, ProductKind and node/dependency archetype
+    semantics are owned upstream (Quantum-L9/.github semantics/ and the product
+    semantic owner) and arrive as resolved inputs. This repository never infers
+    ProductKind from repository shape, package contents, SDK presence, Gate
+    presence, repo class, or template ancestry.
+  owner: Quantum-L9/.github
+  references:
+    - semantics/product_kinds.yaml
+    - semantics/node_archetypes.yaml
+    - semantics/product_topology.schema.yaml
+    - semantics/product_manifest.schema.yaml
+reference_payload:
+  description: >
+    The Python/FastAPI content under src/, tests/, Dockerfile, docker-compose
+    and observability/ is a reference/example product payload. It demonstrates
+    the chassis; it is not factory law and does not constrain the product kinds
+    the factory can birth.
+  ownership_contract: scripts/birth-runner/payload-ownership.yaml
 boundaries:
   owns:
-    - generic Python package scaffold under src/
-    - Repo.mk product force-multipliers
-    - optional local observability compose
+    - deterministic repository assembly and template/chassis application
+    - compiled birth-payload production and verification (l9.birth-payload/v1)
+    - additive versus authoritative payload application
+    - repository birth provenance and lifecycle orchestration
+    - local pre-publication validation
+    - repository creation, root publication and remote birth attestation
+    - invocation of organization-owned bootstrap capabilities
+    - Repo.mk product force-multipliers for the reference payload
   does_not_own:
-    - Constellation node birth / Gate routing / TransportPacket handlers
-    - constellation_* dependency package factory
+    - ProductTopology / ProductManifest / ProductKind / archetype semantics
+    - domain architecture, domain code generation, semantic compilation
+    - organization governance policy and repo-class taxonomy (Quantum-L9/.github)
+    - CI execution semantics, Gate semantics, SDK semantics, provider selection
     - Cursor-Governance control plane implementation
     - organization CI distribution, targeting, versioning, or enforcement
+adapter_boundary:
+  status: not_implemented
+  rule: >
+    A future birthing adapter turns resolved product semantics into a birth
+    request. It is not part of this repository today; this file only names the
+    boundary so the factory can stay semantically neutral until it exists.
 org_birth_profile:
   class: non_constellation_python
+  meaning: >
+    Current organization birth/distribution class of this repository under the
+    presently admitted Quantum-L9/.github repo-class taxonomy. It is not a
+    ProductKind and does not describe the products this factory births.
   authority: Quantum-L9/.github
   contract: policies/repo-classes.yml
   marker: .l9/org-birth-profile.yaml

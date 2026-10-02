@@ -20,6 +20,19 @@ ENGINE_MODULE = ROOT / "scripts" / "birth-runner" / "new_repo.py"
 LEGACY_MODULE = ROOT / "scripts" / "birth-runner" / "new_repo_legacy.py"
 WORKFLOW = ROOT / ".github" / "workflows" / "repo-birth-dispatch.yml"
 
+# The dispatch workflow is the FACTORY's own birth surface and is deliberately
+# never inherited (new_repo_legacy.TEMPLATE_EXCLUDE_PATHS): a newborn carrying a
+# dispatchable workflow that mints an organisation-Administration token is a
+# second factory, not a product. A born repository DOES carry this test file
+# (`tests/**` is product), so the workflow-content assertions below apply only
+# where the workflow legitimately exists, and its absence in a newborn is
+# asserted as the invariant it is rather than failing as a missing fixture.
+IS_NEWBORN = (ROOT / ".l9" / "birth-receipt.json").is_file()
+factory_only = pytest.mark.skipif(
+    IS_NEWBORN,
+    reason="the birth dispatch workflow is factory-only and is never inherited by a newborn",
+)
+
 # The child-subreaper flag and the /proc process table are Linux kernel
 # facilities; the dispatch workflow runs on ubuntu-latest and CI is Linux. On
 # any other platform the engine records the sweep as SKIP and the direct path
@@ -722,6 +735,14 @@ def test_publish_verifies_with_control_git_before_any_privileged_stage(
     assert "product-script" not in (root / ".git" / "config").read_text(encoding="utf-8")
 
 
+def test_the_dispatch_workflow_exists_only_in_the_factory() -> None:
+    if IS_NEWBORN:
+        assert not WORKFLOW.exists(), "a newborn must never inherit the birth dispatch workflow"
+    else:
+        assert WORKFLOW.is_file(), "the factory must carry its own birth dispatch workflow"
+
+
+@factory_only
 def test_workflow_crosses_fresh_runner_before_privilege_and_binds_tools() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "jobs:\n  prepare:" in text
@@ -737,6 +758,7 @@ def test_workflow_crosses_fresh_runner_before_privilege_and_binds_tools() -> Non
     assert 'export PATH="$L9_BIRTH_CONTROL_PATH"' in text
 
 
+@factory_only
 def test_workflow_separates_source_and_publish_authority() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     prepare_text, publish_text = text.split("\n  publish:", 1)
@@ -749,6 +771,7 @@ def test_workflow_separates_source_and_publish_authority() -> None:
     assert "permission-administration: write" in publish_text
 
 
+@factory_only
 def test_workflow_anchors_from_prepare_step_not_later_artifact_read() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "id: prepare_birth" in text
@@ -758,6 +781,7 @@ def test_workflow_anchors_from_prepare_step_not_later_artifact_read() -> None:
     assert "Anchor sealed state outside uploaded artifact" not in text
 
 
+@factory_only
 def test_workflow_run_blocks_take_no_inline_expressions() -> None:
     """Every ``${{ }}`` value reaches a shell through ``env:``, never by splicing."""
     document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
@@ -770,6 +794,7 @@ def test_workflow_run_blocks_take_no_inline_expressions() -> None:
     assert offenders == []
 
 
+@factory_only
 def test_workflow_uses_trusted_venv_and_full_action_pins() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert ".venv/bin/python -I scripts/birth-runner/birth_boundary.py verify" in text

@@ -1,15 +1,17 @@
-# Quantum-L9 Python Repository
+# Quantum-L9 repository birth factory
 
-> Baseline repository chassis for Quantum-L9 projects that are not Constellation
-> nodes or `constellation_*` dependency packages.
+> Generic L9 repository birth factory. This repository owns how an L9
+> repository is born: assembly, compiled-payload verification, birth
+> provenance, local validation, publication of the sealed root, and remote
+> attestation. It does not own what semantic product is born.
 
 ## Authority
 
 - [AGENTS.md](AGENTS.md): cross-agent repository operating law
 - [CLAUDE.md](CLAUDE.md): Claude-specific overlay; never replaces AGENTS.md
-- [.l9/architecture.yaml](.l9/architecture.yaml): authoritative product boundary
-- [.l9/ownership.yaml](.l9/ownership.yaml): ownership and sibling boundaries
-- [.l9/org-birth-profile.yaml](.l9/org-birth-profile.yaml): organization capability class
+- [.l9/architecture.yaml](.l9/architecture.yaml): authoritative factory boundary
+- [.l9/ownership.yaml](.l9/ownership.yaml): factory, upstream, and runtime ownership
+- [.l9/org-birth-profile.yaml](.l9/org-birth-profile.yaml): organization birth class (not a ProductKind)
 - [.l9/repo-workflow.json](.l9/repo-workflow.json): repository execution contract
 - [ARCHITECTURE.md](ARCHITECTURE.md): architecture narrative
 
@@ -35,9 +37,14 @@ repository-local workflow caller to compensate for a central CI gap.
 ## Birth and product boundaries
 
 - [docs/ops/REPO_BIRTH.md](docs/ops/REPO_BIRTH.md): one-command birth contract
+- [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md): what the factory decides and what arrives resolved from upstream
 - [scripts/birth-runner/payload-ownership.yaml](scripts/birth-runner/payload-ownership.yaml): authoritative-vs-additive payload ownership
 - [scripts/birth-runner/schemas/birth-payload.schema.json](scripts/birth-runner/schemas/birth-payload.schema.json): compiled `l9.birth-payload/v1` source contract
 
-Use `Quantum-L9/L9-Node-Template` for Constellation nodes and
-`Quantum-L9/Constellation.PackageTemplate` for `constellation_*` dependency
-packages. Do not vendor or fork centrally owned CI or governance implementation.
+Product semantics (ProductTopology, ProductManifest, ProductKind, archetypes)
+are determined upstream by `Quantum-L9/.github` `semantics/` and the product
+semantic owner, and arrive as resolved inputs. The factory never infers
+ProductKind from repository shape, package contents, SDK presence, Gate
+presence, repo class, or template ancestry. The Python/FastAPI content under
+`src/` is a reference payload, not factory law. Do not vendor or fork centrally
+owned CI or governance implementation.

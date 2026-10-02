@@ -1,9 +1,9 @@
-# AGENTS.md — Quantum-L9 non-Constellation Python template
+# AGENTS.md — Quantum-L9 repository birth factory
 
 ## Mission
 
-Generic Quantum-L9 Python GitHub Template for runtimes, side projects, and experiments
-**outside** Constellation. Not a node scaffold. Not a `constellation_*` dep scaffold.
+Generic L9 repository birth factory. This repository owns **how** an L9
+repository is born. It does not own **what** semantic product is being born.
 
 ## Authority contracts
 
@@ -13,23 +13,36 @@ Generic Quantum-L9 Python GitHub Template for runtimes, side projects, and exper
 
 ## Owns
 
-- Example package under `src/` (thin FastAPI hello + optional helpers)
+- Birth engine under `scripts/birth-runner/`: assembly, compiled payload
+  production/verification, provenance, lifecycle, publication, attestation
 - Local verify + Cursor rule drift + optional local obs stack
 - Product Make targets in `Repo.mk`
-- Generic birth runner under `scripts/birth-runner/`
+- Reference example payload under `src/` (thin FastAPI hello + optional helpers)
+
+## Upstream inputs (not owned here)
+
+- Product semantics — ProductTopology, ProductManifest, ProductKind, node and
+  dependency archetypes — are owned by `Quantum-L9/.github` `semantics/` and the
+  product semantic owner. They arrive as resolved inputs.
+- The Python/FastAPI content is a reference payload, not factory law.
+- SDK compatibility of a born product is product-owned.
+- The repository's own org birth class is `non_constellation_python` — an
+  organization birth/distribution class, not a ProductKind.
 
 ## Never
 
-- Become a Constellation node template (`create_node_app`, Gate handlers, TransportPacket routing)
-- Become a `constellation_*` dependency birth factory
-- `engine/`, `chassis/`, `domains/`, Poetry, Sonar, Justfile, golden parallel CI
+- Infer ProductKind from repository shape, package contents, SDK presence, Gate
+  presence, repo class, or template ancestry
+- Implement or simulate the birthing adapter, a ProductTopology/ProductManifest
+  loader, or a semantic compiler here
+- Maintain an independent copy of organization repo-class semantics
 - Adding repository-local CI orchestration — CI execution semantics belong to l9-ci-core
 - Hand-editing generated `.cursor/rules/*.mdc`
 - Copying Cursor-Governance Makefile/ops into this repo
 - Requiring `make obs-up` for verify/CI
 - Editing root `Makefile` by hand — must match `tools/l9_repo/Makefile.template`
 
-## Sibling templates
+## When to use
 
 See [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md).
 

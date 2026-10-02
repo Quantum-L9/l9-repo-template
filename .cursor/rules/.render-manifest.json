@@ -1,43 +1,43 @@
 {
   "config": "plugin-config.yaml",
-  "config_sha256": "60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46",
-  "rendered_at": "2026-08-27T02:04:46.338851+00:00",
+  "config_sha256": "1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19",
+  "rendered_at": "2026-10-02T02:54:42.805510+00:00",
   "renderer": "scripts/render_cursor_rules.py",
   "rules": [
     {
       "output": ".cursor/rules/00-global.mdc",
-      "output_sha256": "b847d909034d529eeb4ef092723b17071d04b882b74fa8b66de5352f21aa0eec",
-      "render_id": "ba7c586d3b9c3df6b7ea76ba216e0b107aaae05689d4ca9d1d4842160a40c6d4",
+      "output_sha256": "71bcc990e1935cf9ac66035693e07cff64d7d826d707954d5d15b92527100545",
+      "render_id": "6cffa628294d33dcb9e9d8b4e0a8a00050236f3b01b54fe5fd5e3073ad428d43",
       "template": ".cursor/rules/templates/00-global.mdc.template",
       "template_sha256": "d2d7516dc8afaacc58264108e72221f74ebc6139e948c55a8eaf7b49097c9eb8"
     },
     {
       "output": ".cursor/rules/10-domain-cartridge.mdc",
-      "output_sha256": "472e5bbe443bdd41bf58ce5d84aaaf0fdc9e8d0f89341558a14ca9d2872ee993",
-      "render_id": "e1a4d7833a6bd27b3a6ca75a773435fcf1b339296f0e9d700d950d52599312ce",
+      "output_sha256": "586141dfcac0993d860c8a00c97fa9b90c1d90f2262087fbf2744dbd7696a69c",
+      "render_id": "75418aac9164378fe65f185078a8676a4abc8dd51923cb41ed2d47ce77088173",
       "template": ".cursor/rules/templates/10-domain-cartridge.mdc.template",
       "template_sha256": "9eb1c85dbfa2d44905e1b0cc73c5ab54bb2e0df2b2f4dd386a7e491944406a52"
     },
     {
       "output": ".cursor/rules/fastapi.mdc",
-      "output_sha256": "34ab3fcac1064363a6d67c2fc326e7c2c56558ed8c3a6dc1346f5de6b77b263f",
-      "render_id": "03bf578c098ef2fcba3b7c86bf0bc18b8d2d379e87b7ec00deaa93b96940a1b8",
+      "output_sha256": "4910534bdcd261fae4bcc93b5e791ab10f11f3f329baffb6ebcdc29f00389b9b",
+      "render_id": "53ee9df981fe010c7edc74c37a09c52cc52dac93e4b2cafb658c55bdcdf460c4",
       "template": ".cursor/rules/templates/fastapi.mdc.template",
-      "template_sha256": "6d2836a1c221ecf61b54dccc757ec204ce58800e2460dd267eba5c3b7b19e0be"
+      "template_sha256": "2d8aa969519235544d607a8784e96c64d3358df4783b3761982779ac2bf5e6a2"
     },
     {
       "output": ".cursor/rules/l9-agents.mdc",
-      "output_sha256": "734f2d21e046fcf804eb661a1ba57dedd5b808a39e702f3e9173a2fe1e3bdcd6",
-      "render_id": "c9eb4792f6b193244b08bb2561aff240acb47f89f42ed818512e43f0b9a83be3",
+      "output_sha256": "f6201a79ebaedf6e2b92c6b660d4b6957b70dfded24d33e42872aeda735da354",
+      "render_id": "1f087c9796728827553f96ed247ba6517f35822a2103da49c4a935c9bf837ee1",
       "template": ".cursor/rules/templates/l9-agents.mdc.template",
-      "template_sha256": "e7354122352ae6fd05ca2071664edf9dbe87c55352ba91b6d485001e5f67dd03"
+      "template_sha256": "741e60b0f0073d06e78fc59136e9724f4149c31d8cdd8df700d5b1bd54bd0a24"
     },
     {
       "output": ".cursor/rules/l9-python-repo.mdc",
-      "output_sha256": "7849f95147251142253c4d55689946626f05d24a5a81ef9c5dd500d2d8f6bf19",
-      "render_id": "ef9fef7a001cc00ea9c09afa97549fe803180acd93fb29dff146acd2a908596d",
+      "output_sha256": "7128b75e45a2831b69f7740a56e87d99a456e638e057d32b37193a5e376a07a5",
+      "render_id": "c2662ef6b03cc0056e97d298afd25e51f211cabff151ca630d88a9e227370ea3",
       "template": ".cursor/rules/templates/l9-python-repo.mdc.template",
-      "template_sha256": "a7cf6dc2973684b1f718e9926bd38c895a91e552be4ece627f12fde1f5262a82"
+      "template_sha256": "8b89163866b373e238f0683606cbc81fdb02add7aa52edd3aee85f1fd9d585ce"
     }
   ],
   "schema": "l9.cursor_rules.render_manifest.v1",

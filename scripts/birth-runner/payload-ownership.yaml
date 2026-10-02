@@ -16,13 +16,25 @@
 #
 # Four kinds of surface exist in an assembled newborn:
 #   1. birth / chassis-owned   `chassis` below
-#   2. organization-owned      Quantum-L9/.github, via MATERIALIZE in stage 4
+#   2. organization-owned      Quantum-L9/.github, via MATERIALIZE in stage 4.
+#                              The template copy contributes NONE of these
+#                              (`TEMPLATE_EXCLUDE_ORG_OWNED` in new_repo_legacy.py):
+#                              the org's own seed builder supplies the current
+#                              version, and an explicit product-payload copy
+#                              still wins because MATERIALIZE is missing-only.
 #   3. product-payload-owned   supplied by the payload; always wins
 #   4. optional / template-demo `product` below; absent means remove under an authoritative payload
+#
+# `repository_shape` is evidence for exactly one decision — whether a payload is
+# ADDITIVE or AUTHORITATIVE. It is not a ProductKind, and nothing reads it as one:
+# what semantic product a born repository is comes from its resolved product
+# semantics upstream, never from the shape of its payload.
 #
 # PRECEDENCE: `product` is evaluated first. A path matching both lists is
 # product-owned (`docs/**` is chassis, `docs/examples/**` is product).
 # PATTERN GRAMMAR: exact repository-relative path or one trailing `/**` prefix.
+# This grammar governs THIS contract only; the organization's repo-class policy
+# is interpreted solely by Quantum-L9/.github ops/repo-class-profile.js.
 # COMPLETENESS is enforced by tests/unit/test_new_repo_orchestrator.py.
 {
   "schema": "l9.birth-payload-ownership/v1",

@@ -1,6 +1,6 @@
 plugin_version: "1.2.0"
 repo_name: "l9-repo-template"
-domain: "quantum-l9-python-museum"
+domain: "l9-repo-birth-factory"
 
 protected_paths:
   - "uv.lock"

@@ -1,6 +1,6 @@
 <!-- L9_RENDER_REQUIRES: app_entrypoint -->
 ---
-description: "${repo_name} FastAPI conventions — generated from museum cartridge"
+description: "${repo_name} FastAPI conventions — generated for the reference payload"
 globs: ["src/**/*.py"]
 alwaysApply: false
 ---
@@ -15,7 +15,6 @@ alwaysApply: false
 - Prefer `APIRouter` with explicit `prefix` and `tags` as the app grows.
 - Keep business logic out of route handlers; delegate to modules.
 - Keep `GET /v1/health` (or `/healthz`) cheap and unauthenticated.
-- This is **not** a Gate worker — do not require `GATE_URL` or constellation-node-sdk.
 
 ## Hygiene
 

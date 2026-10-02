@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.2.0] — 2026-10-02
+
+### Changed
+
+- Identity: `l9-repo-template` is the generic L9 repository birth factory. It owns how a repository is born, not what semantic product is born; ProductTopology/ProductManifest/ProductKind/archetype semantics are upstream inputs (`Quantum-L9/.github` `semantics/`). Retired the non-Constellation museum boundary and the L9-Node-Template / Constellation.PackageTemplate sibling delegation.
+- Chassis validation (`inventory_check.py`, `repo_hygiene_audit.py`, generated Cursor rules) is product-kind-neutral: no Node-, engine-, contract-, nodespec-, Gate- or SDK-shaped surface is rejected by shape. Org-CI distribution denial, tools allowlist, and eval/exec/print hygiene are unchanged.
+- Birth stage 4 resolves the organization repo class only through `Quantum-L9/.github` `ops/repo-class-profile.js` from the pinned checkout (`resolve_org_profile`); the Python parser/resolver duplicate is removed. Unknown class and malformed policy fail closed in the owner's code.
+- The template copy no longer contributes `.github/CODEOWNERS`, `.github/dependabot.yml`, or `.github/labels.yml` to a newborn; MATERIALIZE supplies the organization's current versions, and an explicit payload-supplied copy still wins (missing-only).
+- `CLASS` / `--repo-class` remains `non_constellation_python` by default and means organization birth/distribution profile only — never ProductKind. The birth payload contract `l9.birth-payload/v1` and `repository_shape` (payload authority mode only) are unchanged.
+
 ## [Unreleased]
 
 ### Changed

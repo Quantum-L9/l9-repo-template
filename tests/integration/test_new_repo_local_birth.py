@@ -306,16 +306,30 @@ def test_no_agent_session_scaffolding_is_inherited(
 def test_no_template_git_history_is_inherited(
     born: tuple[subprocess.CompletedProcess[str], Path],
 ) -> None:
+    """The only history a newborn has is its own sealed root commit.
+
+    PREPARE seals the validated tree into exactly one root commit before any
+    privilege exists. That commit is the newborn's; nothing from the template's
+    history may sit behind it.
+    """
     _, dest = born
     log = subprocess.run(
-        ["git", "-C", str(dest), "log", "--oneline"],
+        ["git", "-C", str(dest), "rev-list", "--parents", "HEAD"],
         capture_output=True,
         text=True,
         check=False,
     )
-    assert log.returncode != 0 or not log.stdout.strip(), (
-        "a newborn must not carry the template's commit history"
-    )
+    assert log.returncode == 0, log.stderr
+    commits = [line.split() for line in log.stdout.strip().splitlines()]
+    assert len(commits) == 1, "a newborn must not carry the template's commit history"
+    assert len(commits[0]) == 1, "the sealed birth commit must be a root commit"
+    subject = subprocess.run(
+        ["git", "-C", str(dest), "log", "-1", "--format=%s"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    assert subject.startswith("chore: birth Quantum-L9/l9-birth-acceptance from l9-repo-template@")
 
 
 def test_receipt_records_both_provenance_shas(
@@ -335,29 +349,93 @@ def test_receipt_records_both_provenance_shas(
 
 
 def test_org_contract_still_has_the_shape_birth_depends_on() -> None:
-    """Cross-repo contract check, against the real policy file.
+    """Cross-repo contract check, through the organization's own resolver.
 
-    Birth reads this from Quantum-L9/.github. If the class stops forbidding a
-    path that `scripts/inventory_check.py` denies, every repository born from
-    this template gets a pull request it cannot merge — which is exactly what
-    this whole contract was built to stop.
+    Birth resolves the class with Quantum-L9/.github's `ops/repo-class-profile.js`
+    from the real checkout. If the class stops forbidding a path that
+    `scripts/inventory_check.py` denies, every repository born from this
+    template gets a pull request it cannot merge — which is exactly what this
+    whole contract was built to stop.
     """
     assert ORG_SRC is not None
-    doc = new_repo.parse_json_in_yaml(
-        (ORG_SRC / "policies" / "repo-classes.yml").read_text(encoding="utf-8")
-    )
-    profile = new_repo.resolve_profile(doc, new_repo.BIRTH_PROFILE_CLASS)
+    profile = new_repo.resolve_org_profile(ORG_SRC, new_repo.BIRTH_PROFILE_CLASS)
+    assert profile["name"] == "non_constellation_python"
     for denied in (
         ".github/workflows/l9-analysis.yml",
         ".github/workflows/l9-lint-test.yml",
         ".github/workflows/on-org-update.yml",
         ".github/workflows/governance.yml",
     ):
-        assert new_repo.match_pattern(profile["forbid"], denied), (
+        assert denied in profile["forbid"], (
             f"org class {profile['name']} must forbid {denied}; inventory_check.py denies it"
         )
-    assert new_repo.match_pattern(profile["forbid"], ".github/governance/waivers.yaml")
+    assert ".github/governance/**" in profile["forbid"]
     assert profile["seed_categories"], "the class must materialize something"
+
+
+def test_the_org_class_is_consumed_not_reproduced() -> None:
+    """No second interpretation of `policies/repo-classes.yml` exists in Python."""
+    source = Path(new_repo._stages.__file__).read_text(encoding="utf-8")
+    assert "def parse_json_in_yaml" not in source
+    assert "def resolve_profile(" not in source
+    assert "ops', 'repo-class-profile.js'" in source
+    assert not hasattr(new_repo, "parse_json_in_yaml")
+
+
+def test_materialized_org_files_are_the_orgs_current_versions(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """The newborn carries the organization's files, not stale factory copies.
+
+    The template copy contributes none of the MATERIALIZE destinations, so for
+    the current class all three are WRITTEN by the org's own builder from the
+    pinned checkout, byte for byte.
+    """
+    _, dest = born
+    assert ORG_SRC is not None
+    receipt = json.loads(
+        (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+    )
+    expected = {
+        ".github/CODEOWNERS": ORG_SRC / "policies" / "CODEOWNERS",
+        ".github/dependabot.yml": ORG_SRC / ".github" / "dependabot.yml",
+        ".github/labels.yml": ORG_SRC / ".github" / "labels.yml",
+    }
+    assert sorted(receipt["materialized"]) == sorted(expected)
+    for rel, source in expected.items():
+        assert (dest / rel).read_text(encoding="utf-8") == source.read_text(encoding="utf-8"), (
+            f"{rel} in the newborn is not the organization's current file"
+        )
+
+
+def test_the_birth_dispatch_workflow_is_never_inherited(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    _, dest = born
+    assert not (dest / ".github" / "workflows" / "repo-birth-dispatch.yml").exists()
+
+
+def test_an_explicit_payload_override_wins_over_materialize(tmp_path: Path) -> None:
+    """A repository/product-owned copy stays closer than the organization default.
+
+    MATERIALIZE is missing-only. A fragment payload that ships its own
+    `.github/CODEOWNERS` is overlaid in stage 2, so stage 4 keeps it rather
+    than writing the org's version over it.
+    """
+    payload = tmp_path / "payload" / ".github"
+    payload.mkdir(parents=True)
+    (payload / "CODEOWNERS").write_text("* @product-owners\n", encoding="utf-8")
+
+    proc = _birth(tmp_path, "--payload", str(tmp_path / "payload"))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    dest = tmp_path / "work" / "l9-birth-acceptance"
+    assert (dest / ".github" / "CODEOWNERS").read_text(encoding="utf-8") == "* @product-owners\n"
+    receipt = json.loads(
+        (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+    )
+    assert ".github/CODEOWNERS" not in receipt["materialized"]
+    assert ".github/dependabot.yml" in receipt["materialized"]
+    assert ".github/labels.yml" in receipt["materialized"]
 
 
 def test_materialized_org_files_are_in_the_initial_commit(
@@ -407,10 +485,12 @@ def test_a_payload_that_smuggles_org_ci_stops_the_birth(tmp_path: Path) -> None:
 
     proc = _birth(tmp_path, "--payload", str(tmp_path / "payload"))
     assert proc.returncode == 1
-    assert "BIRTH: FAIL" in proc.stdout
+    # A refused stage is reported on stderr as `BIRTH FAIL: <reason>`; no
+    # receipt is rendered for a birth that never reached validation.
+    assert "BIRTH FAIL" in proc.stderr
     assert "violates repo class non_constellation_python" in proc.stderr
-    # Stage 4 stops before stage 6: nothing was created.
-    assert "repository created" not in proc.stdout
+    # Stage 4 stops before stage 7: nothing was created.
+    assert "repository created" not in proc.stdout + proc.stderr
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -718,7 +798,7 @@ def test_a_partial_overlay_is_still_purely_additive(tmp_path: Path) -> None:
 # is deliberately preserved.
 TEMPLATE_PRODUCT_CLAIMS = (
     "l9-repo-template",
-    "l9-python-museum",
+    "l9-repo-birth-factory",
     "l9_example_pkg",
     "obs-optional",
 )
@@ -928,7 +1008,9 @@ class TestCanonicalCIIsRequired:
         the time birth ends, and no code path may set BORN there.
         """
         source = (RUNNER).read_text(encoding="utf-8")
-        remote_tail = source[source.index("if cfg.remote:") :]
+        # Everything from the privileged PUBLISH phase onwards: the only place a
+        # remote exists for a state to be claimed about.
+        remote_tail = source[source.index("def publish(") :]
         assert "canonical_ci.PROVISIONAL if not receipt.failed" in remote_tail
         assert "= canonical_ci.BORN" not in remote_tail, (
             "birth must not assign BORN — it is earned by the first pull request"

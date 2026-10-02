@@ -1,13 +1,15 @@
 schema: l9.ownership-spec/v1
 repository: Quantum-L9/l9-repo-template
-museum_owns:
-  - src/ example package and optional helpers
+factory_owns:
+  - scripts/birth-runner/ birth engine, payload compiler/verifier, provenance, lifecycle
+  - scripts/ verify / hygiene / rule rendering / config reconciliation
   - Repo.mk product targets
-  - scripts/ verify / birth-runner / hygiene
-  - observability/ optional local compose
-deferred_to_siblings:
-  constellation_nodes: Quantum-L9/L9-Node-Template
-  constellation_birth_deps: Quantum-L9/Constellation.PackageTemplate
+  - src/ reference example payload and optional helpers
+  - observability/ optional local compose (reference payload)
+upstream_owns:
+  product_semantics: Quantum-L9/.github semantics/ (ProductTopology, ProductManifest, ProductKind, archetypes)
+  product_meaning: the product semantic owner of each born repository
+  org_repo_class_taxonomy: Quantum-L9/.github policies/repo-classes.yml + ops/repo-class-profile.js
 core_runtime_owns:
   - tools/l9_repo/ (vendored)
   - .l9/repo-workflow.json contract shape
