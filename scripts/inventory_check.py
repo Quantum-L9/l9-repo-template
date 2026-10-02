@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Fail closed if template inventory invariants are violated."""
+"""Fail closed if repository chassis inventory invariants are violated.
+
+This checker describes the CHASSIS, not the product. It never classifies the
+product kind of the repository it runs in: a Node, a Dependency, an engine, a
+contract library or a Gate-routed worker are all legitimate products of the
+birth factory, and their surfaces are not denied here merely by shape. Product
+kind is owned upstream (Quantum-L9/.github semantics/) and arrives resolved.
+
+What IS denied: organization CI distribution surfaces (CI execution belongs to
+l9-ci-core; targeting to the central control plane), a second task runner, and
+duplicated chassis configuration.
+"""
 
 from __future__ import annotations
 
@@ -11,22 +22,11 @@ from pathlib import Path
 # Env override exists so tests can run the checker against a fixture tree.
 ROOT = Path(os.environ.get("L9_INVENTORY_ROOT") or Path(__file__).resolve().parents[1])
 
-DENY_DIRS = (
-    "engine",
-    "chassis",
-    "domains",
-    "client",
-    "database",
-    "deploy",
-    "example_service",
-    "contracts",
-)
-
+# Chassis hygiene only: a second task runner beside `make`, and a sample file
+# superseded by the activated root configuration.
 DENY_FILES = (
     "Justfile",
     "justfile",
-    "nodespec.yaml",
-    "spec.yaml",
     "docs/examples/coderabbit.yaml",
 )
 
@@ -127,9 +127,11 @@ REQUIRED = (
     ".github/labels.yml",
 )
 
+# Agent/security discovery wiring: the authority surfaces must point at each
+# other. These anchors describe the chassis identity, never a product kind.
 MENTION_CHECKS = (
-    ("README.md", ("L9-Node-Template", "Constellation.PackageTemplate", "outside")),
-    ("docs/WHEN_TO_USE.md", ("L9-Node-Template", "Constellation.PackageTemplate")),
+    ("README.md", ("repository birth factory", "docs/ops/REPO_BIRTH.md")),
+    ("docs/WHEN_TO_USE.md", ("repository birth factory", "ProductKind")),
     ("AGENTS.md", (".l9/architecture.yaml", ".l9/ownership.yaml")),
     ("CLAUDE.md", ("AGENTS.md", ".l9/architecture.yaml", ".l9/org-birth-profile.yaml")),
     ("llms.txt", ("AGENTS.md", "CLAUDE.md", ".l9/architecture.yaml", "bootstrap.sh")),
@@ -141,9 +143,6 @@ MENTION_CHECKS = (
 
 def main() -> int:
     errors: list[str] = []
-    for name in DENY_DIRS:
-        if (ROOT / name).exists():
-            errors.append(f"deny directory present: {name}/")
     for name in DENY_FILES:
         if (ROOT / name).exists():
             errors.append(f"deny file present: {name}")
@@ -166,21 +165,6 @@ def main() -> int:
     for rel in REQUIRED:
         if not (ROOT / rel).is_file():
             errors.append(f"missing required file: {rel}")
-    if (ROOT / "src" / "l9_example_pkg" / "handlers.py").exists():
-        errors.append("handlers.py must not exist (use L9-Node-Template for nodes)")
-    pyproject_path = ROOT / "pyproject.toml"
-    if not pyproject_path.is_file():
-        pyproject = ""
-    else:
-        pyproject = pyproject_path.read_text(encoding="utf-8")
-    if "constellation-node-sdk" in pyproject:
-        errors.append("pyproject.toml must not require constellation-node-sdk")
-    for path in (ROOT / "src").rglob("*.py"):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if "create_node_app" in text or "register_handler" in text:
-            errors.append(
-                f"Constellation node API in {path.relative_to(ROOT)} — use L9-Node-Template"
-            )
     license_path = ROOT / "LICENSE"
     if license_path.is_file():
         text = license_path.read_text(encoding="utf-8")

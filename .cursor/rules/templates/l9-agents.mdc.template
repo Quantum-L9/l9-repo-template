@@ -27,9 +27,9 @@ ${high_risk_commands_bullets}
 
 ${ci_gates_bullets}
 
-## Museum Laws
+## Chassis Laws
 
 - Package: `${package_name}`
-- Non-Constellation Python only — nodes and constellation_* deps use sibling templates.
+- Product kind is declared by the product's resolved semantics upstream; never infer it from repository shape.
 - Do not add repository-local CI orchestration — CI execution semantics belong to l9-ci-core; organization CI control belongs to l9-ci-control-plane.
 - Test isolation pattern: `${test_isolation_pattern}`

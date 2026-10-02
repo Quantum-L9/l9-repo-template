@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/fastapi.mdc.template
 template_sha256: 6d2836a1c221ecf61b54dccc757ec204ce58800e2460dd267eba5c3b7b19e0be
 config: plugin-config.yaml
-config_sha256: 60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46
-render_id: 03bf578c098ef2fcba3b7c86bf0bc18b8d2d379e87b7ec00deaa93b96940a1b8
+config_sha256: 1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19
+render_id: 3de0199ad4cfa8766abd2e08530331847933a4695ae497986510f0435b2984f2
 /L9_RENDERED -->
 ---
 description: "l9-repo-template FastAPI conventions — generated from museum cartridge"
 globs: ["src/**/*.py"]
 alwaysApply: false
 ---
-<!-- L9_META role: cursor_rule tags: [fastapi, generated, quantum-l9-python-museum] version: 1.2.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [fastapi, generated, l9-repo-birth-factory] version: 1.2.0 /L9_META -->
 
 # FastAPI Conventions — l9-repo-template
 
