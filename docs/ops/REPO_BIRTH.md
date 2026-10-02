@@ -529,6 +529,61 @@ make birth-payload-check PAYLOAD_CONTRACT=/tmp/product.payload.json \
 Same checks stage 1 runs, as a standalone report — `--json` for a machine
 reader.
 
+## The product-to-birth adapter boundary
+
+Upstream, a product is a ProductTopology, compiled into a resolved
+ProductManifest and lowered into a realized source tree; downstream, this
+factory births a repository from that tree under a digest-bound
+`l9.repo-birth-contract/v1`. `scripts/birth-runner/l9_birth_adapter.py` is the
+boundary between the two, and it answers one question only:
+
+> Is this exact, already-resolved product realization admissible as input to
+> this exact repository birth, and are the product, source, birth-contract,
+> factory and manifest coordinates mutually consistent?
+
+```bash
+python3 scripts/birth-runner/l9_birth_adapter.py \
+  --binding /tmp/birth-handoff/binding.json \
+  --manifest /tmp/birth-handoff/product-manifest.json \
+  --birth-contract /tmp/birth-handoff/birth-contract.json \
+  --payload /tmp/birth-handoff/birth-payload.json      # optional
+```
+
+The binding is `l9.product-birth-binding/v1`
+(`scripts/birth-runner/schemas/l9-product-birth-binding.schema.json`): the
+product id and kind the manifest resolves, the manifest and topology refs and
+digests the manifest carries, the realized source snapshot, the birth contract
+and compiled payload by digest, and the factory revision. It is a **closed**
+shape. A `repository_shape`, a `kind_hint`, an inferred anything is malformed
+input, not a tolerated extra.
+
+| Proves | How |
+|--------|-----|
+| manifest schema identity is admitted | `schema == l9.product-manifest/v1`, and only that is reported against another schema |
+| manifest is resolved enough for birth | every block `product_manifest.schema.yaml` requires is present; `unresolved` is **empty** |
+| ProductKind is explicit upstream | `product.kind` and `product.archetype_ref` are explicit tokens; the binding may restate them, never supply them |
+| coordinates are consistent | binding digest == `manifest_digest`; binding topology == `source_topology`; birth contract binds the same clean source, the same payload digest, the same factory revision; the payload, when given, passes the factory's own `l9.birth-payload/v1` gate and names the same snapshot |
+| no repository-shape inference | the adapter never opens a source tree, spawns git, or calls the ownership-contract shape readers (a static unit test holds it to this) |
+
+Two reading rules keep it an adapter rather than a second compiler:
+
+- **The semantic digest is compared, never recomputed.** `manifest_digest`'s
+  canonicalization belongs to the semantic compiler. Birth-contract and
+  payload digests are the factory's artifact convention, `sha256:` over the
+  bytes as written, which the governance handoff packager already uses.
+- **Unresolved fails closed.** Upstream allows soft gaps to remain in a
+  gate-passing manifest but defines no per-entry severity this boundary could
+  read without interpreting semantics it does not own. Every unresolved entry
+  is therefore hard here. A later upstream revision that marks entries
+  non-material is a later adapter stage, not a guess today.
+
+The output (`l9.product-birth-binding-result/v1`) is evidence for the factory,
+authority class `evidence`: admissible or not, the exact validated coordinates
+when it is, and every deterministic failure code when it is not. It grants
+nothing — not mutation, governance, semantic, or release authority — and
+nothing in `new_repo.py` or `birth_frontdoor.py` calls it yet. Wiring it into
+orchestration is a separate stage.
+
 ## The org birth profile
 
 Stage 4 resolves the class (`CLASS`, default `non_constellation_python`) by

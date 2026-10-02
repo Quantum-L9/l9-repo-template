@@ -49,6 +49,8 @@ active surface delegates a product kind to them.
 | `scripts/birth-runner/verify_birth_payload.py` | Reproduces a compiled payload against its source before assembly | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/schemas/birth-payload.schema.json` | Published `l9.birth-payload/v1` contract | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/birth_frontdoor.py` | Remote birth front door (`make birth`) | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/l9_birth_adapter.py` | Product-to-birth adapter boundary: binds an already-resolved ProductManifest + realized source + `l9.repo-birth-contract/v1` to factory coordinates; evidence only, not wired into orchestration | ALREADY_HAVE | this repo |
+| `scripts/birth-runner/schemas/l9-product-birth-binding.schema.json` | Published `l9.product-birth-binding/v1` contract (closed shape; no repository-shape or kind-hint input) | ALREADY_HAVE | this repo |
 | `scripts/birth-runner/0*.sh` | Staged debugging surfaces | ALREADY_HAVE | this repo |
 | `.l9/org-birth-profile.yaml` | Declares the org repo class (an organization birth class, not a ProductKind); carries the immutable `birth:` record in a newborn | ALREADY_HAVE | Quantum-L9/.github contract |
 | `src/*/settings|errors|health|retry.py` | Reference-payload helpers | REFERENCE_PAYLOAD | this repo |
@@ -59,7 +61,7 @@ active surface delegates a product kind to them.
 | Justfile | — | REJECT | dual runner beside `make` |
 | Fix-B OTel Python package | — | REJECT | compose-only obs |
 | Factory-owned parallel CI | — | REJECT | organization CI control plane owns CI targeting |
-| Birthing adapter / ProductTopology loader / ProductManifest loader / ProductKind inference | — | NOT_HERE | separate future campaign; boundary named in `.l9/architecture.yaml` |
+| Adapter orchestration wiring / ProductTopology loader / semantic compilation / lowering / ProductKind inference | — | NOT_HERE | later adapter stages; the pure binding boundary is `l9_birth_adapter.py`, product semantics stay upstream |
 
 ## Product-kind neutrality
 
