@@ -640,6 +640,67 @@ class TestMalformedBindings:
         assert result.coordinates == {}
 
 
+class TestTheContractSurfaceIsClosed:
+    """What a consumer may route on is enumerable, and what is written to disk
+    is written the one way the factory already writes it."""
+
+    def test_the_rendering_is_the_factory_rendering(self) -> None:
+        """One rendering, one digest: the adapter must not own a second way to
+        turn a document into the bytes a digest covers."""
+        assert adapter.render_document is compiler.render_payload
+
+    def test_an_admissible_rendering_lists_every_coordinate(self, case: Case) -> None:
+        text = case.bind().render()
+        for key in adapter.COORDINATE_KEYS:
+            assert f"  {key:<16} " in text, key
+        assert set(adapter.COORDINATE_KEYS) == set(case.bind().coordinates)
+        assert "ADMISSIBLE" in text
+
+    def test_every_emitted_failure_code_is_published(self, case: Case) -> None:
+        """Every reject path in the matrix above, driven once more, may only
+        emit codes FAILURE_CODES declares — an undeclared code is a contract
+        change nobody announced."""
+        manifest = make_manifest(unresolved=[{"ref": "x"}], manifest_digest="sha256:" + "9" * 64)
+        product = manifest["product"]
+        assert isinstance(product, dict)
+        product["kind"] = "unknown"
+        product["archetype_ref"] = ""
+        contract = make_birth_contract(case.payload, operation="remote_birth")
+        source = contract["source"]
+        assert isinstance(source, dict)
+        source["clean"] = False
+        source["revision"] = "d" * 40
+        factory = contract["factory"]
+        assert isinstance(factory, dict)
+        factory["revision"] = "e" * 40
+        payload_ref = contract["payload"]
+        assert isinstance(payload_ref, dict)
+        payload_ref["digest"] = "sha256:" + "f" * 64
+        drifted = adapter.Artifact.from_document(dict(case.payload.document, mode="authoritative"))
+        case.binding = make_binding(
+            case.manifest_doc,
+            case.contract,
+            case.payload,
+            topology={"ref": "other", "digest": "other"},
+            product={"id": "l9.product/other", "kind": "node"},
+        )
+        result = case.bind(
+            manifest=adapter.Artifact.from_document(manifest),
+            birth_contract=adapter.Artifact.from_document(contract),
+            payload=drifted,
+        )
+        emitted = set(codes(result))
+        assert emitted <= adapter.FAILURE_CODES, emitted - adapter.FAILURE_CODES
+        assert len(emitted) >= 8
+
+    def test_every_published_failure_code_is_reachable(self) -> None:
+        """The inverse: a code nothing can emit is a promise nobody keeps."""
+        source = ADAPTER_MODULE.read_text(encoding="utf-8")
+        checks = source.split("# The checks", 1)[1]
+        for code in adapter.FAILURE_CODES:
+            assert f'"{code}"' in checks, code
+
+
 class TestEveryFailureIsReported:
     def test_independent_failures_accumulate(self, case: Case) -> None:
         manifest = make_manifest(unresolved=[{"ref": "x"}], manifest_digest="sha256:" + "9" * 64)

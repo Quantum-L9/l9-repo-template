@@ -158,6 +158,45 @@ BINDING_SECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Every coordinate an admissible result restates, in the order it is rendered.
+COORDINATE_KEYS = (
+    "product",
+    "manifest",
+    "topology",
+    "source",
+    "birth_contract",
+    "payload",
+    "factory",
+)
+
+# Every reason this adapter can refuse a binding. Closed, like the binding
+# itself: a consumer that routes on these codes must be able to enumerate them,
+# and a code emitted but not listed here is a contract change nobody declared.
+FAILURE_CODES = frozenset(
+    {
+        "BINDING_MALFORMED",
+        "MANIFEST_SCHEMA_IDENTITY",
+        "MANIFEST_INCOMPLETE",
+        "MANIFEST_UNRESOLVED",
+        "MANIFEST_DIGEST_MISMATCH",
+        "PRODUCT_KIND_NOT_EXPLICIT",
+        "PRODUCT_ARCHETYPE_NOT_EXPLICIT",
+        "PRODUCT_COORDINATE_MISMATCH",
+        "TOPOLOGY_COORDINATE_MISMATCH",
+        "BIRTH_CONTRACT_SCHEMA_IDENTITY",
+        "BIRTH_CONTRACT_DIGEST_MISMATCH",
+        "BIRTH_CONTRACT_MALFORMED",
+        "BIRTH_CONTRACT_SOURCE_NOT_CLEAN",
+        "BIRTH_CONTRACT_SOURCE_MISMATCH",
+        "BIRTH_CONTRACT_PAYLOAD_MISMATCH",
+        "FACTORY_COORDINATE_MISMATCH",
+        "PAYLOAD_MALFORMED",
+        "PAYLOAD_DIGEST_MISMATCH",
+        "PAYLOAD_SOURCE_MISMATCH",
+    }
+)
+
+
 class AdapterInputError(RuntimeError):
     """An artifact could not be read at all. Distinct from an inadmissible one."""
 
@@ -172,9 +211,10 @@ def artifact_digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def render_document(document: Mapping[str, object]) -> str:
-    """The one rendering the factory and the handoff packager write to disk."""
-    return json.dumps(document, indent=2, sort_keys=True) + "\n"
+# The one rendering the factory and the governance handoff packager write to
+# disk. The compiler already owns it; a second definition here would be a second
+# place for the on-disk bytes — and so the artifact digest — to drift from.
+render_document = compiler.render_payload
 
 
 @dataclass(frozen=True)
@@ -239,7 +279,7 @@ class BindingResult:
     def render(self) -> str:
         lines = ["", "L9 PRODUCT BIRTH BINDING"]
         if self.admissible:
-            for key in ("product", "manifest", "topology", "source", "birth_contract", "factory"):
+            for key in COORDINATE_KEYS:
                 lines.append(f"  {key:<16} {json.dumps(self.coordinates.get(key), sort_keys=True)}")
         for failure in self.failures:
             lines.append(f"  {failure.code:<36} {failure.detail}")
