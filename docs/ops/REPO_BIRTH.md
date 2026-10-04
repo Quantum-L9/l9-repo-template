@@ -569,13 +569,45 @@ all files.
 
 `MATERIALIZE` is missing-only, and it runs after the template copy. So the
 template copy in stage 2 deliberately contributes **none** of the organization's
-MATERIALIZE destinations — `.github/CODEOWNERS`, `.github/dependabot.yml`,
-`.github/labels.yml` (`TEMPLATE_EXCLUDE_ORG_OWNED`). This repository keeps its
-own copies for itself; a newborn receives the organization's *current* files
-from the pinned checkout, never a stale factory copy that missing-only would
-otherwise have kept. A product payload that explicitly ships one of those paths
-is overlaid in stage 2 and still wins — the repository/product override stays
-closer than the organization default, exactly as the seeder intends.
+MATERIALIZE destinations for the class being born. Which paths those are is the
+organization's answer, not a list kept here: stage 2 resolves the class first
+(`resolve_org_authority`) and asks the organization's own `build-seed-payload.js`
+what the profile intends to write (`org_materialize_destinations`), then
+withholds exactly those paths from the template copy. For
+`non_constellation_python` that is `.github/CODEOWNERS`, `.github/dependabot.yml`
+and `.github/labels.yml`; for `default` it also includes the community-health
+files `CONTRIBUTING.md` and `SECURITY.md`, of which this repository carries its
+own, different copies. A static three-path list would have let those stale
+copies outrank the organization's for every class but the factory's own. The
+receipt names the withheld paths (`org-owned paths withheld`). A newborn
+receives the organization's *current* files from the pinned checkout, never a
+stale factory copy that missing-only would otherwise have kept. A product
+payload that explicitly ships one of those paths is overlaid in stage 2 and
+still wins — the repository/product override stays closer than the organization
+default, exactly as the seeder intends.
+
+Stage 2 and stage 4 read **one** resolution. The same `OrgAuthority` (SHA,
+checkout, profile, MATERIALIZE set) that decided what to withhold decides what
+to write; resolving twice could bind the two halves to two different answers.
+
+### Offline authority is proven, not assumed
+
+`--org-profile-src` points birth at a local `Quantum-L9/.github` checkout and
+records its HEAD as `org_policy_sha`. The resolver, the policy and the seed
+builder are then executed out of that working tree, so the record is true only
+if the tree *is* that commit. Birth therefore refuses, before anything is
+assembled, a source that:
+
+- is not a git checkout, or is not the root of one;
+- has no 40-hex `HEAD`;
+- has an `origin` that is not `Quantum-L9/.github` (a tree that merely carries
+  the right paths is not the organization's repository);
+- is dirty — a modified policy, resolver or builder, or any untracked file.
+
+A clean detached `HEAD` passes: that is exactly what `_org_checkout` produces
+for a remote birth, and detachment says nothing about the bytes. Offline birth
+is preserved; what is removed is the ability to record one SHA while executing
+another.
 
 See `docs/REPO_BIRTH_PROFILES.md` in `Quantum-L9/.github` for the contract.
 
@@ -824,8 +856,8 @@ automatic: `.github/**` is `chassis`, so the directory is carried into every
 newborn, and the first version of this workflow was carried with it — verified
 on a real local birth. `TEMPLATE_EXCLUDE_PATHS` in the birth stages excludes
 this one file from the template copy, alongside the top-level
-session-scaffolding exclusion and the org-owned MATERIALIZE destinations
-(`TEMPLATE_EXCLUDE_ORG_OWNED`) it sits beside. A repository born from this
+session-scaffolding exclusion and the profile-derived org-owned MATERIALIZE
+destinations (`org_materialize_destinations`) it sits beside. A repository born from this
 template is a product, not a second factory: inheriting a dispatchable workflow
 that mints an organisation-Administration token would be inert only for as long
 as nobody created a `repo-birth` environment there, and not inert at all had

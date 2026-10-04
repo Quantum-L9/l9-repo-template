@@ -46,6 +46,7 @@ ACTIVE_LAW = (
     ".cursor/rules/fastapi.mdc",
     "llms.txt",
     "docs/LIFECYCLE.md",
+    "docs/ops/SECRET_ROTATION_CHECKLIST.md",
 )
 
 # Matched case-insensitively. Retired sibling routing, the museum identity, and
