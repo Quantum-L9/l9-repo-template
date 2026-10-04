@@ -209,21 +209,30 @@ TEMPLATE_EXCLUDE_TOP_LEVEL = frozenset({".claude", ".mcp.json"})
 # A repository born from this template is a product, not a second factory.
 TEMPLATE_EXCLUDE_PATHS = frozenset({Path(".github/workflows/repo-birth-dispatch.yml")})
 
-# Organization-owned files this factory carries FOR ITSELF. They are MATERIALIZE
-# destinations of the Quantum-L9/.github seed payload, and MATERIALIZE is
-# missing-only: whatever is already in the tree wins. The template copy runs in
-# stage 2, MATERIALIZE in stage 4, so a template copy of these files would
-# silently shadow the organization's CURRENT version with this repository's
-# stale one. The template copy therefore contributes none of them; the org's
-# own builder supplies them when the class says so, and a product payload that
-# explicitly ships one (stage 2 overlay) still wins, exactly as the seeder's
-# missing-only semantics intend.
-TEMPLATE_EXCLUDE_ORG_OWNED = frozenset(
-    {
-        Path(".github/CODEOWNERS"),
-        Path(".github/dependabot.yml"),
-        Path(".github/labels.yml"),
-    }
+# Organization-owned files this factory carries FOR ITSELF — `.github/CODEOWNERS`,
+# `.github/dependabot.yml`, `CONTRIBUTING.md`, `SECURITY.md`, ... — are MATERIALIZE
+# destinations of the Quantum-L9/.github seed payload for one class or another,
+# and MATERIALIZE is missing-only: whatever is already in the tree wins. The
+# template copy runs in stage 2, MATERIALIZE in stage 4, so a template copy of
+# such a file would silently shadow the organization's CURRENT version with this
+# repository's stale one.
+#
+# WHICH paths those are is not this factory's to say. A static list tailored to
+# the factory's own class (`non_constellation_python` materializes three files)
+# is wrong for every other admitted class: `default` materializes the
+# community-health files too, and the factory carries different copies of two of
+# them. So the set is derived per birth, from the ORGANIZATION's own seed
+# builder run against the resolved profile (`org_materialize_destinations`),
+# and the template copy contributes none of those destinations. A product
+# payload that explicitly ships one (stage 2 overlay) still wins, exactly as the
+# seeder's missing-only semantics intend.
+#
+# How an offline org authority proves it IS Quantum-L9/.github: its `origin`
+# names that repository. The payload compiler's remote regex cannot be reused
+# here — its slug grammar requires a repository name to start with an
+# alphanumeric, and `.github` is the one repository this check exists for.
+ORG_REMOTE_RE = re.compile(
+    r"[:/]([A-Za-z0-9][A-Za-z0-9._-]*)/(\.?[A-Za-z0-9][A-Za-z0-9._-]*?)(?:\.git)?/?$"
 )
 
 REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
@@ -580,23 +589,20 @@ def _is_session_scaffolding(rel: Path) -> bool:
     ) or rel in TEMPLATE_EXCLUDE_PATHS
 
 
-def _is_org_owned_copy(rel: Path) -> bool:
-    """A template copy of an organization MATERIALIZE destination.
+def copy_tree(src: Path, dest: Path, *, org_owned: frozenset[Path] = frozenset()) -> int:
+    """Copy the template working tree, skipping git, machine state, session
+    scaffolding, and the factory's own copies of organization-owned files.
 
-    Excluded from the TEMPLATE copy only. A product payload that ships one of
-    these paths overlays it in stage 2 and MATERIALIZE then keeps it: the
+    `org_owned` is the set of MATERIALIZE destinations the resolved organization
+    profile intends to write for THIS birth (`org_materialize_destinations`).
+    They are excluded from the TEMPLATE copy only. A product payload that ships
+    one of them overlays it in stage 2 and MATERIALIZE then keeps it: the
     explicit repository/product override stays closer than the org default.
     """
-    return rel in TEMPLATE_EXCLUDE_ORG_OWNED
-
-
-def copy_tree(src: Path, dest: Path) -> int:
-    """Copy the template working tree, skipping git, machine state, session
-    scaffolding, and the factory's own copies of organization-owned files."""
     copied = 0
     for path in src.rglob("*"):
         rel = path.relative_to(src)
-        if _is_machine_state(rel) or _is_session_scaffolding(rel) or _is_org_owned_copy(rel):
+        if _is_machine_state(rel) or _is_session_scaffolding(rel) or rel in org_owned:
             continue
         target = dest / rel
         if path.is_dir():
@@ -755,6 +761,24 @@ def _remote_text(slug: str, path: str) -> str | None:
         return None
 
 
+@dataclass(frozen=True)
+class OrgAuthority:
+    """One Quantum-L9/.github checkout at one proven SHA, resolved once per birth.
+
+    Stage 2 needs it to know which template paths to withhold, stage 4 to
+    resolve the class and build the seed payload. Resolving twice could bind the
+    two halves to two different answers, so the first resolution is cached on
+    the config and every later stage reads the same object.
+    """
+
+    sha: str
+    checkout: Path
+    profile: dict
+    # The destinations the organization's own builder would write for this
+    # class — what the template copy must leave to MATERIALIZE.
+    materialize_paths: frozenset[Path]
+
+
 @dataclass
 class BirthConfig:
     org: str
@@ -777,6 +801,9 @@ class BirthConfig:
     # classification a birth acts on is one that was verified, not one that was
     # guessed while files were already being copied.
     verified_payload_mode: str | None = None
+    # Set by the first stage that needs the organization (assembly). See
+    # `resolve_org_authority`.
+    org_authority: OrgAuthority | None = None
 
     @property
     def slug(self) -> str:
@@ -960,8 +987,25 @@ def stage_preflight(cfg: BirthConfig, receipt: BirthReceipt) -> None:
 
 def stage_assemble(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     """Template + identity stamp + optional product payload."""
+    # The organization is resolved BEFORE the first file is copied: which
+    # template paths to withhold is a function of the class being born, and
+    # the class is the organization's to resolve. Stage 4 reuses this exact
+    # resolution rather than making a second one.
+    authority = resolve_org_authority(cfg)
+    receipt.record(
+        "assemble.org_owned",
+        "org-owned paths withheld",
+        "PASS",
+        f"{len(authority.materialize_paths)} MATERIALIZE destination(s) of class "
+        f"{authority.profile['name']} left to the organization"
+        + (
+            f": {', '.join(sorted(p.as_posix() for p in authority.materialize_paths))}"
+            if authority.materialize_paths
+            else ""
+        ),
+    )
     cfg.dest.mkdir(parents=True, exist_ok=True)
-    copied = copy_tree(cfg.template_src, cfg.dest)
+    copied = copy_tree(cfg.template_src, cfg.dest, org_owned=authority.materialize_paths)
     receipt.record("assemble.template", "template copied", "PASS", f"{copied} files")
 
     # No `git remote add origin` here. Stage 6 runs `gh repo create --source
@@ -1064,19 +1108,71 @@ def _stamp_description(cfg: BirthConfig) -> None:
         pyproject.write_text(updated, encoding="utf-8")
 
 
+def _local_org_authority_sha(src: Path) -> str:
+    """The SHA a local `--org-profile-src` checkout is PROVEN to be, or a refusal.
+
+    The receipt records `org_policy_sha` and the birth then executes the
+    resolver, the policy, and the seed builder out of this working tree. The
+    record is only true if the tree IS that commit: a clean checkout of
+    Quantum-L9/.github whose HEAD is the SHA recorded. Anything less — a dirty
+    policy, an edited resolver, an extra file, a clone of some other repository
+    with the right paths in it — would execute bytes the provenance does not
+    name, so each of those is a refusal rather than a warning. A detached HEAD
+    is fine: `_org_checkout` produces one, and detached says nothing about the
+    bytes. Offline birth stays possible; it just has to be honest.
+    """
+    if not (src / ORG_PROFILE_PATH).is_file():
+        raise BirthError(f"org profile source has no {ORG_PROFILE_PATH}: {src}")
+    inside = run(["git", "-C", str(src), "rev-parse", "--is-inside-work-tree"], check=False)
+    if (inside.stdout or "").strip() != "true":
+        raise BirthError(
+            f"org profile source is not a git checkout: {src} — provenance records the "
+            f"{ORG_PROFILE_REPO} commit the policy was applied from, and only a clone can prove one"
+        )
+    top = run(["git", "-C", str(src), "rev-parse", "--show-toplevel"], check=False)
+    toplevel = (top.stdout or "").strip()
+    if not toplevel or Path(toplevel).resolve() != src.resolve():
+        raise BirthError(
+            f"org profile source {src} is not the root of its checkout — pass the clone root"
+        )
+    head = git_head(src)
+    if not SHA_RE.match(head):
+        raise BirthError(f"org profile source has no commit to record: {src}")
+    origin = run(["git", "-C", str(src), "remote", "get-url", "origin"], check=False)
+    found = ORG_REMOTE_RE.search((origin.stdout or "").strip()) if origin.returncode == 0 else None
+    slug = f"{found.group(1)}/{found.group(2)}" if found else None
+    if slug is None or slug.lower() != ORG_PROFILE_REPO.lower():
+        raise BirthError(
+            f"org profile source {src} is not a {ORG_PROFILE_REPO} checkout "
+            f"(origin is {slug or 'absent'}) — birth applies the organization's policy "
+            "from the organization's own repository, not from a tree that resembles it"
+        )
+    dirty = [
+        line
+        for line in (
+            run(["git", "-C", str(src), "status", "--porcelain"], check=False).stdout or ""
+        ).splitlines()
+        if line.strip()
+    ]
+    if dirty:
+        shown = ", ".join(line.strip()[:60] for line in dirty[:8])
+        raise BirthError(
+            f"org profile source is dirty ({len(dirty)} path(s)): {shown} — the birth would "
+            f"execute bytes that {head[:12]} does not describe. Commit, stash, or use a clean clone."
+        )
+    return head
+
+
 def _org_policy_sha(cfg: BirthConfig) -> str:
     """The Quantum-L9/.github commit whose repo-class policy this birth applies.
 
-    A local `--org-profile-src` records the SHA of that checkout when it is a
-    git repository, so an offline birth still carries honest provenance rather
-    than a fabricated one. The policy itself is never read here: it is resolved
-    by the organization's own code from the checkout at this SHA.
+    A local `--org-profile-src` records the SHA its checkout is proven to be
+    (`_local_org_authority_sha`), so an offline birth carries honest provenance
+    rather than a fabricated one. The policy itself is never read here: it is
+    resolved by the organization's own code from the checkout at this SHA.
     """
     if cfg.org_profile_src is not None:
-        policy = cfg.org_profile_src / ORG_PROFILE_PATH
-        if not policy.is_file():
-            raise BirthError(f"org profile source has no {ORG_PROFILE_PATH}: {cfg.org_profile_src}")
-        return git_head(cfg.org_profile_src)
+        return _local_org_authority_sha(cfg.org_profile_src)
 
     head = gh_json(["api", f"repos/{ORG_PROFILE_REPO}/commits/HEAD", "--jq", "{sha:.sha}"])
     sha = head.get("sha", "unknown") if isinstance(head, dict) else "unknown"
@@ -1120,25 +1216,12 @@ process.stdout.write(JSON.stringify(buildSeedPayload({ fs, ...opts })));
 """
 
 
-def build_org_payload(checkout: Path, profile: dict, cfg: BirthConfig) -> dict[str, str]:
-    """Ask the organization what this class materializes. Do not guess.
-
-    Runs `ops/build-seed-payload.js` from the pinned checkout, so INHERIT drops
-    and FORBID throws inside the org's own code path — the same one the seeder
-    uses. A FORBID hit surfaces here as a birth failure rather than as a red
-    pull request opened against the newborn a week later.
-    """
+def _run_seed_builder(checkout: Path, opts: dict) -> dict[str, str]:
+    """`ops/build-seed-payload.js` from the pinned checkout, with these options."""
     if shutil.which("node") is None:
         raise BirthError(
             "node not found on PATH — required to run the organization's seed payload builder"
         )
-    opts = {
-        "profile": profile,
-        "hasRootCodeowners": (cfg.dest / "CODEOWNERS").is_file(),
-        "hasPython": (cfg.dest / PYPROJECT).is_file(),
-        "hasPackageJson": (cfg.dest / "package.json").is_file(),
-        "repository": cfg.slug,
-    }
     proc = run(["node", "-e", _PAYLOAD_JS, str(checkout), json.dumps(opts)], check=False)
     if proc.returncode != 0:
         detail = ((proc.stderr or "") + (proc.stdout or "")).strip()
@@ -1150,6 +1233,75 @@ def build_org_payload(checkout: Path, profile: dict, cfg: BirthConfig) -> dict[s
     if not isinstance(payload, dict):
         raise BirthError("seed payload builder returned a non-object payload")
     return payload
+
+
+def build_org_payload(checkout: Path, profile: dict, cfg: BirthConfig) -> dict[str, str]:
+    """Ask the organization what this class materializes. Do not guess.
+
+    Runs `ops/build-seed-payload.js` from the pinned checkout, so INHERIT drops
+    and FORBID throws inside the org's own code path — the same one the seeder
+    uses. A FORBID hit surfaces here as a birth failure rather than as a red
+    pull request opened against the newborn a week later.
+    """
+    return _run_seed_builder(
+        checkout,
+        {
+            "profile": profile,
+            "hasRootCodeowners": (cfg.dest / "CODEOWNERS").is_file(),
+            "hasPython": (cfg.dest / PYPROJECT).is_file(),
+            "hasPackageJson": (cfg.dest / "package.json").is_file(),
+            "repository": cfg.slug,
+        },
+    )
+
+
+def org_materialize_destinations(checkout: Path, profile: dict, repository: str) -> frozenset[Path]:
+    """Every path the organization intends to MATERIALIZE for this class.
+
+    Asked of the organization's own builder, before a single template file is
+    copied, so the template copy can withhold exactly these and nothing else.
+    `hasRootCodeowners` is false here on purpose: it is the widest honest
+    answer. If the product payload turns out to ship a root `CODEOWNERS`, the
+    builder will omit `.github/CODEOWNERS` in stage 4 and the newborn carries
+    the product's root file alone — which is what that option means.
+    """
+    payload = _run_seed_builder(
+        checkout,
+        {
+            "profile": profile,
+            "hasRootCodeowners": False,
+            "hasPython": True,
+            "hasPackageJson": False,
+            "repository": repository,
+        },
+    )
+    return frozenset(Path(dest) for dest in payload)
+
+
+def resolve_org_authority(cfg: BirthConfig) -> OrgAuthority:
+    """Resolve the organization once: SHA, checkout, class profile, MATERIALIZE set.
+
+    Cached on the config. Stage 2 and stage 4 must read the same resolution:
+    a template copy that withheld paths for one profile while MATERIALIZE wrote
+    another's would be the shadowing bug this exists to remove, one level up.
+    """
+    if cfg.org_authority is not None:
+        return cfg.org_authority
+    org_sha = _org_policy_sha(cfg)
+    checkout = _org_checkout(cfg, org_sha)
+    if checkout is None:
+        raise BirthError(
+            "cannot reach a Quantum-L9/.github checkout to resolve the repo class and "
+            "materialize org files — pass --org-profile-src for an offline birth"
+        )
+    profile = resolve_org_profile(checkout, cfg.repo_class)
+    cfg.org_authority = OrgAuthority(
+        sha=org_sha,
+        checkout=checkout,
+        profile=profile,
+        materialize_paths=org_materialize_destinations(checkout, profile, cfg.slug),
+    )
+    return cfg.org_authority
 
 
 def materialize_org_payload(root: Path, payload: dict[str, str]) -> tuple[list[str], list[str]]:
@@ -1441,16 +1593,12 @@ def stage_apply_org_profile(cfg: BirthConfig, receipt: BirthReceipt) -> dict:
     One checkout of Quantum-L9/.github at one recorded SHA serves both halves
     of this stage: `ops/repo-class-profile.js` resolves the class, and
     `ops/build-seed-payload.js` builds what that class materializes. Neither
-    decision is reproduced in Python.
+    decision is reproduced in Python. The resolution is the one stage 2 already
+    made (`resolve_org_authority`), so the paths the template copy withheld are
+    the paths this stage materializes.
     """
-    org_sha = _org_policy_sha(cfg)
-    checkout = _org_checkout(cfg, org_sha)
-    if checkout is None:
-        raise BirthError(
-            "cannot reach a Quantum-L9/.github checkout to resolve the repo class and "
-            "materialize org files — pass --org-profile-src for an offline birth"
-        )
-    profile = resolve_org_profile(checkout, cfg.repo_class)
+    authority = resolve_org_authority(cfg)
+    org_sha, checkout, profile = authority.sha, authority.checkout, authority.profile
 
     receipt.org_profile_sha = org_sha
     receipt.birth_profile = profile["name"]
@@ -1471,7 +1619,7 @@ def stage_apply_org_profile(cfg: BirthConfig, receipt: BirthReceipt) -> dict:
     # the organization's current state; it is born incomplete and then sent a
     # pull request. The applicable org files belong in the first commit — and
     # they are the organization's CURRENT files: the template copy in stage 2
-    # deliberately contributes none of these destinations, so missing-only
+    # withheld every destination this profile materializes, so missing-only
     # cannot keep a stale factory copy over the org's own.
     payload = build_org_payload(checkout, profile, cfg)
     written, kept = materialize_org_payload(cfg.dest, payload)

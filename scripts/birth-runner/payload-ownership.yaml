@@ -18,7 +18,7 @@
 #   1. birth / chassis-owned   `chassis` below
 #   2. organization-owned      Quantum-L9/.github, via MATERIALIZE in stage 4.
 #                              The template copy contributes NONE of these
-#                              (`TEMPLATE_EXCLUDE_ORG_OWNED` in new_repo_legacy.py):
+#                              (`org_materialize_destinations` in new_repo_legacy.py):
 #                              the org's own seed builder supplies the current
 #                              version, and an explicit product-payload copy
 #                              still wins because MATERIALIZE is missing-only.

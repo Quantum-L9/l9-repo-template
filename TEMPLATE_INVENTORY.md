@@ -110,11 +110,14 @@ a repository that needs different content adds its own file and GitHub prefers i
 `CONTRIBUTING.md`, `SECURITY.md`, and `SUPPORT.md` are kept repository-local.
 
 `.github/CODEOWNERS`, `.github/dependabot.yml`, and `.github/labels.yml` are
-organization MATERIALIZE destinations. This repository keeps its own copies for
-itself, but the template copy contributes **none** of them to a newborn
-(`TEMPLATE_EXCLUDE_ORG_OWNED`): stage 4 writes the organization's current files
-from the pinned `Quantum-L9/.github` checkout, and an explicit product-payload
-copy still wins because MATERIALIZE is missing-only.
+organization MATERIALIZE destinations for this repository's class, and
+`CONTRIBUTING.md` / `SECURITY.md` are MATERIALIZE destinations for the `default`
+class. This repository keeps its own copies for itself, but the template copy
+contributes **none** of the destinations the class being born materializes
+(`org_materialize_destinations`, asked of the organization's own seed builder
+per birth): stage 4 writes the organization's current files from the pinned
+`Quantum-L9/.github` checkout, and an explicit product-payload copy still wins
+because MATERIALIZE is missing-only.
 
 Which organization capabilities a repository receives is decided by its class
 in `Quantum-L9/.github` `policies/repo-classes.yml`, declared here in
