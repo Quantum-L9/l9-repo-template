@@ -41,17 +41,20 @@ make new-repo
                            · target repo does not already exist · recompute the
                            source manifest and require the compiled digest
       ▼
-[2] ASSEMBLE LOCALLY       current l9-repo-template · rename/stamp identity
-                           · optional product PAYLOAD · payload ownership
+[2] ASSEMBLE LOCALLY       resolve the org class once (proven .github authority)
+                           · withhold the paths that class MATERIALIZEs · current
+                           l9-repo-template · rename/stamp identity · optional
+                           product PAYLOAD · payload ownership
       ▼
 [3] FINALIZE               canonical LICENSE · uv lock · ruff safe autofix +
    AUTOMATICALLY           format · reconcile plugin-config · render generated
                            rules · compile agent docs via governance's own
                            skill (advisory) · regenerate manifests
       ▼
-[4] APPLY ORG BIRTH        current Quantum-L9/.github · class resolved by the
-    PROFILE                org's own ops/repo-class-profile.js · only applicable
-                           non-inheritable controls · current org SHA recorded
+[4] APPLY ORG BIRTH        the same Quantum-L9/.github resolution as stage 2
+    PROFILE                (class by the org's own ops/repo-class-profile.js,
+                           payload by its build-seed-payload.js) · only applicable
+                           non-inheritable controls · proven org SHA recorded
       ▼
 [5] STAMP BIRTH            .l9-template-version · .l9/org-birth-profile.yaml
     PROVENANCE             · .l9/birth-receipt.json · .l9/template-state.yaml

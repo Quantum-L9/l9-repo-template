@@ -1130,7 +1130,8 @@ def _local_org_authority_sha(src: Path) -> str:
             f"{ORG_PROFILE_REPO} commit the policy was applied from, and only a clone can prove one"
         )
     top = run(["git", "-C", str(src), "rev-parse", "--show-toplevel"], check=False)
-    if Path((top.stdout or "").strip() or "/nonexistent").resolve() != src.resolve():
+    toplevel = (top.stdout or "").strip()
+    if not toplevel or Path(toplevel).resolve() != src.resolve():
         raise BirthError(
             f"org profile source {src} is not the root of its checkout — pass the clone root"
         )
