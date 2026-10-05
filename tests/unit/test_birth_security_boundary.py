@@ -513,6 +513,9 @@ def test_boundary_refuses_anchor_and_handoff_while_product_descendant_survives(
         org="Quantum-L9",
         payload=None,
         payload_contract=None,
+        product_birth_binding=None,
+        product_manifest=None,
+        repo_birth_contract=None,
         work_dir=tmp_path / "work" / "births",
         template_src=tmp_path,
         org_profile_src=tmp_path,
@@ -804,3 +807,102 @@ def test_workflow_uses_trusted_venv_and_full_action_pins() -> None:
             ref = line.rsplit("@", 1)[-1].strip()
             assert len(ref) == 40
             assert all(ch in "0123456789abcdef" for ch in ref)
+
+
+# The product-birth adapter bundle is PREPARE input only.
+
+HANDOFF_SCHEMA = ROOT / "scripts" / "birth-runner" / "schemas" / "birth-handoff.schema.json"
+ADAPTER_ARGS = ("product_birth_binding", "product_manifest", "repo_birth_contract")
+
+
+def test_prepare_transports_the_adapter_bundle_to_the_engine(tmp_path: Path) -> None:
+    args = boundary.parse_args(
+        [
+            "prepare",
+            "--repo",
+            "example",
+            "--pkg",
+            "example",
+            "--desc",
+            "Example",
+            "--work-dir",
+            str(tmp_path / "births"),
+            "--org-profile-src",
+            str(tmp_path),
+            "--handoff",
+            str(tmp_path / "handoff.json"),
+            "--product-birth-binding",
+            str(tmp_path / "binding.json"),
+            "--product-manifest",
+            str(tmp_path / "manifest.json"),
+            "--repo-birth-contract",
+            str(tmp_path / "contract.json"),
+        ]
+    )
+    cfg = engine.build_config(engine.parse_args(boundary._prepare_argv(args)))
+    assert cfg.product_birth_binding == (tmp_path / "binding.json").resolve()
+    assert cfg.product_manifest == (tmp_path / "manifest.json").resolve()
+    assert cfg.repo_birth_contract == (tmp_path / "contract.json").resolve()
+
+
+def test_prepare_without_the_bundle_forwards_nothing_new(tmp_path: Path) -> None:
+    args = boundary.parse_args(
+        [
+            "prepare",
+            "--repo",
+            "example",
+            "--pkg",
+            "example",
+            "--desc",
+            "Example",
+            "--work-dir",
+            str(tmp_path / "births"),
+            "--org-profile-src",
+            str(tmp_path),
+            "--handoff",
+            str(tmp_path / "handoff.json"),
+        ]
+    )
+    argv = boundary._prepare_argv(args)
+    assert not [arg for arg in argv if arg.startswith(("--product-", "--repo-birth-contract"))]
+
+
+def test_the_handoff_contract_does_not_carry_the_adapter_bundle() -> None:
+    """l9.repo-birth-handoff/v1 is unchanged: PUBLISH never sees adapter inputs."""
+    schema = json.loads(HANDOFF_SCHEMA.read_text(encoding="utf-8"))
+    text = json.dumps(schema)
+    for token in ("binding", "manifest", "birth_contract", "product_birth", "repo-birth-contract"):
+        assert token not in text.replace("contents_manifest_sha256", "")
+    assert schema.get("additionalProperties") is False
+
+
+def test_publish_reconstructs_a_config_without_adapter_inputs(tmp_path: Path) -> None:
+    cfg = boundary._cfg_from_handoff(_handoff(tmp_path), tmp_path / "births" / "example")
+    for name in ADAPTER_ARGS:
+        assert getattr(cfg, name) is None
+    publish = boundary.parse_args(["publish", "--handoff", str(tmp_path / "h.json")])
+    for name in ADAPTER_ARGS:
+        assert not hasattr(publish, name)
+
+
+@factory_only
+def test_workflow_reads_adapter_artifacts_only_inside_the_payload_checkout() -> None:
+    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    inputs = document[True]["workflow_dispatch"]["inputs"]
+    for name in ("product_birth_binding_path", "product_manifest_path", "repo_birth_contract_path"):
+        assert inputs[name]["required"] is False
+    steps = {step.get("id"): step for step in document["jobs"]["prepare"]["steps"]}
+    fetch = steps["payload"]["run"]
+    # The same read-only source checkout and path rules as the payload itself.
+    assert "PRODUCT_BINDING_PATH" in steps["payload"]["env"]
+    assert 'realpath -e "$dest/$1"' in fetch
+    assert 'case "$resolved" in "$dest"/*)' in fetch
+    assert "all three adapter artifact paths" in fetch
+    assert "adapter-backed birth requires payload_contract_path" in fetch
+    prepare = steps["prepare_birth"]["run"]
+    for flag in ("--product-birth-binding", "--product-manifest", "--repo-birth-contract"):
+        assert flag in prepare
+    assert "adapter-backed birth requires payload_repo" in prepare
+    publish_text = WORKFLOW.read_text(encoding="utf-8").split("\n  publish:", 1)[1]
+    for token in ("product_birth_binding", "product_manifest", "repo_birth_contract"):
+        assert token not in publish_text

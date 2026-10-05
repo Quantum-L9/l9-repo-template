@@ -49,6 +49,18 @@ on:
         description: "Relative compiled l9.birth-payload/v1 path when required"
         required: false
         type: string
+      product_birth_binding_path:
+        description: "Relative l9.product-birth-binding/v1 path; adapter-backed birth, all three or none"
+        required: false
+        type: string
+      product_manifest_path:
+        description: "Relative resolved l9.product-manifest/v1 path; adapter-backed birth, all three or none"
+        required: false
+        type: string
+      repo_birth_contract_path:
+        description: "Relative l9.repo-birth-contract/v1 path; adapter-backed birth, all three or none"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -124,15 +136,29 @@ jobs:
           PAYLOAD_REF: ${{ inputs.payload_ref }}
           PAYLOAD_SUBPATH: ${{ inputs.payload_subpath }}
           PAYLOAD_CONTRACT_PATH: ${{ inputs.payload_contract_path }}
+          PRODUCT_BINDING_PATH: ${{ inputs.product_birth_binding_path }}
+          PRODUCT_MANIFEST_PATH: ${{ inputs.product_manifest_path }}
+          REPO_BIRTH_CONTRACT_PATH: ${{ inputs.repo_birth_contract_path }}
           BIRTH_ORG: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           case "$PAYLOAD_REPO" in "$BIRTH_ORG"/*) :;; *) echo "payload_repo must be in $BIRTH_ORG" >&2; exit 2;; esac
           [ -n "$PAYLOAD_REF" ] || { echo "payload_ref is required" >&2; exit 2; }
-          for p in "$PAYLOAD_SUBPATH" "$PAYLOAD_CONTRACT_PATH"; do
+          for p in "$PAYLOAD_SUBPATH" "$PAYLOAD_CONTRACT_PATH" "$PRODUCT_BINDING_PATH" "$PRODUCT_MANIFEST_PATH" "$REPO_BIRTH_CONTRACT_PATH"; do
             case "/$p/" in */../*) echo "payload paths must not contain '..'" >&2; exit 2;; esac
             case "$p" in /*) echo "payload paths must be relative" >&2; exit 2;; esac
           done
+          # Adapter-backed birth: all three artifacts or none, plus the compiled
+          # payload they bind. Transport only — PREPARE judges admissibility.
+          adapter_given=0
+          for p in "$PRODUCT_BINDING_PATH" "$PRODUCT_MANIFEST_PATH" "$REPO_BIRTH_CONTRACT_PATH"; do
+            [ -z "$p" ] || adapter_given=$((adapter_given + 1))
+          done
+          case "$adapter_given" in
+            0) :;;
+            3) [ -n "$PAYLOAD_CONTRACT_PATH" ] || { echo "adapter-backed birth requires payload_contract_path" >&2; exit 2; };;
+            *) echo "adapter-backed birth needs all three adapter artifact paths" >&2; exit 2;;
+          esac
           dest="$RUNNER_TEMP/payload-src"
           header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$dest"
@@ -142,8 +168,21 @@ jobs:
           [ -d "$root" ] || { echo "payload_subpath is not a directory" >&2; exit 2; }
           contract=""
           if [ -n "$PAYLOAD_CONTRACT_PATH" ]; then contract="$dest/$PAYLOAD_CONTRACT_PATH"; [ -f "$contract" ] || exit 2; fi
+          adapter_file() {
+            [ -n "$1" ] || return 0
+            resolved="$(realpath -e "$dest/$1")" || { echo "adapter artifact not found: $1" >&2; exit 2; }
+            case "$resolved" in "$dest"/*) :;; *) echo "adapter artifact escapes the payload checkout: $1" >&2; exit 2;; esac
+            [ -f "$resolved" ] || { echo "adapter artifact is not a file: $1" >&2; exit 2; }
+            printf '%s' "$resolved"
+          }
+          binding="$(adapter_file "$PRODUCT_BINDING_PATH")"
+          manifest="$(adapter_file "$PRODUCT_MANIFEST_PATH")"
+          birth_contract="$(adapter_file "$REPO_BIRTH_CONTRACT_PATH")"
           echo "root=$root" >> "$GITHUB_OUTPUT"
           echo "contract=$contract" >> "$GITHUB_OUTPUT"
+          echo "binding=$binding" >> "$GITHUB_OUTPUT"
+          echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+          echo "birth_contract=$birth_contract" >> "$GITHUB_OUTPUT"
           echo "sha=$(git -C "$dest" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: PREPARE and seal without privileged birth authority
         id: prepare_birth
@@ -156,6 +195,10 @@ jobs:
           BIRTH_VISIBILITY: ${{ inputs.visibility }}
           BIRTH_PAYLOAD: ${{ steps.payload.outputs.root }}
           BIRTH_PAYLOAD_CONTRACT: ${{ steps.payload.outputs.contract }}
+          BIRTH_PRODUCT_BINDING: ${{ steps.payload.outputs.binding }}
+          BIRTH_PRODUCT_MANIFEST: ${{ steps.payload.outputs.manifest }}
+          BIRTH_REPO_BIRTH_CONTRACT: ${{ steps.payload.outputs.birth_contract }}
+          BIRTH_ADAPTER_REQUESTED: ${{ inputs.product_birth_binding_path }}${{ inputs.product_manifest_path }}${{ inputs.repo_birth_contract_path }}
           L9_GOV_ROOT: ${{ steps.governance.outputs.root }}
           L9_BIRTH_GOVERNANCE_SHA: ${{ steps.governance.outputs.sha }}
           L9_BIRTH_PAYLOAD_REPOSITORY: ${{ inputs.payload_repo }}
@@ -165,11 +208,20 @@ jobs:
         run: |
           set -euo pipefail
           unset GH_TOKEN GITHUB_TOKEN L9_BIRTH_PRIVILEGED_TOKEN
+          # Adapter inputs are resolved only inside the payload checkout. Asked
+          # for but not resolved (no payload_repo) is a refusal, never a generic birth.
+          if [ -n "$BIRTH_ADAPTER_REQUESTED" ] && [ -z "${BIRTH_PRODUCT_BINDING:-}${BIRTH_PRODUCT_MANIFEST:-}${BIRTH_REPO_BIRTH_CONTRACT:-}" ]; then
+            echo "adapter-backed birth requires payload_repo: its artifacts are read from the payload checkout" >&2
+            exit 2
+          fi
           args=(prepare --repo "$BIRTH_REPO" --pkg "$BIRTH_PKG" --desc "$BIRTH_DESC" --org "$BIRTH_ORG" --work-dir "$RUNNER_TEMP/births" --handoff "$RUNNER_TEMP/birth-handoff.json" --org-profile-src "$ORG_POLICY_ROOT")
           [ -z "$BIRTH_CLASS" ] || args+=(--repo-class "$BIRTH_CLASS")
           [ "$BIRTH_VISIBILITY" != private ] || args+=(--private)
           [ -z "${BIRTH_PAYLOAD:-}" ] || args+=(--payload "$BIRTH_PAYLOAD")
           [ -z "${BIRTH_PAYLOAD_CONTRACT:-}" ] || args+=(--payload-contract "$BIRTH_PAYLOAD_CONTRACT")
+          [ -z "${BIRTH_PRODUCT_BINDING:-}" ] || args+=(--product-birth-binding "$BIRTH_PRODUCT_BINDING")
+          [ -z "${BIRTH_PRODUCT_MANIFEST:-}" ] || args+=(--product-manifest "$BIRTH_PRODUCT_MANIFEST")
+          [ -z "${BIRTH_REPO_BIRTH_CONTRACT:-}" ] || args+=(--repo-birth-contract "$BIRTH_REPO_BIRTH_CONTRACT")
           .venv/bin/python -I scripts/birth-runner/birth_boundary.py "${args[@]}"
           tar -C "$RUNNER_TEMP/births" -czf "$RUNNER_TEMP/sealed-birth.tgz" "$BIRTH_REPO"
       - name: Record source provenance

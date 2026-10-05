@@ -97,3 +97,74 @@ def test_front_door_never_passes_publication_credentials() -> None:
     assert "GH_TOKEN" not in text
     assert "GITHUB_TOKEN" not in text
     assert "L9_BIRTH_PRIVILEGED_TOKEN" not in text
+
+
+ADAPTER_PATHS = {
+    "product_birth_binding_path": "birth/product-birth-binding.json",
+    "product_manifest_path": "birth/product-manifest.json",
+    "repo_birth_contract_path": "birth/repo-birth-contract.json",
+}
+
+
+def test_an_adapter_bundle_is_dispatched_as_three_relative_paths() -> None:
+    fields = dict(front.dispatch_fields(_intent(**ADAPTER_PATHS)))
+    for key, value in ADAPTER_PATHS.items():
+        assert fields[key] == value
+
+
+@pytest.mark.parametrize("dropped", sorted(ADAPTER_PATHS))
+def test_a_partial_adapter_bundle_is_refused(dropped: str) -> None:
+    with pytest.raises(front.BirthFrontDoorError, match="all three artifacts"):
+        front.validate_intent(_intent(**{**ADAPTER_PATHS, dropped: ""}))
+
+
+def test_an_adapter_bundle_requires_the_compiled_payload() -> None:
+    with pytest.raises(front.BirthFrontDoorError, match="PAYLOAD_CONTRACT_PATH"):
+        front.validate_intent(_intent(**ADAPTER_PATHS, payload_contract_path=""))
+
+
+def test_an_adapter_bundle_requires_the_payload_checkout() -> None:
+    with pytest.raises(front.BirthFrontDoorError, match="PAYLOAD_REPO"):
+        front.validate_intent(_intent(**ADAPTER_PATHS, payload_repo="", payload_ref=""))
+
+
+@pytest.mark.parametrize("key", sorted(ADAPTER_PATHS))
+def test_adapter_paths_must_be_relative(key: str) -> None:
+    with pytest.raises(front.BirthFrontDoorError, match="must be relative"):
+        front.validate_intent(_intent(**{**ADAPTER_PATHS, key: "/etc/passwd"}))
+
+
+@pytest.mark.parametrize("key", sorted(ADAPTER_PATHS))
+def test_adapter_paths_must_not_traverse(key: str) -> None:
+    with pytest.raises(front.BirthFrontDoorError, match=r"'\.\.'"):
+        front.validate_intent(_intent(**{**ADAPTER_PATHS, key: "birth/../../secret.json"}))
+
+
+def test_the_front_door_does_not_interpret_adapter_artifacts() -> None:
+    """Transport only: no ProductKind, archetype, or topology reasoning here."""
+    import ast
+
+    tree = ast.parse(MODULE.read_text(encoding="utf-8"))
+    imported = {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in (
+            node.names if isinstance(node, ast.Import) else [ast.alias(node.module or "")]
+        )
+    }
+    assert imported <= {
+        "__future__",
+        "argparse",
+        "dataclasses",
+        "re",
+        "shutil",
+        "subprocess",
+        "sys",
+    }
+    called = {
+        node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    }
+    assert not called & {"open", "read_text", "read_bytes", "load", "loads"}
