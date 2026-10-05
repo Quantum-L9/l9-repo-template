@@ -1768,6 +1768,34 @@ class TestProductBirthAdapterGate:
             new_repo.stage_preflight(cfg, new_repo.BirthReceipt())
         assert "adapter" not in preflight_trace
 
+    @pytest.mark.parametrize("kind", ["node", "library"])
+    def test_the_gate_acts_identically_whatever_the_product_kind(
+        self, tmp_path: Path, preflight_trace: list[str], kind: str
+    ) -> None:
+        """Behavioral: the verdict, not the kind, decides; nothing kind-specific leaks."""
+        case = adapter_fixtures.Case()
+        product = {"id": "l9.product/ideaos", "kind": kind, "archetype_ref": "l9.archetype/x@1"}
+        manifest_doc = adapter_fixtures.make_manifest(product=product)
+        documents = {
+            "binding": adapter_fixtures.make_binding(manifest_doc, case.contract, case.payload),
+            "manifest": manifest_doc,
+            "birth_contract": case.contract_doc,
+            "payload": adapter_fixtures.make_payload(),
+        }
+        bundle: dict[str, Path] = {}
+        for name, document in documents.items():
+            bundle[name] = tmp_path / f"{name}.json"
+            bundle[name].write_text(
+                new_repo.birth_adapter.render_document(document), encoding="utf-8"
+            )
+        cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        receipt = new_repo.BirthReceipt()
+        new_repo.stage_preflight(cfg, receipt)
+        stage = _stage(receipt, "preflight.adapter")
+        assert stage.status == "PASS"
+        assert kind not in stage.detail
+        assert cfg.verified_payload_mode is None  # the gate set nothing on the config
+
     def test_the_gate_reads_no_product_semantics(self) -> None:
         """Activation and transport only: kind, archetype, topology stay upstream."""
         import inspect
