@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Quantum-L9/l9-repo-template/main/scripts/birth-runner/schemas/l9-product-birth-binding.schema.json",
+  "title": "l9.product-birth-binding/v1",
+  "description": "The exact coordinates a caller claims when binding an already-resolved product realization to one repository birth: product id and kind as resolved upstream, the ProductManifest and ProductTopology references and digests the manifest carries, the realized source snapshot, the l9.repo-birth-contract/v1 and l9.birth-payload/v1 artifacts by digest, and the factory revision. It is input to l9_birth_adapter.py, which holds every coordinate to the artifacts themselves. It is a closed shape: no repository shape, no kind hint, no inferred field is admitted, because the adapter never infers ProductKind or reads a source tree. Semantic refs and digests (manifest, topology) are owned upstream and are opaque non-empty strings here; artifact digests (birth contract, payload) are the factory convention `sha256:` over the artifact bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "product",
+    "manifest",
+    "topology",
+    "source",
+    "birth_contract",
+    "payload",
+    "factory"
+  ],
+  "properties": {
+    "schema": {
+      "const": "l9.product-birth-binding/v1"
+    },
+    "product": {
+      "description": "Restates the product coordinates the manifest resolves. The adapter compares them; it never supplies them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/semanticToken" },
+        "kind": { "$ref": "#/$defs/semanticToken" }
+      }
+    },
+    "manifest": {
+      "description": "The exact ProductManifest: its semantic ref and the semantic digest it declares as manifest_digest. Compared as opaque strings; never recomputed here.",
+      "$ref": "#/$defs/semanticCoordinate"
+    },
+    "topology": {
+      "description": "The exact ProductTopology the manifest records as source_topology.",
+      "$ref": "#/$defs/semanticCoordinate"
+    },
+    "source": {
+      "description": "The realized source snapshot the birth contract and the compiled payload both bind.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "revision", "tree_sha"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/repositorySlug" },
+        "revision": { "$ref": "#/$defs/gitObjectId" },
+        "tree_sha": { "$ref": "#/$defs/gitObjectId" }
+      }
+    },
+    "birth_contract": {
+      "description": "The exact l9.repo-birth-contract/v1 artifact.",
+      "$ref": "#/$defs/artifactCoordinate"
+    },
+    "payload": {
+      "description": "The exact compiled l9.birth-payload/v1 artifact the birth contract references.",
+      "$ref": "#/$defs/artifactCoordinate"
+    },
+    "factory": {
+      "description": "The exact birth factory the realization is bound to. Explicit, never defaulted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "revision"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/repositorySlug" },
+        "revision": { "$ref": "#/$defs/gitObjectId" }
+      }
+    }
+  },
+  "$defs": {
+    "semanticToken": {
+      "type": "string",
+      "pattern": "^\\S(.*\\S)?$"
+    },
+    "semanticCoordinate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "digest"],
+      "properties": {
+        "ref": { "$ref": "#/$defs/semanticToken" },
+        "digest": { "$ref": "#/$defs/semanticToken" }
+      }
+    },
+    "artifactCoordinate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "digest"],
+      "properties": {
+        "ref": { "$ref": "#/$defs/semanticToken" },
+        "digest": { "$ref": "#/$defs/artifactDigest" }
+      }
+    },
+    "repositorySlug": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "gitObjectId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "artifactDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}
