@@ -1,26 +1,27 @@
 ---
-description: "${repo_name} Quantum-L9 Python museum invariants — generated"
+description: "${repo_name} L9 repository chassis invariants — generated"
 globs: ["src/**/*.py", "scripts/**", "AGENTS.md", "docs/**"]
 alwaysApply: true
 ---
-<!-- L9_META role: cursor_rule tags: [l9, python, museum, ${domain}] version: ${plugin_version} /L9_META -->
+<!-- L9_META role: cursor_rule tags: [l9, python, chassis, ${domain}] version: ${plugin_version} /L9_META -->
 
-# Quantum-L9 Python Museum — ${repo_name}
+# L9 Repository Chassis — ${repo_name}
 
 > ${rendered_notice}
 
 ## Identity
 
-- This repo is a **non-Constellation** Quantum-L9 Python package/service.
-- Constellation **nodes** → use [L9-Node-Template](https://github.com/Quantum-L9/L9-Node-Template).
-- `constellation_*` **deps** → use [Constellation.PackageTemplate](https://github.com/Quantum-L9/Constellation.PackageTemplate).
+- This repository carries the generic L9 repository chassis assembled by the L9 repository birth factory.
+- What semantic product it is (ProductKind, archetype, Gate or SDK obligations) is declared
+  by the product's resolved semantics upstream (`Quantum-L9/.github` `semantics/`). This rule
+  does not infer it from repository shape, package contents, SDK presence, or Gate presence.
 
-## Forbidden (wrong product)
+## Forbidden (chassis)
 
-- `create_node_app`, Gate handlers, `register_handler`, TransportPacket routing as product law
-- `enginehandlers.py`, `nodespec.yaml`, `contracts/`, Justfile
-- Peer-node HTTP dispatch patterns that belong only in node/SDK repos
+- Repository-local CI orchestration — CI execution semantics belong to l9-ci-core
+- A second task runner beside `make` (Justfile)
 - Expanding `tools/` beyond `l9_repo` + `check_workflow_integrity.py`
+- Hand-editing generated `.cursor/rules/*.mdc`
 
 ## Required habits
 

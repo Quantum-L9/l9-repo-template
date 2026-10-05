@@ -1,33 +1,34 @@
 <!-- L9_RENDERED
 template: .cursor/rules/templates/l9-python-repo.mdc.template
-template_sha256: a7cf6dc2973684b1f718e9926bd38c895a91e552be4ece627f12fde1f5262a82
+template_sha256: 8b89163866b373e238f0683606cbc81fdb02add7aa52edd3aee85f1fd9d585ce
 config: plugin-config.yaml
-config_sha256: 60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46
-render_id: ef9fef7a001cc00ea9c09afa97549fe803180acd93fb29dff146acd2a908596d
+config_sha256: 1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19
+render_id: c2662ef6b03cc0056e97d298afd25e51f211cabff151ca630d88a9e227370ea3
 /L9_RENDERED -->
 ---
-description: "l9-repo-template Quantum-L9 Python museum invariants — generated"
+description: "l9-repo-template L9 repository chassis invariants — generated"
 globs: ["src/**/*.py", "scripts/**", "AGENTS.md", "docs/**"]
 alwaysApply: true
 ---
-<!-- L9_META role: cursor_rule tags: [l9, python, museum, quantum-l9-python-museum] version: 1.2.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [l9, python, chassis, l9-repo-birth-factory] version: 1.2.0 /L9_META -->
 
-# Quantum-L9 Python Museum — l9-repo-template
+# L9 Repository Chassis — l9-repo-template
 
 > This file is generated from .cursor/rules/templates/*.mdc.template. Do not edit directly; edit the template or plugin-config.yaml.
 
 ## Identity
 
-- This repo is a **non-Constellation** Quantum-L9 Python package/service.
-- Constellation **nodes** → use [L9-Node-Template](https://github.com/Quantum-L9/L9-Node-Template).
-- `constellation_*` **deps** → use [Constellation.PackageTemplate](https://github.com/Quantum-L9/Constellation.PackageTemplate).
+- This repository carries the generic L9 repository chassis assembled by the L9 repository birth factory.
+- What semantic product it is (ProductKind, archetype, Gate or SDK obligations) is declared
+  by the product's resolved semantics upstream (`Quantum-L9/.github` `semantics/`). This rule
+  does not infer it from repository shape, package contents, SDK presence, or Gate presence.
 
-## Forbidden (wrong product)
+## Forbidden (chassis)
 
-- `create_node_app`, Gate handlers, `register_handler`, TransportPacket routing as product law
-- `enginehandlers.py`, `nodespec.yaml`, `contracts/`, Justfile
-- Peer-node HTTP dispatch patterns that belong only in node/SDK repos
+- Repository-local CI orchestration — CI execution semantics belong to l9-ci-core
+- A second task runner beside `make` (Justfile)
 - Expanding `tools/` beyond `l9_repo` + `check_workflow_integrity.py`
+- Hand-editing generated `.cursor/rules/*.mdc`
 
 ## Required habits
 

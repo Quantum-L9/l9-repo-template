@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generic repo hygiene audit for the non-Constellation museum template.
+"""Generic repository hygiene audit for the L9 repository chassis.
 
-Enforces eval/exec/print bans in src/ and accidental reintroduction of
-Constellation node/dep scaffolding (Justfile, contracts/, enginehandlers).
-Does NOT encode PacketEnvelope/Gate peer-routing laws (those belong to
-L9-Node-Template / Gate_SDK).
+Enforces the eval/exec/print ban in src/ and the single-task-runner rule
+(no Justfile beside `make`). It does not classify the product kind of the
+repository: engines, handlers, contracts, nodespecs, Gate or SDK surfaces are
+legitimate products of the birth factory and are not hygiene findings.
 """
 
 from __future__ import annotations
@@ -16,9 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 
+# One task runner. `make` is the chassis facade; a second runner is drift.
 FORBIDDEN_ROOT_FILES = ("Justfile", "justfile")
-FORBIDDEN_ROOT_DIRS = ("contracts", "engine", "chassis", "domains")
-FORBIDDEN_REL_SUFFIXES = ("enginehandlers.py", "nodespec.yaml")
 
 
 class _Visitor(ast.NodeVisitor):
@@ -56,15 +55,6 @@ def audit_scaffold() -> list[str]:
     for name in FORBIDDEN_ROOT_FILES:
         if (ROOT / name).exists():
             findings.append(f"forbidden root file present: {name}")
-    for name in FORBIDDEN_ROOT_DIRS:
-        if (ROOT / name).exists():
-            findings.append(f"forbidden root directory present: {name}/")
-    for path in ROOT.rglob("*"):
-        if not path.is_file() or ".git" in path.parts or ".venv" in path.parts:
-            continue
-        rel = path.relative_to(ROOT).as_posix()
-        if any(rel.endswith(suf) or rel == suf for suf in FORBIDDEN_REL_SUFFIXES):
-            findings.append(f"forbidden constellation scaffolding path: {rel}")
     return findings
 
 

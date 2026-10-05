@@ -97,6 +97,7 @@ def _birth(
     *extra: str,
     repo: str = "l9-birth-acceptance",
     pkg: str = "l9_birth_acceptance",
+    org_src: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.pop("VIRTUAL_ENV", None)
@@ -114,7 +115,7 @@ def _birth(
             "--work-dir",
             str(tmp_path / "work"),
             "--org-profile-src",
-            str(ORG_SRC),
+            str(org_src or ORG_SRC),
             "--no-remote",
             *extra,
         ],
@@ -306,16 +307,30 @@ def test_no_agent_session_scaffolding_is_inherited(
 def test_no_template_git_history_is_inherited(
     born: tuple[subprocess.CompletedProcess[str], Path],
 ) -> None:
+    """The only history a newborn has is its own sealed root commit.
+
+    PREPARE seals the validated tree into exactly one root commit before any
+    privilege exists. That commit is the newborn's; nothing from the template's
+    history may sit behind it.
+    """
     _, dest = born
     log = subprocess.run(
-        ["git", "-C", str(dest), "log", "--oneline"],
+        ["git", "-C", str(dest), "rev-list", "--parents", "HEAD"],
         capture_output=True,
         text=True,
         check=False,
     )
-    assert log.returncode != 0 or not log.stdout.strip(), (
-        "a newborn must not carry the template's commit history"
-    )
+    assert log.returncode == 0, log.stderr
+    commits = [line.split() for line in log.stdout.strip().splitlines()]
+    assert len(commits) == 1, "a newborn must not carry the template's commit history"
+    assert len(commits[0]) == 1, "the sealed birth commit must be a root commit"
+    subject = subprocess.run(
+        ["git", "-C", str(dest), "log", "-1", "--format=%s"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    assert subject.startswith("chore: birth Quantum-L9/l9-birth-acceptance from l9-repo-template@")
 
 
 def test_receipt_records_both_provenance_shas(
@@ -335,29 +350,197 @@ def test_receipt_records_both_provenance_shas(
 
 
 def test_org_contract_still_has_the_shape_birth_depends_on() -> None:
-    """Cross-repo contract check, against the real policy file.
+    """Cross-repo contract check, through the organization's own resolver.
 
-    Birth reads this from Quantum-L9/.github. If the class stops forbidding a
-    path that `scripts/inventory_check.py` denies, every repository born from
-    this template gets a pull request it cannot merge — which is exactly what
-    this whole contract was built to stop.
+    Birth resolves the class with Quantum-L9/.github's `ops/repo-class-profile.js`
+    from the real checkout. If the class stops forbidding a path that
+    `scripts/inventory_check.py` denies, every repository born from this
+    template gets a pull request it cannot merge — which is exactly what this
+    whole contract was built to stop.
     """
     assert ORG_SRC is not None
-    doc = new_repo.parse_json_in_yaml(
-        (ORG_SRC / "policies" / "repo-classes.yml").read_text(encoding="utf-8")
-    )
-    profile = new_repo.resolve_profile(doc, new_repo.BIRTH_PROFILE_CLASS)
+    profile = new_repo.resolve_org_profile(ORG_SRC, new_repo.BIRTH_PROFILE_CLASS)
+    assert profile["name"] == "non_constellation_python"
     for denied in (
         ".github/workflows/l9-analysis.yml",
         ".github/workflows/l9-lint-test.yml",
         ".github/workflows/on-org-update.yml",
         ".github/workflows/governance.yml",
     ):
-        assert new_repo.match_pattern(profile["forbid"], denied), (
+        assert denied in profile["forbid"], (
             f"org class {profile['name']} must forbid {denied}; inventory_check.py denies it"
         )
-    assert new_repo.match_pattern(profile["forbid"], ".github/governance/waivers.yaml")
+    assert ".github/governance/**" in profile["forbid"]
     assert profile["seed_categories"], "the class must materialize something"
+
+
+def test_the_org_class_is_consumed_not_reproduced() -> None:
+    """No second interpretation of `policies/repo-classes.yml` exists in Python."""
+    source = Path(new_repo._stages.__file__).read_text(encoding="utf-8")
+    assert "def parse_json_in_yaml" not in source
+    assert "def resolve_profile(" not in source
+    assert "ops', 'repo-class-profile.js'" in source
+    assert not hasattr(new_repo, "parse_json_in_yaml")
+
+
+def test_materialized_org_files_are_the_orgs_current_versions(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """The newborn carries the organization's files, not stale factory copies.
+
+    The template copy contributes none of the MATERIALIZE destinations, so for
+    the current class all three are WRITTEN by the org's own builder from the
+    pinned checkout, byte for byte.
+    """
+    _, dest = born
+    assert ORG_SRC is not None
+    receipt = json.loads(
+        (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+    )
+    expected = {
+        ".github/CODEOWNERS": ORG_SRC / "policies" / "CODEOWNERS",
+        ".github/dependabot.yml": ORG_SRC / ".github" / "dependabot.yml",
+        ".github/labels.yml": ORG_SRC / ".github" / "labels.yml",
+    }
+    assert sorted(receipt["materialized"]) == sorted(expected)
+    for rel, source in expected.items():
+        assert (dest / rel).read_text(encoding="utf-8") == source.read_text(encoding="utf-8"), (
+            f"{rel} in the newborn is not the organization's current file"
+        )
+
+
+def test_the_birth_dispatch_workflow_is_never_inherited(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    _, dest = born
+    assert not (dest / ".github" / "workflows" / "repo-birth-dispatch.yml").exists()
+
+
+def test_an_explicit_payload_override_wins_over_materialize(tmp_path: Path) -> None:
+    """A repository/product-owned copy stays closer than the organization default.
+
+    MATERIALIZE is missing-only. A fragment payload that ships its own
+    `.github/CODEOWNERS` is overlaid in stage 2, so stage 4 keeps it rather
+    than writing the org's version over it.
+    """
+    payload = tmp_path / "payload" / ".github"
+    payload.mkdir(parents=True)
+    (payload / "CODEOWNERS").write_text("* @product-owners\n", encoding="utf-8")
+
+    proc = _birth(tmp_path, "--payload", str(tmp_path / "payload"))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    dest = tmp_path / "work" / "l9-birth-acceptance"
+    assert (dest / ".github" / "CODEOWNERS").read_text(encoding="utf-8") == "* @product-owners\n"
+    receipt = json.loads(
+        (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
+    )
+    assert ".github/CODEOWNERS" not in receipt["materialized"]
+    assert ".github/dependabot.yml" in receipt["materialized"]
+    assert ".github/labels.yml" in receipt["materialized"]
+
+
+ORG_ORIGIN = "https://github.com/Quantum-L9/.github.git"
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _org_clone(tmp_path: Path, *, detach: bool = False, keep_local_origin: bool = False) -> Path:
+    """A private clone of the real org checkout, so a test can dirty or detach it.
+
+    The clone's origin is pointed back at the organization's repository: a local
+    clone's origin is a filesystem path, which is exactly the "resembles the
+    repository but cannot prove it" case the guard refuses. `keep_local_origin`
+    keeps that path to exercise the refusal.
+    """
+    assert ORG_SRC is not None
+    dest = tmp_path / "org-clone"
+    subprocess.run(
+        ["git", "clone", "-q", "--no-hardlinks", str(ORG_SRC), str(dest)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if not keep_local_origin:
+        _git(dest, "remote", "set-url", "origin", ORG_ORIGIN)
+    if detach:
+        _git(dest, "checkout", "-q", "--detach")
+    return dest
+
+
+def test_a_dirty_org_authority_stops_the_birth_before_assembly(tmp_path: Path) -> None:
+    """The receipt would record HEAD while the builder executed edited bytes."""
+    clone = _org_clone(tmp_path)
+    policy = clone / "policies" / "repo-classes.yml"
+    policy.write_text(policy.read_text(encoding="utf-8") + "# local edit\n", encoding="utf-8")
+    proc = _birth(tmp_path, org_src=clone)
+    assert proc.returncode != 0
+    assert "org profile source is dirty" in proc.stdout + proc.stderr
+    assert "policies/repo-classes.yml" in proc.stdout + proc.stderr
+    assembled = tmp_path / "work" / "l9-birth-acceptance"
+    assert not assembled.exists() or not any(assembled.iterdir()), "files were copied first"
+
+
+def test_a_tree_that_only_resembles_the_org_repository_stops_the_birth(tmp_path: Path) -> None:
+    clone = _org_clone(tmp_path, keep_local_origin=True)
+    proc = _birth(tmp_path, org_src=clone)
+    assert proc.returncode != 0
+    assert "not a Quantum-L9/.github checkout" in proc.stdout + proc.stderr
+
+
+def test_a_clean_detached_org_checkout_births_with_its_sha_recorded(tmp_path: Path) -> None:
+    """Offline birth is preserved — and the recorded SHA is the proven one."""
+    clone = _org_clone(tmp_path, detach=True)
+    assert _git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
+    proc = _birth(tmp_path, org_src=clone)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "BIRTH: PASS" in proc.stdout
+    dest = tmp_path / "work" / "l9-birth-acceptance"
+    receipt = json.loads((dest / prov.BIRTH_RECEIPT_PATH).read_text(encoding="utf-8"))
+    assert receipt["org_policy"]["sha"] == _git(clone, "rev-parse", "HEAD")
+    birth = prov.birth_block((dest / prov.MARKER_PATH).read_text(encoding="utf-8"))
+    assert birth["org_policy_sha"] == receipt["org_policy"]["sha"]
+
+
+def test_a_default_class_birth_materializes_the_orgs_community_health_files(
+    tmp_path: Path,
+) -> None:
+    """The cross-class case the factory's own class never exercised.
+
+    `default` materializes `CONTRIBUTING.md` and `SECURITY.md`; this factory
+    carries different copies of both. The template copy must withhold them so
+    the organization's current bytes land. The class also seeds the governance
+    caller this template's own inventory check denies, so the birth is not
+    expected to reach PASS and prints only its refusal — the assertion is on the
+    assembled tree stages 2 and 4 left in the work directory, not on the verdict
+    or the rendered receipt.
+    """
+    assert ORG_SRC is not None
+    _birth(tmp_path, "--repo-class", "default")
+    dest = tmp_path / "work" / "l9-birth-acceptance"
+    assert (dest / "pyproject.toml").is_file(), "the tree was never assembled"
+    assert (dest / "CONTRIBUTING.md").read_bytes() == (ORG_SRC / "CONTRIBUTING.md").read_bytes(), (
+        "CONTRIBUTING.md in the newborn is not the organization's current file"
+    )
+    assert (dest / "CODE_OF_CONDUCT.md").read_bytes() == (
+        ORG_SRC / "CODE_OF_CONDUCT.md"
+    ).read_bytes()
+    profile = new_repo.resolve_org_profile(ORG_SRC, "default")
+    payload = new_repo._stages._run_seed_builder(
+        ORG_SRC,
+        {
+            "profile": profile,
+            "hasRootCodeowners": False,
+            "hasPython": True,
+            "hasPackageJson": False,
+            "repository": "Quantum-L9/l9-birth-acceptance",
+        },
+    )
+    assert (dest / "SECURITY.md").read_text(encoding="utf-8") == payload["SECURITY.md"]
+    assert (REPO / "SECURITY.md").read_bytes() != (dest / "SECURITY.md").read_bytes()
 
 
 def test_materialized_org_files_are_in_the_initial_commit(
@@ -407,10 +590,12 @@ def test_a_payload_that_smuggles_org_ci_stops_the_birth(tmp_path: Path) -> None:
 
     proc = _birth(tmp_path, "--payload", str(tmp_path / "payload"))
     assert proc.returncode == 1
-    assert "BIRTH: FAIL" in proc.stdout
+    # A refused stage is reported on stderr as `BIRTH FAIL: <reason>`; no
+    # receipt is rendered for a birth that never reached validation.
+    assert "BIRTH FAIL" in proc.stderr
     assert "violates repo class non_constellation_python" in proc.stderr
-    # Stage 4 stops before stage 6: nothing was created.
-    assert "repository created" not in proc.stdout
+    # Stage 4 stops before stage 7: nothing was created.
+    assert "repository created" not in proc.stdout + proc.stderr
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -718,7 +903,7 @@ def test_a_partial_overlay_is_still_purely_additive(tmp_path: Path) -> None:
 # is deliberately preserved.
 TEMPLATE_PRODUCT_CLAIMS = (
     "l9-repo-template",
-    "l9-python-museum",
+    "l9-repo-birth-factory",
     "l9_example_pkg",
     "obs-optional",
 )
@@ -928,7 +1113,9 @@ class TestCanonicalCIIsRequired:
         the time birth ends, and no code path may set BORN there.
         """
         source = (RUNNER).read_text(encoding="utf-8")
-        remote_tail = source[source.index("if cfg.remote:") :]
+        # Everything from the privileged PUBLISH phase onwards: the only place a
+        # remote exists for a state to be claimed about.
+        remote_tail = source[source.index("def publish(") :]
         assert "canonical_ci.PROVISIONAL if not receipt.failed" in remote_tail
         assert "= canonical_ci.BORN" not in remote_tail, (
             "birth must not assign BORN — it is earned by the first pull request"

@@ -1,16 +1,16 @@
 <!-- L9_RENDERED
 template: .cursor/rules/templates/l9-agents.mdc.template
-template_sha256: e7354122352ae6fd05ca2071664edf9dbe87c55352ba91b6d485001e5f67dd03
+template_sha256: 741e60b0f0073d06e78fc59136e9724f4149c31d8cdd8df700d5b1bd54bd0a24
 config: plugin-config.yaml
-config_sha256: 60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46
-render_id: c9eb4792f6b193244b08bb2561aff240acb47f89f42ed818512e43f0b9a83be3
+config_sha256: 1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19
+render_id: 1f087c9796728827553f96ed247ba6517f35822a2103da49c4a935c9bf837ee1
 /L9_RENDERED -->
 ---
 description: "l9-repo-template autonomous agent guardrails — generated from domain cartridge"
 globs: ["AGENTS.md", "scripts/**", "Makefile", "Repo.mk"]
 alwaysApply: false
 ---
-<!-- L9_META role: cursor_rule tags: [agents, generated, quantum-l9-python-museum] version: 1.2.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [agents, generated, l9-repo-birth-factory] version: 1.2.0 /L9_META -->
 
 # Agent Guardrails — l9-repo-template
 
@@ -45,9 +45,9 @@ alwaysApply: false
 - `make check-rules`
 - `make hygiene-check`
 
-## Museum Laws
+## Chassis Laws
 
 - Package: `l9_example_pkg`
-- Non-Constellation Python only — nodes and constellation_* deps use sibling templates.
+- Product kind is declared by the product's resolved semantics upstream; never infer it from repository shape.
 - Do not add repository-local CI orchestration — CI execution semantics belong to l9-ci-core; organization CI control belongs to l9-ci-control-plane.
 - Test isolation pattern: `none`

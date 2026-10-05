@@ -1,14 +1,18 @@
 """Unit tests for the birth orchestrator's decision logic.
 
-Everything here runs without git, gh, uv, or a network: these are the pure
-functions that decide whether a birth may proceed, and they are exactly the
-ones whose failure would be discovered only after a repository already exists.
+Everything here runs without gh, uv, or a network: these are the functions
+that decide whether a birth may proceed, and they are exactly the ones whose
+failure would be discovered only after a repository already exists. The one
+external dependency is deliberate: the org repo-class resolver under test is
+Quantum-L9/.github's own `ops/repo-class-profile.js`, so those tests need node
+and a local checkout of that repository, and skip (never fake it) otherwise.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -67,6 +71,52 @@ MINIMAL_POLICY = json.dumps(
 )
 
 
+def _real_org_checkout() -> Path | None:
+    """A genuine Quantum-L9/.github working tree, or None.
+
+    The repo-class resolver under test is the ORGANIZATION's
+    `ops/repo-class-profile.js`; a hand-written stand-in would prove only that
+    the stand-in works. `L9_ORG_GITHUB_SRC` first, then the sibling checkout.
+    """
+    candidates = []
+    env_src = os.environ.get("L9_ORG_GITHUB_SRC")
+    if env_src:
+        candidates.append(Path(env_src))
+    candidates.append(REPO.parent / ".github")
+    for root in candidates:
+        if (root / "ops" / "repo-class-profile.js").is_file():
+            return root.resolve()
+    return None
+
+
+ORG_SRC = _real_org_checkout()
+
+needs_owner_resolver = pytest.mark.skipif(
+    ORG_SRC is None or shutil.which("node") is None,
+    reason=(
+        "a Quantum-L9/.github checkout (set L9_ORG_GITHUB_SRC or place one beside this "
+        "repo) and node are required — the resolver under test is the organization's own"
+    ),
+)
+
+
+def _org_fixture(tmp_path: Path, policy: str | None = MINIMAL_POLICY) -> Path:
+    """A checkout-shaped fixture: the OWNER's resolver beside a policy of our choosing.
+
+    Only the policy file is ours. The code that interprets it is copied byte for
+    byte from the real organization checkout, so every refusal asserted below is
+    the organization's refusal, transported by the birth engine.
+    """
+    assert ORG_SRC is not None
+    root = tmp_path / "dot-github"
+    (root / "ops").mkdir(parents=True)
+    shutil.copy2(ORG_SRC / "ops" / "repo-class-profile.js", root / "ops" / "repo-class-profile.js")
+    if policy is not None:
+        (root / "policies").mkdir()
+        (root / "policies" / "repo-classes.yml").write_text(policy, encoding="utf-8")
+    return root
+
+
 class TestIdentityValidation:
     @pytest.mark.parametrize(
         "name", ["l9-observability-core", "Repo.Name", "a", "l9_repo_template"]
@@ -99,32 +149,92 @@ class TestIdentityValidation:
             new_repo.validate_description("   ")
 
 
-class TestOrgPolicyParsing:
-    def test_strips_full_line_comments(self) -> None:
-        doc = new_repo.parse_json_in_yaml("# a comment\n" + MINIMAL_POLICY)
-        assert set(doc["classes"]) == {"default", "non_constellation_python"}
+class TestOrgProfileResolutionIsTheOwners:
+    """`policies/repo-classes.yml` means what Quantum-L9/.github says it means.
 
-    def test_preserves_hash_inside_strings(self) -> None:
-        doc = new_repo.parse_json_in_yaml('{"classes": {"x": {}}, "note": "a#b"}')
-        assert doc["note"] == "a#b"
+    The birth engine transports a class name in and the resolved profile out
+    through `ops/repo-class-profile.js` from the pinned checkout. It keeps no
+    parser, resolver, or pattern grammar of its own for that policy: two
+    implementations of "what does this class receive" are two answers.
+    """
 
-    @pytest.mark.parametrize("text", ["", "   ", "not json", '{"no": "classes"}'])
-    def test_rejects_unusable_policy(self, text: str) -> None:
-        with pytest.raises(new_repo.BirthError):
-            new_repo.parse_json_in_yaml(text)
+    def test_the_engine_keeps_no_python_resolver(self) -> None:
+        source = _stage_source()
+        assert "def parse_json_in_yaml" not in source
+        assert "def resolve_profile(" not in source
+        assert "repo-class-profile.js" in source
+        assert "loadRepoClasses" in source
+        assert "resolveProfile" in source
+        assert "strict: true" in source
+        assert not hasattr(new_repo, "parse_json_in_yaml")
+        assert not hasattr(new_repo, "resolve_profile")
 
-    def test_unknown_class_stops_the_birth(self) -> None:
-        # A sweep falls back to default; a birth must not. A typo that silently
-        # widens what a repository receives is discovered after it exists.
-        doc = new_repo.parse_json_in_yaml(MINIMAL_POLICY)
-        with pytest.raises(new_repo.BirthError, match="unknown repo class"):
-            new_repo.resolve_profile(doc, "typo_class")
-
-    def test_resolves_declared_class(self) -> None:
-        doc = new_repo.parse_json_in_yaml(MINIMAL_POLICY)
-        profile = new_repo.resolve_profile(doc, "non_constellation_python")
+    @needs_owner_resolver
+    def test_resolves_the_declared_class_through_the_owner(self, tmp_path: Path) -> None:
+        profile = new_repo.resolve_org_profile(_org_fixture(tmp_path), "non_constellation_python")
         assert profile["name"] == "non_constellation_python"
         assert ".github/workflows/governance.yml" in profile["forbid"]
+        assert profile["inherit"] == ["CODE_OF_CONDUCT.md"]
+        assert profile["seed_categories"] == ["codeowners"]
+        # Owner-supplied fields come through untouched; `marker_path` is the one
+        # addition, because the provenance stage needs it.
+        assert profile["resolved_from"] == "marker"
+        assert profile["marker_path"] == ".l9/org-birth-profile.yaml"
+
+    @needs_owner_resolver
+    def test_full_line_comments_are_the_owners_to_strip(self, tmp_path: Path) -> None:
+        root = _org_fixture(tmp_path, "# a comment\n" + MINIMAL_POLICY)
+        assert new_repo.resolve_org_profile(root, "default")["name"] == "default"
+
+    @needs_owner_resolver
+    def test_unknown_class_fails_closed(self, tmp_path: Path) -> None:
+        # A sweep falls back to default; a birth must not. A typo that silently
+        # widens what a repository receives is discovered after it exists.
+        with pytest.raises(new_repo.BirthError, match="unknown repo class typo_class"):
+            new_repo.resolve_org_profile(_org_fixture(tmp_path), "typo_class")
+
+    @needs_owner_resolver
+    @pytest.mark.parametrize("text", ["", "   ", "not json", '{"no": "classes"}'])
+    def test_malformed_policy_fails_closed_in_the_owners_code(
+        self, tmp_path: Path, text: str
+    ) -> None:
+        with pytest.raises(new_repo.BirthError, match="repo-class resolver refused"):
+            new_repo.resolve_org_profile(_org_fixture(tmp_path, text), "default")
+
+    @needs_owner_resolver
+    def test_a_missing_policy_fails_closed(self, tmp_path: Path) -> None:
+        with pytest.raises(new_repo.BirthError, match="policy not found"):
+            new_repo.resolve_org_profile(_org_fixture(tmp_path, None), "default")
+
+    def test_a_checkout_without_the_owner_resolver_fails_closed(self, tmp_path: Path) -> None:
+        (tmp_path / "policies").mkdir()
+        (tmp_path / "policies" / "repo-classes.yml").write_text(MINIMAL_POLICY, encoding="utf-8")
+        with pytest.raises(new_repo.BirthError, match="no ops/repo-class-profile.js"):
+            new_repo.resolve_org_profile(tmp_path, "default")
+
+    @needs_owner_resolver
+    def test_the_current_class_is_an_org_profile_not_a_product_kind(self, tmp_path: Path) -> None:
+        """`non_constellation_python` stays a valid organization birth class.
+
+        It describes what the organization materializes, inherits, forbids and
+        remote-applies for this repository. It says nothing about product kind,
+        and the resolved profile carries no field that could be read as one.
+        """
+        profile = new_repo.resolve_org_profile(_org_fixture(tmp_path), new_repo.BIRTH_PROFILE_CLASS)
+        assert profile["name"] == "non_constellation_python"
+        assert set(profile) == {
+            "name",
+            "description",
+            "seed_categories",
+            "inherit",
+            "forbid",
+            "remote_apply",
+            "mandatory_files_waive",
+            "resolved_from",
+            "marker_path",
+        }
+        for not_a_profile_concern in ("product_kind", "kind", "archetype", "topology"):
+            assert not_a_profile_concern not in profile
 
 
 class TestPatternMatching:
@@ -439,27 +549,33 @@ class TestSessionScaffoldingIsNeverBorn:
     def test_the_birth_dispatch_workflow_is_not_inherited(self) -> None:
         """A newborn is a product, not a second factory.
 
-        `.github/**` is `chassis`, so CODEOWNERS, labels and dependabot ARE
-        inherited. The birth dispatch workflow must not be: it mints an
-        organisation-Administration token, and a newborn carrying it is inert
-        only for as long as nobody creates a `repo-birth` environment there.
+        `.github/**` is `chassis` and the directory IS carried. The birth
+        dispatch workflow must not be: it mints an organisation-Administration
+        token, and a newborn carrying it is inert only for as long as nobody
+        creates a `repo-birth` environment there.
         """
         assert new_repo._is_session_scaffolding(Path(".github/workflows/repo-birth-dispatch.yml"))
 
-    def test_copy_tree_keeps_github_but_drops_the_dispatch_workflow(self, tmp_path: Path) -> None:
-        # The exclusion is one file, not the directory. Proving both halves in
-        # one copy is what stops a future widening from passing silently.
+    def test_copy_tree_keeps_github_but_drops_factory_only_files(self, tmp_path: Path) -> None:
+        # The exclusions are individual files, not the directory. Proving both
+        # halves in one copy is what stops a future widening from passing silently.
         src = tmp_path / "template"
         (src / ".github" / "workflows").mkdir(parents=True)
-        (src / ".github" / "CODEOWNERS").write_text("* @owner\n", encoding="utf-8")
+        (src / ".github" / "README.md").write_text("# .github\n", encoding="utf-8")
+        for org_owned in ("CODEOWNERS", "dependabot.yml", "labels.yml"):
+            (src / ".github" / org_owned).write_text("stale factory copy\n", encoding="utf-8")
         (src / ".github" / "workflows" / "repo-birth-dispatch.yml").write_text(
             "name: x\n", encoding="utf-8"
         )
         dest = tmp_path / "newborn"
         dest.mkdir()
-        new_repo.copy_tree(src, dest)
-        assert (dest / ".github" / "CODEOWNERS").is_file()
+        # The org-owned set is the resolved profile's answer, handed in by the
+        # assembly stage; here it is the factory class's own three files.
+        new_repo.copy_tree(src, dest, org_owned=FACTORY_CLASS_DESTINATIONS)
+        assert (dest / ".github" / "README.md").is_file()
         assert not (dest / ".github" / "workflows" / "repo-birth-dispatch.yml").exists()
+        for org_owned in ("CODEOWNERS", "dependabot.yml", "labels.yml"):
+            assert not (dest / ".github" / org_owned).exists()
 
     def test_copy_tree_leaves_it_behind(self, tmp_path: Path) -> None:
         src = tmp_path / "template"
@@ -492,13 +608,324 @@ class TestSessionScaffoldingIsNeverBorn:
         assert "/.mcp.json" in ignored
 
 
+FACTORY_CLASS_DESTINATIONS = frozenset(
+    {Path(".github/CODEOWNERS"), Path(".github/dependabot.yml"), Path(".github/labels.yml")}
+)
+
+
+class TestOrgOwnedCopiesAreNotInherited:
+    """The factory keeps org-owned files for itself; a newborn gets the org's.
+
+    MATERIALIZE is missing-only and runs after the template copy, so a template
+    copy of ANY destination the class being born materializes would shadow the
+    organization's CURRENT file with this repository's stale one. Which
+    destinations those are is the organization's answer per class — asked of its
+    own seed builder (`org_materialize_destinations`) — never a static list
+    tailored to the factory's own class. An explicit product-payload copy,
+    overlaid in stage 2, still wins — that is what missing-only is for.
+    """
+
+    def test_no_static_class_specific_list_remains(self) -> None:
+        source = _stage_source()
+        assert "TEMPLATE_EXCLUDE_ORG_OWNED" not in source
+        assert "_is_org_owned_copy" not in source
+        assert "def org_materialize_destinations" in source
+        assert "def resolve_org_authority" in source
+
+    @needs_owner_resolver
+    def test_the_factory_class_withholds_exactly_its_three_files(self) -> None:
+        """`non_constellation_python` behavior is preserved, now derived."""
+        assert ORG_SRC is not None
+        profile = new_repo.resolve_org_profile(ORG_SRC, new_repo.BIRTH_PROFILE_CLASS)
+        dests = new_repo.org_materialize_destinations(ORG_SRC, profile, "Quantum-L9/x")
+        assert dests == FACTORY_CLASS_DESTINATIONS
+        # The exclusion is about what a NEWBORN inherits. This repository is
+        # governed by the same organization and keeps its own materialized copies.
+        for rel in dests:
+            assert (REPO / rel).is_file(), f"the factory lost its own {rel}"
+
+    @needs_owner_resolver
+    def test_the_default_class_withholds_the_community_health_files_too(self) -> None:
+        """The case the static list missed: `default` materializes files the
+        factory carries DIFFERENT copies of."""
+        assert ORG_SRC is not None
+        profile = new_repo.resolve_org_profile(ORG_SRC, "default")
+        dests = new_repo.org_materialize_destinations(ORG_SRC, profile, "Quantum-L9/x")
+        assert {Path("CONTRIBUTING.md"), Path("SECURITY.md")} <= dests
+        assert FACTORY_CLASS_DESTINATIONS - {Path(".github/labels.yml")} <= dests
+        for rel in ("CONTRIBUTING.md", "SECURITY.md"):
+            assert (REPO / rel).read_bytes() != (ORG_SRC / rel).read_bytes(), (
+                f"{rel}: the factory's copy must differ for this test to discriminate"
+            )
+
+    @needs_owner_resolver
+    def test_a_default_class_newborn_gets_the_orgs_community_health_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        """Discriminating: stale factory copies withheld, org bytes land."""
+        assert ORG_SRC is not None
+        slug = "Quantum-L9/default-born"
+        profile = new_repo.resolve_org_profile(ORG_SRC, "default")
+        dests = new_repo.org_materialize_destinations(ORG_SRC, profile, slug)
+
+        src = tmp_path / "template"
+        src.mkdir()
+        (src / "CONTRIBUTING.md").write_text("# stale factory contributing\n", encoding="utf-8")
+        (src / "SECURITY.md").write_text("# stale factory security\n", encoding="utf-8")
+        (src / "README.md").write_text("# t\n", encoding="utf-8")
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        new_repo.copy_tree(src, dest, org_owned=dests)
+        assert not (dest / "CONTRIBUTING.md").exists()
+        assert not (dest / "SECURITY.md").exists()
+        assert (dest / "README.md").is_file()
+
+        payload = new_repo._stages._run_seed_builder(
+            ORG_SRC,
+            {
+                "profile": profile,
+                "hasRootCodeowners": False,
+                "hasPython": True,
+                "hasPackageJson": False,
+                "repository": slug,
+            },
+        )
+        written, kept = new_repo.materialize_org_payload(dest, payload)
+        assert kept == []
+        assert {"CONTRIBUTING.md", "SECURITY.md"} <= set(written)
+        # CONTRIBUTING.md carries no repository placeholder: byte-for-byte the
+        # pinned source. SECURITY.md is the organization's own rendering of its
+        # source for this repository (advisory URLs rewritten by the builder).
+        assert (dest / "CONTRIBUTING.md").read_bytes() == (ORG_SRC / "CONTRIBUTING.md").read_bytes()
+        assert (dest / "SECURITY.md").read_text(encoding="utf-8") == payload["SECURITY.md"]
+        assert "stale factory" not in (dest / "SECURITY.md").read_text(encoding="utf-8")
+
+    def test_copy_tree_withholds_only_what_the_profile_names(self, tmp_path: Path) -> None:
+        src = tmp_path / "template"
+        (src / ".github").mkdir(parents=True)
+        (src / ".github" / "CODEOWNERS").write_text("* @factory\n", encoding="utf-8")
+        (src / "CONTRIBUTING.md").write_text("factory\n", encoding="utf-8")
+        (src / "README.md").write_text("# t\n", encoding="utf-8")
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        copied = new_repo.copy_tree(src, dest, org_owned=frozenset({Path("CONTRIBUTING.md")}))
+        assert copied == 2
+        assert (dest / ".github" / "CODEOWNERS").is_file()
+        assert not (dest / "CONTRIBUTING.md").exists()
+        assert (dest / "README.md").is_file()
+
+    def test_copy_tree_withholds_nothing_unless_told(self, tmp_path: Path) -> None:
+        src = tmp_path / "template"
+        (src / ".github").mkdir(parents=True)
+        (src / ".github" / "CODEOWNERS").write_text("* @factory\n", encoding="utf-8")
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        new_repo.copy_tree(src, dest)
+        assert (dest / ".github" / "CODEOWNERS").is_file()
+
+    def _assembled(self, tmp_path: Path) -> Path:
+        src = tmp_path / "template"
+        (src / ".github").mkdir(parents=True)
+        (src / ".github" / "CODEOWNERS").write_text("* @stale-factory-team\n", encoding="utf-8")
+        (src / "README.md").write_text("# t\n", encoding="utf-8")
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        new_repo.copy_tree(src, dest, org_owned=frozenset({Path(".github/CODEOWNERS")}))
+        assert not (dest / ".github" / "CODEOWNERS").exists()
+        return dest
+
+    def test_without_an_override_materialize_supplies_the_orgs_file(self, tmp_path: Path) -> None:
+        dest = self._assembled(tmp_path)
+        written, kept = new_repo.materialize_org_payload(
+            dest, {".github/CODEOWNERS": "* @org-current-team\n"}
+        )
+        assert written == [".github/CODEOWNERS"]
+        assert kept == []
+        assert (dest / ".github" / "CODEOWNERS").read_text(encoding="utf-8") == (
+            "* @org-current-team\n"
+        )
+
+    def test_an_explicit_payload_copy_wins_over_materialize(self, tmp_path: Path) -> None:
+        dest = self._assembled(tmp_path)
+        payload = tmp_path / "payload"
+        (payload / ".github").mkdir(parents=True)
+        (payload / ".github" / "CODEOWNERS").write_text("* @product-team\n", encoding="utf-8")
+        assert new_repo.overlay_payload(payload, dest) == [".github/CODEOWNERS"]
+        written, kept = new_repo.materialize_org_payload(
+            dest, {".github/CODEOWNERS": "* @org-current-team\n"}
+        )
+        assert written == []
+        assert kept == [".github/CODEOWNERS"]
+        assert (dest / ".github" / "CODEOWNERS").read_text(encoding="utf-8") == "* @product-team\n"
+
+
+ORG_ORIGIN = "https://github.com/Quantum-L9/.github.git"
+
+
+def _git(root: Path, *args: str) -> str:
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.email=birth@l9.invalid",
+            "-c",
+            "user.name=birth",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return proc.stdout.strip()
+
+
+def _org_clone(tmp_path: Path, *, origin: str | None = ORG_ORIGIN, detach: bool = False) -> Path:
+    """A committed, clean checkout shaped like Quantum-L9/.github.
+
+    The bytes inside do not matter to the provenance guard under test — only
+    that they are exactly the committed ones. Resolution itself is covered by
+    the owner-resolver tests above.
+    """
+    root = tmp_path / "dot-github"
+    (root / "ops").mkdir(parents=True)
+    (root / "policies").mkdir()
+    (root / "policies" / "repo-classes.yml").write_text(MINIMAL_POLICY, encoding="utf-8")
+    (root / "ops" / "repo-class-profile.js").write_text("// resolver\n", encoding="utf-8")
+    (root / "ops" / "build-seed-payload.js").write_text("// builder\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    if origin:
+        _git(root, "remote", "add", "origin", origin)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "org authority")
+    if detach:
+        _git(root, "checkout", "-q", "--detach")
+    return root
+
+
+def _local_config(src: Path) -> object:
+    return new_repo.BirthConfig(
+        org="Quantum-L9",
+        repo="l9-observability-core",
+        pkg="l9_observability_core",
+        desc="observability",
+        work_dir=Path("/nonexistent"),
+        payload=None,
+        payload_contract=None,
+        template_src=Path("/nonexistent"),
+        org_profile_src=src,
+        repo_class="non_constellation_python",
+        remote=False,
+        private=False,
+        keep=False,
+        receipt_path=None,
+        bootstrap_timeout=1,
+    )
+
+
+class TestLocalOrgAuthorityIsProvenNotAssumed:
+    """`--org-profile-src` records a SHA and executes a working tree.
+
+    The record is true only if the tree IS that commit: a clean checkout of
+    Quantum-L9/.github at a 40-hex HEAD. Dirty authority bytes or a tree that
+    merely resembles the organization's repository are refused before anything
+    is assembled. Offline birth survives; recording one SHA while executing
+    another does not.
+    """
+
+    def test_a_clean_checkout_records_its_head(self, tmp_path: Path) -> None:
+        root = _org_clone(tmp_path)
+        assert new_repo._stages._local_org_authority_sha(root) == _git(root, "rev-parse", "HEAD")
+
+    def test_a_clean_detached_head_is_fine(self, tmp_path: Path) -> None:
+        """`_org_checkout` produces exactly this shape for a remote birth."""
+        root = _org_clone(tmp_path, detach=True)
+        assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
+        assert new_repo._stages._local_org_authority_sha(root) == _git(root, "rev-parse", "HEAD")
+
+    def test_the_config_path_records_the_same_proven_sha(self, tmp_path: Path) -> None:
+        root = _org_clone(tmp_path)
+        assert new_repo._stages._org_policy_sha(_local_config(root)) == _git(
+            root, "rev-parse", "HEAD"
+        )
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "policies/repo-classes.yml",
+            "ops/repo-class-profile.js",
+            "ops/build-seed-payload.js",
+        ],
+    )
+    def test_dirty_authority_bytes_are_refused(self, tmp_path: Path, rel: str) -> None:
+        root = _org_clone(tmp_path)
+        (root / rel).write_text("// edited after HEAD\n", encoding="utf-8")
+        with pytest.raises(new_repo.BirthError, match="dirty") as excinfo:
+            new_repo._stages._local_org_authority_sha(root)
+        assert rel in str(excinfo.value)
+
+    def test_an_untracked_file_is_dirt_too(self, tmp_path: Path) -> None:
+        """It would be read by the builder just like a tracked one."""
+        root = _org_clone(tmp_path)
+        (root / "policies" / "extra.yml").write_text("x\n", encoding="utf-8")
+        with pytest.raises(new_repo.BirthError, match="dirty"):
+            new_repo._stages._local_org_authority_sha(root)
+
+    def test_a_checkout_of_another_repository_is_refused(self, tmp_path: Path) -> None:
+        root = _org_clone(tmp_path, origin="https://github.com/Quantum-L9/not-the-org.git")
+        with pytest.raises(new_repo.BirthError, match="not a Quantum-L9/.github checkout"):
+            new_repo._stages._local_org_authority_sha(root)
+
+    def test_a_checkout_without_an_origin_is_refused(self, tmp_path: Path) -> None:
+        root = _org_clone(tmp_path, origin=None)
+        with pytest.raises(new_repo.BirthError, match="origin is absent"):
+            new_repo._stages._local_org_authority_sha(root)
+
+    def test_a_plain_directory_is_refused(self, tmp_path: Path) -> None:
+        """Before: `git_head` returned 'unknown' and the birth went on."""
+        root = tmp_path / "dot-github"
+        (root / "policies").mkdir(parents=True)
+        (root / "policies" / "repo-classes.yml").write_text(MINIMAL_POLICY, encoding="utf-8")
+        with pytest.raises(new_repo.BirthError, match="not a git checkout"):
+            new_repo._stages._local_org_authority_sha(root)
+
+    def test_a_subdirectory_of_a_checkout_is_refused(self, tmp_path: Path) -> None:
+        root = _org_clone(tmp_path)
+        nested = root / "nested"
+        (nested / "policies").mkdir(parents=True)
+        (nested / "policies" / "repo-classes.yml").write_text(MINIMAL_POLICY, encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "nested")
+        with pytest.raises(new_repo.BirthError, match="not the root of its checkout"):
+            new_repo._stages._local_org_authority_sha(nested)
+
+    def test_a_source_without_the_policy_is_refused(self, tmp_path: Path) -> None:
+        root = _org_clone(tmp_path)
+        _git(root, "rm", "-q", "policies/repo-classes.yml")
+        _git(root, "commit", "-q", "-m", "drop policy")
+        with pytest.raises(new_repo.BirthError, match="has no policies/repo-classes.yml"):
+            new_repo._stages._local_org_authority_sha(root)
+
+    @needs_owner_resolver
+    def test_the_authority_is_resolved_once_and_shared_by_the_stages(self) -> None:
+        """Stage 2 withholds what stage 4 materializes: one resolution, read twice."""
+        assert ORG_SRC is not None
+        cfg = _local_config(ORG_SRC)
+        first = new_repo.resolve_org_authority(cfg)
+        assert first is new_repo.resolve_org_authority(cfg)
+        assert first is cfg.org_authority
+        assert first.sha == _git(ORG_SRC, "rev-parse", "HEAD")
+        assert first.checkout == ORG_SRC
+        assert first.profile["name"] == "non_constellation_python"
+        assert first.materialize_paths == FACTORY_CLASS_DESTINATIONS
+
+
 class TestMaterializeOrgPayload:
     """MATERIALIZE writes the applicable org files BEFORE the initial commit.
 
     A repository that is "born, then offered an org patch" is born incomplete.
-    These assert the write/keep semantics directly, because a real birth
-    against the current template writes nothing — the template already ships
-    all three dests, so the happy path exercises only the keep branch.
+    These assert the write/keep semantics directly.
     """
 
     def test_writes_missing_files(self, tmp_path: Path) -> None:

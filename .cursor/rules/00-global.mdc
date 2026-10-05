@@ -2,15 +2,15 @@
 template: .cursor/rules/templates/00-global.mdc.template
 template_sha256: d2d7516dc8afaacc58264108e72221f74ebc6139e948c55a8eaf7b49097c9eb8
 config: plugin-config.yaml
-config_sha256: 60bf21dd6142f9867e374b83a337d36b2d7997de2bdc83a50ebee6c4935f1f46
-render_id: ba7c586d3b9c3df6b7ea76ba216e0b107aaae05689d4ca9d1d4842160a40c6d4
+config_sha256: 1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19
+render_id: 6cffa628294d33dcb9e9d8b4e0a8a00050236f3b01b54fe5fd5e3073ad428d43
 /L9_RENDERED -->
 ---
 description: "l9-repo-template global conventions — generated from domain cartridge"
 globs: ["**/*"]
 alwaysApply: true
 ---
-<!-- L9_META role: cursor_rule tags: [global, generated, quantum-l9-python-museum] version: 1.2.0 /L9_META -->
+<!-- L9_META role: cursor_rule tags: [global, generated, l9-repo-birth-factory] version: 1.2.0 /L9_META -->
 
 # l9-repo-template Global Agent Conventions
 
@@ -51,7 +51,7 @@ Run in this order:
 ## Repo Cartridge
 
 - Repo: `l9-repo-template`
-- Domain: `quantum-l9-python-museum`
+- Domain: `l9-repo-birth-factory`
 - Package: `l9_example_pkg`
 - App entrypoint: `l9_example_pkg.app:app`
 - Python: `3.12`

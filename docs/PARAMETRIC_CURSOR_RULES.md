@@ -3,11 +3,15 @@
 Reusable `.mdc.template` files become concrete `.cursor/rules/*.mdc` files using
 per-repo values from `plugin-config.yaml`.
 
-Museum templates:
+Chassis templates:
 
-- `l9-python-repo.mdc.template` — non-Constellation Quantum-L9 Python invariants
-- `fastapi.mdc.template` — optional FastAPI conventions (no Gate/SDK)
+- `l9-python-repo.mdc.template` — generic repository/chassis invariants
+- `fastapi.mdc.template` — optional FastAPI conventions for the reference payload
+  (rendered only when `app_entrypoint` is materialized)
 - `l9-agents.mdc.template` / `00-global` / `10-domain-cartridge` — agent cartridge
+
+Generated rules describe repository and chassis invariants only. They do not
+classify the product kind of the repository they are rendered into.
 
 ## First render
 

@@ -1,4 +1,4 @@
-# Repo birth (non-Constellation)
+# Repo birth
 
 ```bash
 # [0] compile the payload from a clean checkout of the actual source repository
@@ -41,16 +41,20 @@ make new-repo
                            · target repo does not already exist · recompute the
                            source manifest and require the compiled digest
       ▼
-[2] ASSEMBLE LOCALLY       current l9-repo-template · rename/stamp identity
-                           · optional product PAYLOAD · payload ownership
+[2] ASSEMBLE LOCALLY       resolve the org class once (proven .github authority)
+                           · withhold the paths that class MATERIALIZEs · current
+                           l9-repo-template · rename/stamp identity · optional
+                           product PAYLOAD · payload ownership
       ▼
 [3] FINALIZE               canonical LICENSE · uv lock · ruff safe autofix +
    AUTOMATICALLY           format · reconcile plugin-config · render generated
                            rules · compile agent docs via governance's own
                            skill (advisory) · regenerate manifests
       ▼
-[4] APPLY ORG BIRTH        current Quantum-L9/.github · only applicable
-    PROFILE                non-inheritable controls · current org SHA recorded
+[4] APPLY ORG BIRTH        the same Quantum-L9/.github resolution as stage 2
+    PROFILE                (class by the org's own ops/repo-class-profile.js,
+                           payload by its build-seed-payload.js) · only applicable
+                           non-inheritable controls · proven org SHA recorded
       ▼
 [5] STAMP BIRTH            .l9-template-version · .l9/org-birth-profile.yaml
     PROVENANCE             · .l9/birth-receipt.json · .l9/template-state.yaml
@@ -329,8 +333,8 @@ organization has had its say — never copied in with the template and hoped ove
 | `PAYLOAD` | no | product files. A fragment is overlaid (payload wins on collision); a whole repository is **authoritative** — see below |
 | `PAYLOAD_CONTRACT` | for an authoritative payload | the compiled `l9.birth-payload/v1` authorizing those bytes |
 | `ORG` | no | GitHub owner (default `Quantum-L9`) |
-| `WORK_DIR` | no | where the repository is assembled (default `/tmp/l9-births`) |
-| `CLASS` | no | org repo class (default `non_constellation_python`) |
+| `WORK_DIR` | no | where the repository is assembled (default `$XDG_STATE_HOME/l9/births`, i.e. `~/.local/state/l9/births`, created `0700`; never a predictable world-writable `/tmp` path) |
+| `CLASS` | no | organization birth/distribution class (default `non_constellation_python`), resolved strictly by `Quantum-L9/.github` `ops/repo-class-profile.js`. It is **not** a ProductKind |
 | `ORG_PROFILE_SRC` | no | local `Quantum-L9/.github` checkout — skips the `gh` read, enables an offline birth |
 | `RECEIPT` | no | where to write the run's operator receipt JSON |
 | `PRIVATE` | no | create the repository private |
@@ -530,9 +534,22 @@ reader.
 
 ## The org birth profile
 
-Stage 4 reads `policies/repo-classes.yml` from `Quantum-L9/.github` at its
-current SHA and applies the class this repository declares in
-`.l9/org-birth-profile.yaml`. The organization contract has four modes:
+Stage 4 resolves the class (`CLASS`, default `non_constellation_python`) by
+running the organization's **own** resolver — `ops/repo-class-profile.js`
+(`loadRepoClasses` → `resolveProfile(..., {strict: true})`) — from a
+`Quantum-L9/.github` checkout at the recorded SHA, then builds what that class
+materializes with the organization's own `ops/build-seed-payload.js` from the
+same checkout. Python transports the class name in and the resolved profile
+out; it keeps no parser, resolver, or pattern grammar for the policy. An
+unknown class, a malformed policy, or a missing policy file stops the birth with
+the organization's own message.
+
+The class is an organization birth/distribution profile: what the repository
+receives, inherits, must never carry, and gets applied remotely. It is **not** a
+ProductKind, and nothing in birth reads it, the payload's shape, or the
+assembled tree as one. Product semantics arrive resolved from upstream.
+
+The organization contract has four modes:
 
 | Mode | Meaning |
 |------|---------|
@@ -552,6 +569,48 @@ itself in the face: the organization seeder's historic default categories write
 11 paths that this template's `scripts/inventory_check.py` fails closed on.
 Class-aware seeding means the newborn is given applicable *capabilities*, not
 all files.
+
+`MATERIALIZE` is missing-only, and it runs after the template copy. So the
+template copy in stage 2 deliberately contributes **none** of the organization's
+MATERIALIZE destinations for the class being born. Which paths those are is the
+organization's answer, not a list kept here: stage 2 resolves the class first
+(`resolve_org_authority`) and asks the organization's own `build-seed-payload.js`
+what the profile intends to write (`org_materialize_destinations`), then
+withholds exactly those paths from the template copy. For
+`non_constellation_python` that is `.github/CODEOWNERS`, `.github/dependabot.yml`
+and `.github/labels.yml`; for `default` it also includes the community-health
+files `CONTRIBUTING.md` and `SECURITY.md`, of which this repository carries its
+own, different copies. A static three-path list would have let those stale
+copies outrank the organization's for every class but the factory's own. The
+receipt names the withheld paths (`org-owned paths withheld`). A newborn
+receives the organization's *current* files from the pinned checkout, never a
+stale factory copy that missing-only would otherwise have kept. A product
+payload that explicitly ships one of those paths is overlaid in stage 2 and
+still wins — the repository/product override stays closer than the organization
+default, exactly as the seeder intends.
+
+Stage 2 and stage 4 read **one** resolution. The same `OrgAuthority` (SHA,
+checkout, profile, MATERIALIZE set) that decided what to withhold decides what
+to write; resolving twice could bind the two halves to two different answers.
+
+### Offline authority is proven, not assumed
+
+`--org-profile-src` points birth at a local `Quantum-L9/.github` checkout and
+records its HEAD as `org_policy_sha`. The resolver, the policy and the seed
+builder are then executed out of that working tree, so the record is true only
+if the tree *is* that commit. Birth therefore refuses, before anything is
+assembled, a source that:
+
+- is not a git checkout, or is not the root of one;
+- has no 40-hex `HEAD`;
+- has an `origin` that is not `Quantum-L9/.github` (a tree that merely carries
+  the right paths is not the organization's repository);
+- is dirty — a modified policy, resolver or builder, or any untracked file.
+
+A clean detached `HEAD` passes: that is exactly what `_org_checkout` produces
+for a remote birth, and detachment says nothing about the bytes. Offline birth
+is preserved; what is removed is the ability to record one SHA while executing
+another.
 
 See `docs/REPO_BIRTH_PROFILES.md` in `Quantum-L9/.github` for the contract.
 
@@ -796,11 +855,12 @@ workflow, so `canonical_ci.discover_bindings()` returns `[]` and the ownership
 boundary above is untouched.
 
 It lives in the template and is **not** inherited by a newborn. That is not
-automatic: `.github/**` is `chassis`, so CODEOWNERS, labels and dependabot are
-carried into every newborn, and the first version of this workflow was carried
-with them — verified on a real local birth. `TEMPLATE_EXCLUDE_PATHS` in
-`new_repo.py` excludes this one file from the template copy, alongside the
-top-level session-scaffolding exclusion it extends. A repository born from this
+automatic: `.github/**` is `chassis`, so the directory is carried into every
+newborn, and the first version of this workflow was carried with it — verified
+on a real local birth. `TEMPLATE_EXCLUDE_PATHS` in the birth stages excludes
+this one file from the template copy, alongside the top-level
+session-scaffolding exclusion and the profile-derived org-owned MATERIALIZE
+destinations (`org_materialize_destinations`) it sits beside. A repository born from this
 template is a product, not a second factory: inheriting a dispatchable workflow
 that mints an organisation-Administration token would be inert only for as long
 as nobody created a `repo-birth` environment there, and not inert at all had
@@ -825,7 +885,7 @@ does **not** apply the org birth profile and does not attest the remote — use
 `make new-repo` for a real birth.
 
 ```bash
-export PLAY_DIR=/tmp/museum-birth-demo
+export PLAY_DIR=/tmp/l9-birth-demo
 mkdir -p "$PLAY_DIR"
 cp scripts/birth-runner/config.template.yaml "$PLAY_DIR/config.yaml"
 # edit config.yaml: org, repo_name, package_name, description, work_dir
@@ -834,5 +894,3 @@ bash scripts/birth-runner/02_bootstrap.sh
 bash scripts/birth-runner/03_verify.sh
 PUSH=1 bash scripts/birth-runner/04_push.sh   # optional, explicit
 ```
-
-No PackageTemplate plays catalog. No Gate-worker birth framing.
