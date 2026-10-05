@@ -310,9 +310,21 @@ def _check_pattern(errors: list[str], doc: Mapping, key: str, pattern: re.Patter
 
 
 def _check_nonempty(errors: list[str], doc: Mapping, key: str, where: str) -> None:
+    """A semantic token: non-empty, no surrounding whitespace, one line.
+
+    The same rule the published schema states as `^\\S(.*\\S)?$`. A token the
+    gate trims but the schema rejects would be a binding two readers disagree
+    on, and an exact coordinate is compared, never normalized.
+    """
     value = doc.get(key)
-    if not isinstance(value, str) or not value.strip():
-        errors.append(f"{where}.{key} is not a non-empty string")
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or "\n" in value
+        or "\r" in value
+    ):
+        errors.append(f"{where}.{key} is not a non-empty single-line token without padding")
 
 
 def validate_binding_document(document: object) -> list[str]:
