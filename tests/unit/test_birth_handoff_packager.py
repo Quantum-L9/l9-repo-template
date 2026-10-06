@@ -636,3 +636,25 @@ class TestThePrepareGateStillDecides:
         receipt = self._receipt(cfg, "0" * 40)
         with pytest.raises(new_repo.BirthError, match="running factory revision"):
             new_repo._stages._preflight_product_birth_adapter(cfg, receipt)
+
+
+def test_the_cli_reports_a_refusal_and_exits_nonzero(
+    fx: Fixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = packager.main(
+        [
+            "--source",
+            str(fx.source),
+            "--evidence",
+            str(fx.root / "absent-evidence.json"),
+            "--manifest",
+            str(fx.manifest),
+            "--manifest-ref",
+            fx.manifest_ref,
+            "--out-dir",
+            str(fx.out),
+        ]
+    )
+    assert code == 1
+    assert "REPO_BIRTH_HANDOFF: FAIL" in capsys.readouterr().err
+    assert _outputs(fx.out) == []
