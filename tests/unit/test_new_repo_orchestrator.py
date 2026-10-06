@@ -1692,8 +1692,9 @@ class TestProductBirthAdapterGate:
     ) -> None:
         bundle = _write_adapter_bundle(tmp_path / "bundle")
         cfg = _adapter_config(tmp_path, bundle, "payload", *names)
+        receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="partial product-birth adapter bundle"):
-            _prepare_until_assembly(monkeypatch, cfg, preflight_trace, new_repo.BirthReceipt())
+            _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
         assert "adapter" not in preflight_trace
         assert "assemble" not in preflight_trace
 
@@ -1702,8 +1703,9 @@ class TestProductBirthAdapterGate:
     ) -> None:
         bundle = _write_adapter_bundle(tmp_path / "bundle")
         cfg = _adapter_config(tmp_path, bundle, *ADAPTER_FLAGS)
+        receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="requires the compiled l9.birth-payload/v1"):
-            _prepare_until_assembly(monkeypatch, cfg, preflight_trace, new_repo.BirthReceipt())
+            _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
         assert "adapter" not in preflight_trace
         assert "assemble" not in preflight_trace
 
@@ -1723,8 +1725,9 @@ class TestProductBirthAdapterGate:
     ) -> None:
         bundle = _write_adapter_bundle(tmp_path / "bundle", manifest_digest="sha256:" + "9" * 64)
         cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="MANIFEST_DIGEST_MISMATCH"):
-            _prepare_until_assembly(monkeypatch, cfg, preflight_trace, new_repo.BirthReceipt())
+            _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
         assert "adapter" in preflight_trace
         assert "assemble" not in preflight_trace
 
@@ -1764,8 +1767,9 @@ class TestProductBirthAdapterGate:
         bundle = _write_adapter_bundle(tmp_path / "bundle")
         cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
         bundle["manifest"].unlink()
+        receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="adapter input unreadable"):
-            new_repo.stage_preflight(cfg, new_repo.BirthReceipt())
+            new_repo.stage_preflight(cfg, receipt)
         assert "adapter" not in preflight_trace
 
     @pytest.mark.parametrize("kind", ["node", "library"])
