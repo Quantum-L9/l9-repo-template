@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "l9.repo-birth-contract/v1",
+  "title": "Repository birth handoff contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "operation", "source", "lineage", "factory", "payload"],
+  "properties": {
+    "schema": {"const": "l9.repo-birth-contract/v1"},
+    "operation": {"enum": ["local_validation", "remote_birth"]},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "repository", "revision", "tree_sha", "clean"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "clean": {"const": true}
+      }
+    },
+    "lineage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["idea_execute_receipt", "gar_decision", "plan", "campaign_source", "pe_receipt", "acceptance_evidence_refs"],
+      "properties": {
+        "idea_execute_receipt": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "gar_decision": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "plan": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "campaign_source": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "pe_receipt": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "acceptance_evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "factory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "revision", "compiler", "birth_front_door"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "compiler": {"type": "string", "minLength": 1},
+        "birth_front_door": {"type": "string", "minLength": 1}
+      }
+    },
+    "payload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ref", "digest", "schema"],
+      "properties": {
+        "ref": {"type": "string", "minLength": 1},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "schema": {"const": "l9.birth-payload/v1"}
+      }
+    }
+  }
+}

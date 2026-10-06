@@ -53,7 +53,7 @@ canonicalization belongs to the semantic compiler, so it is compared as an
 exact opaque string and never recomputed here. Birth-contract and payload
 digests follow the factory's own artifact convention — `sha256:` over the
 bytes of the artifact as written — the same one `compile_birth_payload.py` and
-the governance handoff packager already use.
+the factory's own packager (`package_birth_handoff.py`) already use.
 
 Unresolved state fails closed. The upstream schema says a manifest may carry
 `unresolved` entries while only HARD gaps block the resolved-manifest gate, but
@@ -69,9 +69,9 @@ adapter stage; guessing today would be the reinterpretation the boundary forbids
 Exit 0 when admissible, 1 when not, 2 when an input cannot be read at all.
 Dependency-free at runtime, like the rest of the birth engine. Authority cited:
 `Quantum-L9/.github@43600db3` `semantics/product_manifest.schema.yaml`,
-`semantics/product_kinds.yaml`, `semantics/authority_model.yaml`;
-`Quantum-L9/Cursor-Governance@884dbd15`
-`skills/l9-repo-birth/schemas/birth-contract.schema.json`.
+`semantics/product_kinds.yaml`, `semantics/authority_model.yaml`; the
+`l9.repo-birth-contract/v1` shape is this factory's own
+`scripts/birth-runner/schemas/birth-contract.schema.json`.
 """
 
 from __future__ import annotations
@@ -209,7 +209,7 @@ def artifact_digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-# The one rendering the factory and the governance handoff packager write to
+# The one rendering the factory and its handoff packager write to
 # disk. The compiler already owns it; a second definition here would be a second
 # place for the on-disk bytes — and so the artifact digest — to drift from.
 render_document = compiler.render_payload

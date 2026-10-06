@@ -114,7 +114,7 @@ def make_payload() -> dict[str, object]:
 
 
 def make_birth_contract(payload: adapter.Artifact, **overrides: object) -> dict[str, object]:
-    """An l9.repo-birth-contract/v1 as the governance packager emits it."""
+    """An l9.repo-birth-contract/v1 as the factory packager emits it."""
     contract: dict[str, object] = {
         "schema": adapter.BIRTH_CONTRACT_SCHEMA,
         "operation": "local_validation",
