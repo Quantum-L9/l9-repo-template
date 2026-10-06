@@ -41,8 +41,10 @@ This is a thin Claude-specific overlay. It does not replace or duplicate
   presence, Gate presence, repo class, or template ancestry.
 - The Python/FastAPI content under `src/` is a reference/example payload, not
   factory law. SDK compatibility of a born product is product-owned.
-- The birthing adapter does not exist yet; `.l9/architecture.yaml` only names
-  that boundary. Do not implement or simulate it here.
+- The pure product-to-birth adapter exists:
+  `scripts/birth-runner/l9_birth_adapter.py`. PREPARE invokes it for an
+  adapter-backed birth. Agents may wire and invoke it, but must not duplicate
+  it or turn it into a semantic compiler; product semantics stay upstream.
 - Extend existing surfaces. Do not create parallel runners, duplicate configs,
   duplicate agent law, or repository-local copies of centrally owned CI logic.
 - A repository-shaped birth payload owns its product surfaces; do not restore

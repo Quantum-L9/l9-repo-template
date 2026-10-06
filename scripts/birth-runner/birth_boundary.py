@@ -177,6 +177,15 @@ def _prepare_argv(args: argparse.Namespace) -> list[str]:
         argv += ["--payload-contract", str(args.payload_contract)]
     if args.org_profile_src:
         argv += ["--org-profile-src", str(args.org_profile_src)]
+    # The adapter-backed birth bundle is PREPARE input only: the engine's
+    # preflight admits or refuses it, and the handoff never carries it.
+    for flag, value in (
+        ("--product-birth-binding", args.product_birth_binding),
+        ("--product-manifest", args.product_manifest),
+        ("--repo-birth-contract", args.repo_birth_contract),
+    ):
+        if value:
+            argv += [flag, str(value)]
     if args.private:
         argv += ["--private"]
     return argv
@@ -355,6 +364,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     prep.add_argument("--org", default=nr.DEFAULT_ORG)
     prep.add_argument("--payload", type=Path)
     prep.add_argument("--payload-contract", type=Path)
+    prep.add_argument("--product-birth-binding", type=Path)
+    prep.add_argument("--product-manifest", type=Path)
+    prep.add_argument("--repo-birth-contract", type=Path)
     prep.add_argument("--work-dir", type=Path, required=True)
     prep.add_argument("--template-src", type=Path, default=ROOT)
     prep.add_argument("--org-profile-src", type=Path, required=True)

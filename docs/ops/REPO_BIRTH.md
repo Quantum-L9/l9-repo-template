@@ -583,9 +583,18 @@ Two reading rules keep it an adapter rather than a second compiler:
 The output (`l9.product-birth-binding-result/v1`) is evidence for the factory,
 authority class `evidence`: admissible or not, the exact validated coordinates
 when it is, and every deterministic failure code when it is not. It grants
-nothing — not mutation, governance, semantic, or release authority — and
-nothing in `new_repo.py` or `birth_frontdoor.py` calls it yet. Wiring it into
-orchestration is a separate stage.
+nothing — not mutation, governance, semantic, or release authority.
+
+PREPARE invokes it. `stage_preflight` runs `_preflight_product_birth_adapter`
+after `_preflight_payload_contract` has reproduced the compiled payload and
+before anything is assembled. The binding, the resolved ProductManifest and the
+repo-birth contract (`--product-birth-binding`, `--product-manifest`,
+`--repo-birth-contract`; workflow inputs `product_birth_binding_path`,
+`product_manifest_path`, `repo_birth_contract_path`, resolved inside the payload
+checkout) come all together or not at all, and with them the compiled payload is
+required. None of them: the birth is unchanged and the stage records SKIP. A
+partial bundle, a missing payload, or an inadmissible result stops PREPARE. The
+bundle never crosses into `l9.repo-birth-handoff/v1`; PUBLISH does not see it.
 
 ## The org birth profile
 
