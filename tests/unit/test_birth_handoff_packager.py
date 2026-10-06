@@ -679,3 +679,31 @@ def test_the_cli_reports_a_refusal_and_exits_nonzero(
     assert code == 1
     assert "REPO_BIRTH_HANDOFF: FAIL" in capsys.readouterr().err
     assert _outputs(fx.out) == []
+
+
+class TestTheOutputDirectory:
+    def test_a_refused_rerun_keeps_the_previous_bundle(self, fx: Fixture) -> None:
+        """A refusal never deletes what a previous successful run left there."""
+        fx.package()
+        before = {name: (fx.out / name).read_bytes() for name in _outputs(fx.out)}
+        fx.write_manifest(adapter_fixtures.make_manifest(unresolved=[{"id": "gap"}]))
+        with pytest.raises(packager.HandoffError, match="MANIFEST_UNRESOLVED"):
+            fx.package()
+        assert {name: (fx.out / name).read_bytes() for name in _outputs(fx.out)} == before
+
+    def test_unrelated_files_in_the_output_directory_survive_a_refusal(self, fx: Fixture) -> None:
+        fx.out.mkdir()
+        (fx.out / "notes.txt").write_text("keep me\n", encoding="utf-8")
+        fx.write_manifest(adapter_fixtures.make_manifest(unresolved=[{"id": "gap"}]))
+        with pytest.raises(packager.HandoffError):
+            fx.package()
+        assert _outputs(fx.out) == ["notes.txt"]
+
+    @pytest.mark.parametrize("inside", [".", "handoff", "lineage/out"])
+    def test_an_output_directory_inside_the_source_is_refused(
+        self, fx: Fixture, inside: str
+    ) -> None:
+        """Writing there would dirty the snapshot the contract attests as clean."""
+        with pytest.raises(packager.HandoffError, match="inside the source checkout"):
+            fx.package(out_dir=fx.source / inside)
+        assert _git(fx.source, "status", "--porcelain") == ""

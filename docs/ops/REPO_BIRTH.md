@@ -616,7 +616,9 @@ It writes `birth-payload.json` (the existing compiler's output),
 `birth-contract.json` (`l9.repo-birth-contract/v1`,
 `schemas/birth-contract.schema.json`) and `product-birth-binding.json`, then
 proves them with the adapter. Packaging passes only when the adapter admits the
-bundle, and a refused bundle leaves nothing behind.
+bundle. A refused bundle leaves the output directory exactly as it was, and the
+output directory may not lie inside the source checkout, because writing there
+would dirty the snapshot the contract attests as clean.
 
 - **The running repository is the factory.** Its coordinate is its own clean,
   committed HEAD, and only a checkout whose `origin` is

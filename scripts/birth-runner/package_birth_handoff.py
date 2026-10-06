@@ -27,7 +27,8 @@ factory; there is no `--factory` argument to point the packager somewhere else.
                              [--source-repository OWNER/NAME]
 
 Exit 0 and a PASS document when the existing adapter admits the bundle, 1
-otherwise. A refused bundle leaves nothing in the output directory.
+otherwise. A refused bundle leaves the output directory exactly as it was, and
+the output directory may not lie inside the source checkout.
 Dependency-free at runtime, like the rest of the birth engine. Moved from
 Cursor-Governance `skills/l9-repo-birth` (BIRTH-OWNERSHIP-CONSOLIDATION-001A).
 """
@@ -38,7 +39,9 @@ import argparse
 import importlib.util
 import json
 import re
+import shutil
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -422,6 +425,11 @@ def package(
         )
     source, out_dir = source.resolve(), out_dir.resolve()
     factory_root, manifest_path = factory_root.resolve(), manifest_path.resolve()
+    if out_dir == source or source in out_dir.parents:
+        raise HandoffError(
+            f"--out-dir {out_dir} is inside the source checkout — writing the bundle there "
+            "would dirty the snapshot the birth contract attests as clean"
+        )
 
     manifest = load_json(manifest_path, "ProductManifest")
     coordinates = manifest_coordinates(manifest)
@@ -498,23 +506,28 @@ def package(
     if binding_errors:
         raise HandoffError("product-birth binding malformed: " + "; ".join(binding_errors))
 
+    # Staged and proven beside the destination, then moved into place only on
+    # PASS: a refusal leaves out_dir exactly as it was, including any bundle a
+    # previous run left there. Proven from the bytes on disk, so the verdict is
+    # about what is handed on; refs name the final paths, which the adapter
+    # binds by digest, not by location.
     out_dir.mkdir(parents=True, exist_ok=True)
-    written = (payload_path, contract_path, binding_path)
+    stage = Path(tempfile.mkdtemp(prefix=".package-birth-handoff-", dir=out_dir))
     try:
-        payload_path.write_bytes(payload_bytes)
-        contract_path.write_bytes(contract_bytes)
-        _write(binding_path, binding)
-        # Proven from the bytes on disk, so the verdict is about what is handed on.
+        staged = {name: stage / name for name in (PAYLOAD_NAME, CONTRACT_NAME, BINDING_NAME)}
+        staged[PAYLOAD_NAME].write_bytes(payload_bytes)
+        staged[CONTRACT_NAME].write_bytes(contract_bytes)
+        _write(staged[BINDING_NAME], binding)
         result = prove_bundle(
-            binding=binding_path,
+            binding=staged[BINDING_NAME],
             manifest=manifest_path,
-            birth_contract=contract_path,
-            payload=payload_path,
+            birth_contract=staged[CONTRACT_NAME],
+            payload=staged[PAYLOAD_NAME],
         )
-    except BaseException:
-        for path in written:
-            path.unlink(missing_ok=True)
-        raise
+        for name, path in staged.items():
+            path.replace(out_dir / name)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
     return {
         "status": "PASS",
         "operation": operation,
