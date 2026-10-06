@@ -681,29 +681,128 @@ def test_the_cli_reports_a_refusal_and_exits_nonzero(
     assert _outputs(fx.out) == []
 
 
-class TestTheOutputDirectory:
-    def test_a_refused_rerun_keeps_the_previous_bundle(self, fx: Fixture) -> None:
-        """A refusal never deletes what a previous successful run left there."""
+def _state(out: Path) -> dict[str, tuple[bytes, int]]:
+    """Every entry in the output directory, hidden ones included, with bytes and mtime."""
+    if not out.exists():
+        return {}
+    return {
+        p.name: (p.read_bytes() if p.is_file() else b"<dir>", p.stat().st_mtime_ns)
+        for p in sorted(out.iterdir())
+    }
+
+
+BUNDLE = ["birth-contract.json", "birth-payload.json", "product-birth-binding.json"]
+
+
+class TestTransactionalEmission:
+    """F-051-001: a failed invocation never destroys, replaces or half-updates a proven bundle."""
+
+    def test_a_first_emission_exposes_exactly_the_proven_bundle(self, fx: Fixture) -> None:
         fx.package()
-        before = {name: (fx.out / name).read_bytes() for name in _outputs(fx.out)}
+        assert _outputs(fx.out) == BUNDLE
+
+    def test_a_deterministic_rerun_is_a_no_op(self, fx: Fixture) -> None:
+        fx.package()
+        before = _state(fx.out)
+        fx.package()
+        assert _state(fx.out) == before, "an identical proven bundle is left untouched"
+
+    def test_an_adapter_refusal_preserves_the_prior_bundle_exactly(self, fx: Fixture) -> None:
+        fx.package()
+        before = _state(fx.out)
         fx.write_manifest(adapter_fixtures.make_manifest(unresolved=[{"id": "gap"}]))
         with pytest.raises(packager.HandoffError, match="MANIFEST_UNRESOLVED"):
             fx.package()
-        assert {name: (fx.out / name).read_bytes() for name in _outputs(fx.out)} == before
+        assert _state(fx.out) == before
+
+    @pytest.mark.parametrize("refusal", ["manifest_ref", "dirty_source", "evidence"])
+    def test_an_early_refusal_cannot_make_a_stale_bundle_look_new(
+        self, fx: Fixture, refusal: str
+    ) -> None:
+        fx.package()
+        before = _state(fx.out)
+        overrides: dict[str, object] = {}
+        if refusal == "manifest_ref":
+            overrides["manifest_ref"] = ""
+        elif refusal == "dirty_source":
+            (fx.source / "dirty.txt").write_text("drift\n", encoding="utf-8")
+        else:
+            fx.write_evidence({**fx.evidence_doc, "plan": "sha256:" + "b" * 64})
+        with pytest.raises(packager.HandoffError):
+            fx.package(**overrides)
+        assert _state(fx.out) == before
+
+    def test_a_failure_while_exposing_never_leaves_a_mixed_bundle(
+        self, fx: Fixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The second file's exposure fails after the first moved: everything rolls back."""
+        fx.package()
+        before = _state(fx.out)
+        fx.write_evidence(fx.evidence_doc)
+        real_replace = Path.replace
+
+        def failing_replace(self: Path, target: object) -> Path:
+            if Path(str(target)).name == "birth-contract.json" and self.parent != fx.out:
+                raise OSError("simulated failure exposing the birth contract")
+            return real_replace(self, target)
+
+        monkeypatch.setattr(Path, "replace", failing_replace)
+        fx.write_manifest(
+            adapter_fixtures.make_manifest(
+                product={"id": "l9.product/ideaos", "kind": "library", "archetype_ref": "a@1"}
+            )
+        )
+        with pytest.raises(OSError, match="simulated failure"):
+            fx.package()
+        assert _state(fx.out) == before
+
+    def test_a_failure_while_exposing_into_an_empty_directory_leaves_it_empty(
+        self, fx: Fixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_replace = Path.replace
+
+        def failing_replace(self: Path, target: object) -> Path:
+            if Path(str(target)).name == "product-birth-binding.json":
+                raise OSError("simulated failure exposing the binding")
+            return real_replace(self, target)
+
+        monkeypatch.setattr(Path, "replace", failing_replace)
+        with pytest.raises(OSError, match="simulated failure"):
+            fx.package()
+        assert _outputs(fx.out) == []
 
     def test_unrelated_files_in_the_output_directory_survive_a_refusal(self, fx: Fixture) -> None:
         fx.out.mkdir()
         (fx.out / "notes.txt").write_text("keep me\n", encoding="utf-8")
+        before = _state(fx.out)
         fx.write_manifest(adapter_fixtures.make_manifest(unresolved=[{"id": "gap"}]))
         with pytest.raises(packager.HandoffError):
             fx.package()
-        assert _outputs(fx.out) == ["notes.txt"]
+        assert _state(fx.out) == before
 
-    @pytest.mark.parametrize("inside", [".", "handoff", "lineage/out"])
-    def test_an_output_directory_inside_the_source_is_refused(
-        self, fx: Fixture, inside: str
+
+class TestOutputIsolation:
+    """F-051-002: the handoff lives outside both authoritative trees."""
+
+    @pytest.mark.parametrize(
+        ("tree", "inside"),
+        [
+            ("source", "."),
+            ("source", "handoff"),
+            ("source", "lineage/out"),
+            ("factory", "."),
+            ("factory", "handoff"),
+            ("factory", "scripts/birth-runner/out"),
+        ],
+    )
+    def test_an_output_directory_in_either_tree_is_refused(
+        self, fx: Fixture, tree: str, inside: str
     ) -> None:
-        """Writing there would dirty the snapshot the contract attests as clean."""
-        with pytest.raises(packager.HandoffError, match="inside the source checkout"):
-            fx.package(out_dir=fx.source / inside)
+        root = fx.source if tree == "source" else fx.factory
+        target = root / inside
+        existed = target.exists()
+        with pytest.raises(packager.HandoffError, match=f"inside the {tree} checkout"):
+            fx.package(out_dir=target)
         assert _git(fx.source, "status", "--porcelain") == ""
+        assert _git(fx.factory, "status", "--porcelain") == ""
+        assert target.exists() == existed

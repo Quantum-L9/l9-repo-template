@@ -28,7 +28,7 @@ factory; there is no `--factory` argument to point the packager somewhere else.
 
 Exit 0 and a PASS document when the existing adapter admits the bundle, 1
 otherwise. A refused bundle leaves the output directory exactly as it was, and
-the output directory may not lie inside the source checkout.
+the output directory may lie inside neither the source nor the factory checkout.
 Dependency-free at runtime, like the rest of the birth engine. Moved from
 Cursor-Governance `skills/l9-repo-birth` (BIRTH-OWNERSHIP-CONSOLIDATION-001A).
 """
@@ -406,6 +406,54 @@ def _write(path: Path, document: Mapping[str, object]) -> None:
     path.write_text(compiler.render_payload(dict(document)), encoding="utf-8")
 
 
+def _refuse_output_inside(out_dir: Path, source: Path, factory_root: Path) -> None:
+    """The handoff lives outside both authoritative trees, checked before any write."""
+    reasons = {
+        "source": "writing the bundle there would dirty the snapshot the birth contract "
+        "attests as clean",
+        "factory": "writing the bundle there would dirty the factory after its coordinate "
+        "is captured, and could carry packaging artifacts into a newborn",
+    }
+    for label, tree in (("source", source), ("factory", factory_root)):
+        if out_dir == tree or tree in out_dir.parents:
+            raise HandoffError(
+                f"--out-dir {out_dir} is inside the {label} checkout — {reasons[label]}"
+            )
+
+
+def _expose(staged: dict[str, Path], out_dir: Path, stage: Path) -> None:
+    """Make a proven, staged bundle current: all three files, or none of them.
+
+    An identical bundle already in place is left untouched, so a deterministic
+    re-run is a no-op. Otherwise the current files are backed up (bytes and
+    timestamps) before anything moves, and any failure part-way restores them,
+    so out_dir never shows a mix of two bundles.
+    """
+    finals = {name: out_dir / name for name in staged}
+    if all(
+        final.is_file() and final.read_bytes() == staged[name].read_bytes()
+        for name, final in finals.items()
+    ):
+        return
+    backups: dict[str, Path] = {}
+    for name, final in finals.items():
+        if final.is_file():
+            backups[name] = stage / f"previous-{name}"
+            shutil.copy2(final, backups[name])
+    exposed: list[str] = []
+    try:
+        for name, path in staged.items():
+            path.replace(finals[name])
+            exposed.append(name)
+    except BaseException:
+        for name in exposed:
+            if name in backups:
+                backups[name].replace(finals[name])
+            else:
+                finals[name].unlink(missing_ok=True)
+        raise
+
+
 def package(
     *,
     source: Path,
@@ -425,11 +473,7 @@ def package(
         )
     source, out_dir = source.resolve(), out_dir.resolve()
     factory_root, manifest_path = factory_root.resolve(), manifest_path.resolve()
-    if out_dir == source or source in out_dir.parents:
-        raise HandoffError(
-            f"--out-dir {out_dir} is inside the source checkout — writing the bundle there "
-            "would dirty the snapshot the birth contract attests as clean"
-        )
+    _refuse_output_inside(out_dir, source, factory_root)
 
     manifest = load_json(manifest_path, "ProductManifest")
     coordinates = manifest_coordinates(manifest)
@@ -524,8 +568,7 @@ def package(
             birth_contract=staged[CONTRACT_NAME],
             payload=staged[PAYLOAD_NAME],
         )
-        for name, path in staged.items():
-            path.replace(out_dir / name)
+        _expose(staged, out_dir, stage)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     return {
