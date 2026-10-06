@@ -57,3 +57,46 @@ def test_gov_wrapper_skips_when_gov_root_missing() -> None:
 def test_inventory_check_target() -> None:
     proc = _make("inventory-check")
     assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+def test_public_birth_target_forwards_the_adapter_bundle() -> None:
+    """`make birth` is the advertised front door; it must carry the adapter paths."""
+    proc = _make(
+        "-n",
+        "birth",
+        "REPO=demo",
+        "PKG=demo",
+        "DESC=demo",
+        "PRODUCT_BIRTH_BINDING_PATH=birth/binding.json",
+        "PRODUCT_MANIFEST_PATH=birth/manifest.json",
+        "REPO_BIRTH_CONTRACT_PATH=birth/contract.json",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert '--product-birth-binding-path "birth/binding.json"' in proc.stdout
+    assert '--product-manifest-path "birth/manifest.json"' in proc.stdout
+    assert '--repo-birth-contract-path "birth/contract.json"' in proc.stdout
+
+
+def test_direct_birth_target_forwards_the_adapter_bundle() -> None:
+    proc = _make(
+        "-n",
+        "new-repo",
+        "REPO=demo",
+        "PKG=demo",
+        "DESC=demo",
+        "PRODUCT_BIRTH_BINDING=/x/binding.json",
+        "PRODUCT_MANIFEST=/x/manifest.json",
+        "REPO_BIRTH_CONTRACT=/x/contract.json",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert '--product-birth-binding "/x/binding.json"' in proc.stdout
+    assert '--product-manifest "/x/manifest.json"' in proc.stdout
+    assert '--repo-birth-contract "/x/contract.json"' in proc.stdout
+
+
+def test_birth_targets_forward_no_adapter_flags_by_default() -> None:
+    for target in ("birth", "new-repo"):
+        proc = _make("-n", target, "REPO=demo", "PKG=demo", "DESC=demo")
+        assert proc.returncode == 0, proc.stderr
+        assert "--product-" not in proc.stdout
+        assert "--repo-birth-contract" not in proc.stdout
