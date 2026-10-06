@@ -37,6 +37,8 @@ boundaries:
   owns:
     - deterministic repository assembly and template/chassis application
     - compiled birth-payload production and verification (l9.birth-payload/v1)
+    - repository-birth packaging and the l9.repo-birth-contract/v1 schema
+      (scripts/birth-runner/package_birth_handoff.py)
     - additive versus authoritative payload application
     - repository birth provenance and lifecycle orchestration
     - local pre-publication validation
@@ -51,11 +53,17 @@ boundaries:
     - Cursor-Governance control plane implementation
     - organization CI distribution, targeting, versioning, or enforcement
 adapter_boundary:
-  status: not_implemented
+  status: implemented
+  adapter: scripts/birth-runner/l9_birth_adapter.py
+  packager: scripts/birth-runner/package_birth_handoff.py
+  prepare_gate: scripts/birth-runner/new_repo_legacy.py::_preflight_product_birth_adapter
   rule: >
-    A future birthing adapter turns resolved product semantics into a birth
-    request. It is not part of this repository today; this file only names the
-    boundary so the factory can stay semantically neutral until it exists.
+    The adapter decides whether an already-resolved product realization is
+    admissible for this exact birth; the packager emits that bundle from a
+    clean source snapshot, its lineage evidence and a supplied ProductManifest,
+    and PREPARE refuses assembly unless the adapter admits it for the running
+    factory. All three consume resolved product semantics and none produces
+    them: ProductManifest, ProductKind and archetypes stay upstream inputs.
 org_birth_profile:
   class: non_constellation_python
   meaning: >

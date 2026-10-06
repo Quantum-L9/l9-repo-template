@@ -573,7 +573,7 @@ Two reading rules keep it an adapter rather than a second compiler:
 - **The semantic digest is compared, never recomputed.** `manifest_digest`'s
   canonicalization belongs to the semantic compiler. Birth-contract and
   payload digests are the factory's artifact convention, `sha256:` over the
-  bytes as written, which the governance handoff packager already uses.
+  bytes as written, which the factory's own packager already uses.
 - **Unresolved fails closed.** Upstream allows soft gaps to remain in a
   gate-passing manifest but defines no per-entry severity this boundary could
   read without interpreting semantics it does not own. Every unresolved entry
@@ -595,6 +595,43 @@ checkout) come all together or not at all, and with them the compiled payload is
 required. None of them: the birth is unchanged and the stage records SKIP. A
 partial bundle, a missing payload, or an inadmissible result stops PREPARE. The
 bundle never crosses into `l9.repo-birth-handoff/v1`; PUBLISH does not see it.
+
+### Packaging the bundle
+
+The factory also emits that bundle. `scripts/birth-runner/package_birth_handoff.py`
+takes a clean realized source checkout, its `l9.repo-birth-evidence/v1` lineage,
+a resolved ProductManifest and that manifest's explicit semantic ref:
+
+```bash
+python3 scripts/birth-runner/package_birth_handoff.py \
+  --source /path/to/clean/source \
+  --evidence PE_BIRTH_EVIDENCE.json \
+  --manifest product-manifest.json \
+  --manifest-ref l9.product-manifest/<product>@<version> \
+  --out-dir /tmp/birth-handoff \
+  --operation local_validation          # or remote_birth
+```
+
+It writes `birth-payload.json` (the existing compiler's output),
+`birth-contract.json` (`l9.repo-birth-contract/v1`,
+`schemas/birth-contract.schema.json`) and `product-birth-binding.json`, then
+proves them with the adapter. Packaging passes only when the adapter admits the
+bundle, and a refused bundle leaves nothing behind.
+
+- **The running repository is the factory.** Its coordinate is its own clean,
+  committed HEAD, and only a checkout whose `origin` is
+  Quantum-L9/l9-repo-template qualifies. There is no `--factory` argument.
+- **The ProductManifest is consumed, never produced.** Its bytes are read and
+  never rewritten. Its ref is never derived from a product id, repository,
+  topology or filename, and a ProductKind the manifest does not state is a
+  refusal, not a default.
+- **Lineage is held exactly.** Each lineage digest must hash its `*_path` file,
+  acceptance evidence must exist, the PE receipt must declare a schema, and the
+  evidence must name the source's clean revision and tree.
+
+Moving the bundle to a remote birth (the dispatch workflow reads the three
+paths from the payload checkout) is a separate concern; packaging does not
+upload anything.
 
 ## The org birth profile
 

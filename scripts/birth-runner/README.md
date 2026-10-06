@@ -126,6 +126,10 @@ recomputes that manifest against the source tree and stops on disagreement via
 | [`verify_birth_payload.py`](verify_birth_payload.py) | payload reproducer |
 | [`schemas/birth-payload.schema.json`](schemas/birth-payload.schema.json) | `l9.birth-payload/v1` contract |
 | [`payload_ownership.py`](payload_ownership.py) | payload ownership reader |
+| [`l9_birth_adapter.py`](l9_birth_adapter.py) | product-to-birth adapter; PREPARE admits a bundle only on its verdict |
+| [`package_birth_handoff.py`](package_birth_handoff.py) | packages payload, birth contract and product-birth binding; proves them with the adapter |
+| [`schemas/birth-contract.schema.json`](schemas/birth-contract.schema.json) | `l9.repo-birth-contract/v1` contract |
+| [`schemas/l9-product-birth-binding.schema.json`](schemas/l9-product-birth-binding.schema.json) | `l9.product-birth-binding/v1` contract |
 
 Useful direct/debug flags on `new_repo.py`:
 

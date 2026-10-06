@@ -9,7 +9,7 @@ Generic Quantum-L9 **repository birth factory**.
 | How an L9 repository is born | **this repo** — `make new-repo` / `make birth` |
 | What semantic product is born (ProductTopology, ProductManifest, ProductKind, archetypes) | `Quantum-L9/.github` `semantics/` + the product semantic owner (upstream input) |
 | What the organization requires of a born repository | `Quantum-L9/.github` — `policies/repo-classes.yml`, `ops/repo-class-profile.js` |
-| Birthing adapter (resolved semantics → birth request) | not implemented; boundary only named in `.l9/architecture.yaml` |
+| Birthing adapter + packaging (resolved semantics → admissible birth bundle) | **this repo** — `scripts/birth-runner/l9_birth_adapter.py`, `package_birth_handoff.py`; consumes ProductManifest, never produces it |
 
 Repository birth profile, repository shape, payload mode, SDK presence and Gate
 presence are **not** ProductKind. The factory never infers product kind from any
