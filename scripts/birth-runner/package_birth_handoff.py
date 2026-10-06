@@ -287,6 +287,16 @@ def _snapshot_bytes(snapshot: Mapping[str, bytes], source: Path, ref: str) -> by
     return snapshot[key]
 
 
+def _require_receipt_schema(artifact: bytes) -> None:
+    """The PE receipt artifact carries its schema identity."""
+    try:
+        receipt = json.loads(artifact.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HandoffError(f"pe_receipt artifact is not JSON: {exc}") from exc
+    if not isinstance(receipt, dict) or not str(receipt.get("schema") or "").strip():
+        raise HandoffError("pe_receipt artifact must declare schema")
+
+
 def _verify_lineage(
     evidence: Mapping[str, object], source: Path, snapshot: Mapping[str, bytes]
 ) -> None:
@@ -301,12 +311,7 @@ def _verify_lineage(
         if birth_adapter.artifact_digest(artifact) != digest:
             raise HandoffError(f"evidence.{key} does not match hashed {path_key}")
         if key == "pe_receipt":
-            try:
-                receipt = json.loads(artifact.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise HandoffError(f"pe_receipt artifact is not JSON: {exc}") from exc
-            if not isinstance(receipt, dict) or not str(receipt.get("schema") or "").strip():
-                raise HandoffError("pe_receipt artifact must declare schema")
+            _require_receipt_schema(artifact)
 
 
 def _verify_acceptance(
