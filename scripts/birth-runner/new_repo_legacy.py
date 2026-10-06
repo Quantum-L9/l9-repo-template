@@ -1038,6 +1038,21 @@ def _preflight_product_birth_adapter(cfg: BirthConfig, receipt: BirthReceipt) ->
     if not result.admissible:
         reasons = "; ".join(f"{f.code}: {f.detail}" for f in result.failures)
         raise BirthError(f"product-birth adapter refused this realization — {reasons}")
+    # The adapter proves the bundle agrees with itself; only PREPARE knows which
+    # factory is actually executing. Bind the validated factory coordinate to it
+    # exactly — full revision, exact repository, no normalization.
+    factory = result.coordinates["factory"]
+    assert isinstance(factory, dict)
+    if factory.get("repository") != receipt.template_repo:
+        raise BirthError(
+            f"product-birth binding names factory {factory.get('repository')!r}, but the "
+            f"running factory repository is {receipt.template_repo!r}"
+        )
+    if factory.get("revision") != receipt.template_sha:
+        raise BirthError(
+            f"product-birth binding names factory revision {factory.get('revision')!r}, but "
+            f"the running factory revision is {receipt.template_sha!r}"
+        )
     receipt.record(
         "preflight.adapter",
         "product-birth adapter",
