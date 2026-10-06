@@ -532,6 +532,27 @@ class TestTheBirthContract:
         with pytest.raises(packager.HandoffError, match="unsupported"):
             packager.validate_against({"type": "string", "format": "uri"}, "x", "doc")
 
+    def test_a_schema_pattern_never_becomes_a_runtime_regex(self) -> None:
+        """Closed pattern set: an unknown pattern refuses instead of being compiled."""
+        with pytest.raises(packager.HandoffError, match="unsupported pattern"):
+            packager.validate_against({"type": "string", "pattern": "^(a+)+$"}, "aaa", "doc")
+
+    def test_the_closed_pattern_set_is_exactly_the_schemas(self) -> None:
+        found: set[str] = set()
+
+        def walk(node: object) -> None:
+            if isinstance(node, dict):
+                if isinstance(node.get("pattern"), str):
+                    found.add(node["pattern"])
+                for child in node.values():
+                    walk(child)
+            elif isinstance(node, list):
+                for child in node:
+                    walk(child)
+
+        walk(json.loads(CONTRACT_SCHEMA.read_text(encoding="utf-8")))
+        assert found == set(packager._KNOWN_PATTERNS)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Self-proof: the existing adapter decides, and refuses every inconsistency

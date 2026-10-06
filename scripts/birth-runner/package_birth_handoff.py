@@ -138,6 +138,86 @@ def _same_json_value(a: object, b: object) -> bool:
     return type(a) is type(b) and a == b
 
 
+# The patterns `birth-contract.schema.json` uses, compiled once. Like the
+# keyword set, the pattern set is closed: a schema value never becomes a
+# regular expression at runtime, and a pattern outside this set refuses.
+_KNOWN_PATTERNS: dict[str, re.Pattern[str]] = {
+    source: re.compile(source)
+    for source in (
+        r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$",
+        r"^[0-9a-f]{40}$",
+        r"^sha256:[0-9a-f]{64}$",
+    )
+}
+
+
+def _known_pattern(pattern: str) -> re.Pattern[str]:
+    compiled = _KNOWN_PATTERNS.get(pattern)
+    if compiled is None:
+        raise HandoffError(f"birth contract schema uses unsupported pattern {pattern!r}")
+    return compiled
+
+
+def _check_type(schema: Mapping[str, object], value: object, where: str) -> str | None:
+    expected = schema.get("type")
+    if expected is None:
+        return None
+    if not isinstance(expected, str) or expected not in _JSON_TYPES:
+        raise HandoffError(f"birth contract schema uses unsupported type {expected!r}")
+    return None if isinstance(value, _JSON_TYPES[expected]) else f"{where} is not a JSON {expected}"
+
+
+def _check_values(schema: Mapping[str, object], value: object, where: str) -> list[str]:
+    errors: list[str] = []
+    if "const" in schema and not _same_json_value(value, schema["const"]):
+        errors.append(f"{where} must equal {schema['const']!r}")
+    enum = schema.get("enum")
+    if isinstance(enum, list) and not any(_same_json_value(value, item) for item in enum):
+        errors.append(f"{where} must be one of {enum}")
+    return errors
+
+
+def _check_string(schema: Mapping[str, object], value: str, where: str) -> list[str]:
+    errors: list[str] = []
+    pattern = schema.get("pattern")
+    # search, as JSON Schema `pattern` is defined; the schema anchors its own.
+    if isinstance(pattern, str) and not _known_pattern(pattern).search(value):
+        errors.append(f"{where} does not match {pattern}")
+    min_length = schema.get("minLength")
+    if isinstance(min_length, int) and len(value) < min_length:
+        errors.append(f"{where} is shorter than {min_length}")
+    return errors
+
+
+def _check_array(schema: Mapping[str, object], value: list, where: str) -> list[str]:
+    errors: list[str] = []
+    min_items = schema.get("minItems")
+    if isinstance(min_items, int) and len(value) < min_items:
+        errors.append(f"{where} has fewer than {min_items} item(s)")
+    items = schema.get("items")
+    if isinstance(items, Mapping):
+        for index, item in enumerate(value):
+            errors.extend(validate_against(items, item, f"{where}[{index}]"))
+    return errors
+
+
+def _check_object(schema: Mapping[str, object], value: dict, where: str) -> list[str]:
+    properties = schema.get("properties")
+    props = properties if isinstance(properties, Mapping) else {}
+    required = schema.get("required")
+    errors = [
+        f"{where}.{key} is required"
+        for key in (required if isinstance(required, list) else [])
+        if key not in value
+    ]
+    if schema.get("additionalProperties") is False:
+        errors.extend(f"{where}.{key} is not allowed" for key in sorted(set(value) - set(props)))
+    for key, subschema in props.items():
+        if key in value and isinstance(subschema, Mapping):
+            errors.extend(validate_against(subschema, value[key], f"{where}.{key}"))
+    return errors
+
+
 def validate_against(schema: Mapping[str, object], value: object, where: str) -> list[str]:
     """Every way `value` fails `schema`, for the closed keyword subset above."""
     unsupported = sorted(set(schema) - _SUPPORTED_KEYWORDS)
@@ -146,47 +226,16 @@ def validate_against(schema: Mapping[str, object], value: object, where: str) ->
             f"birth contract schema uses unsupported keyword(s) at {where}: "
             f"{', '.join(unsupported)}"
         )
-    errors: list[str] = []
-    expected = schema.get("type")
-    if expected is not None:
-        if not isinstance(expected, str) or expected not in _JSON_TYPES:
-            raise HandoffError(f"birth contract schema uses unsupported type {expected!r}")
-        if not isinstance(value, _JSON_TYPES[expected]):
-            return [f"{where} is not a JSON {expected}"]
-    if "const" in schema and not _same_json_value(value, schema["const"]):
-        errors.append(f"{where} must equal {schema['const']!r}")
-    enum = schema.get("enum")
-    if isinstance(enum, list) and not any(_same_json_value(value, item) for item in enum):
-        errors.append(f"{where} must be one of {enum}")
+    wrong_type = _check_type(schema, value, where)
+    if wrong_type:
+        return [wrong_type]
+    errors = _check_values(schema, value, where)
     if isinstance(value, str):
-        pattern = schema.get("pattern")
-        # re.search, as JSON Schema `pattern` is defined; the schema anchors its own.
-        if isinstance(pattern, str) and not re.search(pattern, value):
-            errors.append(f"{where} does not match {pattern}")
-        min_length = schema.get("minLength")
-        if isinstance(min_length, int) and len(value) < min_length:
-            errors.append(f"{where} is shorter than {min_length}")
-    if isinstance(value, list):
-        min_items = schema.get("minItems")
-        if isinstance(min_items, int) and len(value) < min_items:
-            errors.append(f"{where} has fewer than {min_items} item(s)")
-        items = schema.get("items")
-        if isinstance(items, Mapping):
-            for index, item in enumerate(value):
-                errors.extend(validate_against(items, item, f"{where}[{index}]"))
-    if isinstance(value, dict):
-        properties = schema.get("properties")
-        props = properties if isinstance(properties, Mapping) else {}
-        required = schema.get("required")
-        for key in required if isinstance(required, list) else []:
-            if key not in value:
-                errors.append(f"{where}.{key} is required")
-        if schema.get("additionalProperties") is False:
-            for key in sorted(set(value) - set(props)):
-                errors.append(f"{where}.{key} is not allowed")
-        for key, subschema in props.items():
-            if key in value and isinstance(subschema, Mapping):
-                errors.extend(validate_against(subschema, value[key], f"{where}.{key}"))
+        errors.extend(_check_string(schema, value, where))
+    elif isinstance(value, list):
+        errors.extend(_check_array(schema, value, where))
+    elif isinstance(value, dict):
+        errors.extend(_check_object(schema, value, where))
     return errors
 
 
@@ -224,10 +273,8 @@ def _resolve_lineage_path(source: Path, ref: str) -> Path:
     return path
 
 
-def validate_evidence(evidence: Mapping[str, object], source: Path) -> tuple[str, str, str]:
-    """`(source repository, revision, tree)` of a clean snapshot the evidence binds."""
-    if evidence.get("schema") != EVIDENCE_SCHEMA:
-        raise HandoffError(f"evidence.schema must equal {EVIDENCE_SCHEMA}")
+def _verify_lineage(evidence: Mapping[str, object], source: Path) -> None:
+    """Each lineage digest hashes its `*_path` artifact; the PE receipt has a schema."""
     for key in LINEAGE_KEYS:
         digest = _require_digest(evidence, key)
         path_key = f"{key}_path"
@@ -241,6 +288,9 @@ def validate_evidence(evidence: Mapping[str, object], source: Path) -> tuple[str
             receipt = load_json(artifact, "pe_receipt artifact")
             if not str(receipt.get("schema") or "").strip():
                 raise HandoffError("pe_receipt artifact must declare schema")
+
+
+def _verify_acceptance(evidence: Mapping[str, object], source: Path) -> None:
     refs = evidence.get("acceptance_evidence_refs")
     if (
         not isinstance(refs, list)
@@ -250,6 +300,14 @@ def validate_evidence(evidence: Mapping[str, object], source: Path) -> tuple[str
         raise HandoffError("evidence.acceptance_evidence_refs must be a non-empty string list")
     for ref in refs:
         _resolve_lineage_path(source, ref)
+
+
+def validate_evidence(evidence: Mapping[str, object], source: Path) -> tuple[str, str, str]:
+    """`(source repository, revision, tree)` of a clean snapshot the evidence binds."""
+    if evidence.get("schema") != EVIDENCE_SCHEMA:
+        raise HandoffError(f"evidence.schema must equal {EVIDENCE_SCHEMA}")
+    _verify_lineage(evidence, source)
+    _verify_acceptance(evidence, source)
     try:
         compiler.assert_immutable_snapshot(source)
         revision, tree_sha = compiler.source_revision(source)
