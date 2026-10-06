@@ -806,3 +806,53 @@ class TestOutputIsolation:
         assert _git(fx.source, "status", "--porcelain") == ""
         assert _git(fx.factory, "status", "--porcelain") == ""
         assert target.exists() == existed
+
+
+class TestLineageStaysInTheSnapshot:
+    """S6549: lineage and acceptance paths resolve inside the source checkout or are refused."""
+
+    def _commit(self, fx: Fixture, *paths: str) -> None:
+        _git(fx.source, "add", "--", *paths)
+        _git(fx.source, "commit", "-q", "-m", "lineage fixture")
+        fx.write_evidence(
+            {
+                **fx.evidence_doc,
+                "source_revision": _git(fx.source, "rev-parse", "HEAD"),
+                "source_tree_sha": _git(fx.source, "rev-parse", "HEAD^{tree}"),
+            }
+        )
+
+    def test_an_absolute_path_inside_the_source_still_resolves(self, fx: Fixture) -> None:
+        absolute = str((fx.source / "receipts" / "pec.json").resolve())
+        fx.write_evidence({**fx.evidence_doc, "acceptance_evidence_refs": [absolute]})
+        assert fx.package()["status"] == "PASS"
+
+    def test_an_absolute_path_outside_the_source_is_refused(self, fx: Fixture) -> None:
+        outside = fx.root / "elsewhere.json"
+        outside.write_text("{}\n", encoding="utf-8")
+        fx.write_evidence({**fx.evidence_doc, "acceptance_evidence_refs": [str(outside)]})
+        with pytest.raises(packager.HandoffError, match="outside the source checkout"):
+            fx.package()
+
+    def test_a_traversal_out_of_the_source_is_refused(self, fx: Fixture) -> None:
+        (fx.root / "elsewhere.json").write_text("{}\n", encoding="utf-8")
+        fx.write_evidence({**fx.evidence_doc, "acceptance_evidence_refs": ["../elsewhere.json"]})
+        with pytest.raises(packager.HandoffError, match="outside the source checkout"):
+            fx.package()
+
+    def test_a_lineage_path_outside_the_source_is_refused(self, fx: Fixture) -> None:
+        outside = fx.root / "plan.json"
+        outside.write_text('{"schema":"l9.plan-document/v1"}\n', encoding="utf-8")
+        fx.write_evidence({**fx.evidence_doc, "plan": _digest(outside), "plan_path": str(outside)})
+        with pytest.raises(packager.HandoffError, match="outside the source checkout"):
+            fx.package()
+
+    def test_a_symlink_escaping_the_source_is_refused(self, fx: Fixture) -> None:
+        (fx.root / "elsewhere.json").write_text("{}\n", encoding="utf-8")
+        (fx.source / "receipts" / "escape.json").symlink_to(fx.root / "elsewhere.json")
+        self._commit(fx, "receipts/escape.json")
+        fx.write_evidence(
+            {**_read(fx.evidence), "acceptance_evidence_refs": ["receipts/escape.json"]}
+        )
+        with pytest.raises(packager.HandoffError, match="outside the source checkout"):
+            fx.package()

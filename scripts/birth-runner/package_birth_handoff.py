@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import shutil
 import sys
@@ -264,13 +265,24 @@ def _require_digest(evidence: Mapping[str, object], key: str) -> str:
 
 
 def _resolve_lineage_path(source: Path, ref: str) -> Path:
+    """A lineage or acceptance artifact inside the verified source snapshot.
+
+    Relative refs resolve against the source; an absolute ref is accepted only
+    when it lies inside it. Symlinks are resolved first, so a link that leaves
+    the snapshot is refused too. Lineage is bound to the snapshot it was
+    verified with, and nothing outside it is probed.
+    """
     raw = str(ref or "").strip()
     if not raw:
         raise HandoffError("lineage path is empty")
-    path = Path(raw)
-    if not path.is_absolute():
-        path = source / path
-    path = path.resolve()
+    base = os.path.realpath(source)
+    candidate = os.path.realpath(os.path.join(base, raw))
+    if os.path.commonpath([base, candidate]) != base:
+        raise HandoffError(
+            f"lineage artifact {ref!r} is outside the source checkout — lineage is bound "
+            "to the snapshot it was verified with"
+        )
+    path = Path(candidate)
     if not path.is_file():
         raise HandoffError(f"lineage artifact missing: {ref}")
     return path
