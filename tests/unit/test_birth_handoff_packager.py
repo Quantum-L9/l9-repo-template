@@ -854,5 +854,15 @@ class TestLineageStaysInTheSnapshot:
         fx.write_evidence(
             {**_read(fx.evidence), "acceptance_evidence_refs": ["receipts/escape.json"]}
         )
-        with pytest.raises(packager.HandoffError, match="outside the source checkout"):
+        with pytest.raises(packager.HandoffError, match="escapes the source root"):
+            fx.package()
+
+    def test_an_ignored_uncommitted_lineage_file_is_refused(self, fx: Fixture) -> None:
+        """Present on disk but not in the commit: not part of the verified snapshot."""
+        (fx.source / ".gitignore").write_text("scratch/\n", encoding="utf-8")
+        self._commit(fx, ".gitignore")
+        (fx.source / "scratch").mkdir()
+        (fx.source / "scratch" / "pec.json").write_text("{}\n", encoding="utf-8")
+        fx.write_evidence({**_read(fx.evidence), "acceptance_evidence_refs": ["scratch/pec.json"]})
+        with pytest.raises(packager.HandoffError, match="not a tracked file"):
             fx.package()

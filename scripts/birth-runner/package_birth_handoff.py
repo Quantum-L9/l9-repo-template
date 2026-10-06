@@ -39,6 +39,7 @@ import argparse
 import importlib.util
 import json
 import os
+import posixpath
 import re
 import shutil
 import sys
@@ -90,10 +91,6 @@ BINDING_NAME = "product-birth-binding.json"
 
 class HandoffError(RuntimeError):
     """The bundle could not be packaged, or the adapter did not admit it."""
-
-
-def sha256(path: Path) -> str:
-    return birth_adapter.artifact_digest(path.read_bytes())
 
 
 def load_json(path: Path, what: str) -> dict[str, object]:
@@ -264,31 +261,35 @@ def _require_digest(evidence: Mapping[str, object], key: str) -> str:
     return value
 
 
-def _resolve_lineage_path(source: Path, ref: str) -> Path:
-    """A lineage or acceptance artifact inside the verified source snapshot.
+def _snapshot_bytes(snapshot: Mapping[str, bytes], source: Path, ref: str) -> bytes:
+    """A lineage or acceptance artifact's bytes, from the verified snapshot only.
 
-    Relative refs resolve against the source; an absolute ref is accepted only
-    when it lies inside it. Symlinks are resolved first, so a link that leaves
-    the snapshot is refused too. Lineage is bound to the snapshot it was
-    verified with, and nothing outside it is probed.
+    The ref is a key into the snapshot's tracked files, never a filesystem path:
+    relative refs name a tracked file; an absolute ref is accepted only when it
+    names one inside the source. Anything that resolves outside the snapshot, or
+    is not committed in it, is refused — lineage is bound to the snapshot it was
+    verified with, and nothing outside it is opened or probed.
     """
     raw = str(ref or "").strip()
     if not raw:
         raise HandoffError("lineage path is empty")
-    base = os.path.realpath(source)
-    candidate = os.path.realpath(os.path.join(base, raw))
-    if os.path.commonpath([base, candidate]) != base:
+    rel = os.path.relpath(raw, str(source)) if os.path.isabs(raw) else raw
+    key = posixpath.normpath(rel.replace(os.sep, "/"))
+    if key == ".." or key.startswith("../") or key.startswith("/"):
         raise HandoffError(
             f"lineage artifact {ref!r} is outside the source checkout — lineage is bound "
             "to the snapshot it was verified with"
         )
-    path = Path(candidate)
-    if not path.is_file():
-        raise HandoffError(f"lineage artifact missing: {ref}")
-    return path
+    if key not in snapshot:
+        raise HandoffError(
+            f"lineage artifact missing: {ref} (not a tracked file in the source snapshot)"
+        )
+    return snapshot[key]
 
 
-def _verify_lineage(evidence: Mapping[str, object], source: Path) -> None:
+def _verify_lineage(
+    evidence: Mapping[str, object], source: Path, snapshot: Mapping[str, bytes]
+) -> None:
     """Each lineage digest hashes its `*_path` artifact; the PE receipt has a schema."""
     for key in LINEAGE_KEYS:
         digest = _require_digest(evidence, key)
@@ -296,16 +297,21 @@ def _verify_lineage(evidence: Mapping[str, object], source: Path) -> None:
         raw_path = str(evidence.get(path_key) or "").strip()
         if not raw_path:
             raise HandoffError(f"evidence.{path_key} must locate the {key} artifact")
-        artifact = _resolve_lineage_path(source, raw_path)
-        if sha256(artifact) != digest:
+        artifact = _snapshot_bytes(snapshot, source, raw_path)
+        if birth_adapter.artifact_digest(artifact) != digest:
             raise HandoffError(f"evidence.{key} does not match hashed {path_key}")
         if key == "pe_receipt":
-            receipt = load_json(artifact, "pe_receipt artifact")
-            if not str(receipt.get("schema") or "").strip():
+            try:
+                receipt = json.loads(artifact.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise HandoffError(f"pe_receipt artifact is not JSON: {exc}") from exc
+            if not isinstance(receipt, dict) or not str(receipt.get("schema") or "").strip():
                 raise HandoffError("pe_receipt artifact must declare schema")
 
 
-def _verify_acceptance(evidence: Mapping[str, object], source: Path) -> None:
+def _verify_acceptance(
+    evidence: Mapping[str, object], source: Path, snapshot: Mapping[str, bytes]
+) -> None:
     refs = evidence.get("acceptance_evidence_refs")
     if (
         not isinstance(refs, list)
@@ -314,20 +320,21 @@ def _verify_acceptance(evidence: Mapping[str, object], source: Path) -> None:
     ):
         raise HandoffError("evidence.acceptance_evidence_refs must be a non-empty string list")
     for ref in refs:
-        _resolve_lineage_path(source, ref)
+        _snapshot_bytes(snapshot, source, ref)
 
 
 def validate_evidence(evidence: Mapping[str, object], source: Path) -> tuple[str, str, str]:
     """`(source repository, revision, tree)` of a clean snapshot the evidence binds."""
     if evidence.get("schema") != EVIDENCE_SCHEMA:
         raise HandoffError(f"evidence.schema must equal {EVIDENCE_SCHEMA}")
-    _verify_lineage(evidence, source)
-    _verify_acceptance(evidence, source)
     try:
         compiler.assert_immutable_snapshot(source)
         revision, tree_sha = compiler.source_revision(source)
+        snapshot = compiler.source_files(source)
     except (compiler.PayloadCompileError, prov.ProvenanceError) as exc:
         raise HandoffError(str(exc)) from exc
+    _verify_lineage(evidence, source, snapshot)
+    _verify_acceptance(evidence, source, snapshot)
     if evidence.get("source_revision") != revision or evidence.get("source_tree_sha") != tree_sha:
         raise HandoffError(
             "PE evidence source revision/tree does not match the current clean source"
