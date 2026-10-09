@@ -332,6 +332,9 @@ organization has had its say — never copied in with the template and hoped ove
 | `DESC` | yes | one-line description |
 | `PAYLOAD` | no | product files. A fragment is overlaid (payload wins on collision); a whole repository is **authoritative** — see below |
 | `PAYLOAD_CONTRACT` | for an authoritative payload | the compiled `l9.birth-payload/v1` authorizing those bytes |
+| `PRODUCT_BIRTH_BINDING` | for a compiler-backed birth | the `l9.product-birth-binding/v2`; with `PRODUCT_MANIFEST`, `PAYLOAD`, `PAYLOAD_CONTRACT` and `SEMANTIC_COMPILER_SRC` — see [the adapter boundary](#the-product-to-birth-adapter-boundary) |
+| `PRODUCT_MANIFEST` | for a compiler-backed birth | the resolved `l9.product-manifest/v1` the binding names |
+| `SEMANTIC_COMPILER_SRC` | for a compiler-backed birth | a clean checkout of the engine pinned in `scripts/birth-runner/semantic-compiler.pin.json`; PREPARE re-runs it against the payload |
 | `ORG` | no | GitHub owner (default `Quantum-L9`) |
 | `WORK_DIR` | no | where the repository is assembled (default `$XDG_STATE_HOME/l9/births`, i.e. `~/.local/state/l9/births`, created `0700`; never a predictable world-writable `/tmp` path) |
 | `CLASS` | no | organization birth/distribution class (default `non_constellation_python`), resolved strictly by `Quantum-L9/.github` `ops/repo-class-profile.js`. It is **not** a ProductKind |
@@ -534,106 +537,168 @@ reader.
 
 ## The product-to-birth adapter boundary
 
-Upstream, a product is a ProductTopology, compiled into a resolved
-ProductManifest and lowered into a realized source tree; downstream, this
-factory births a repository from that tree under a digest-bound
-`l9.repo-birth-contract/v1`. `scripts/birth-runner/l9_birth_adapter.py` is the
-boundary between the two, and it answers one question only:
+Upstream, a product is a ProductTopology, compiled by the semantic compiler
+into a resolved ProductManifest and realized as a source tree; downstream, this
+factory births a repository from an immutable snapshot of that tree under a
+compiled, digest-bound `l9.birth-payload/v1`.
+`scripts/birth-runner/l9_birth_adapter.py` is the boundary between the two, and
+it answers one question only:
 
-> Is this exact, already-resolved product realization admissible as input to
-> this exact repository birth, and are the product, source, birth-contract,
-> factory and manifest coordinates mutually consistent?
+> Is this exact, compiler-resolved product realization admissible as input to
+> this exact repository birth, and are the product, source, payload, factory,
+> compiler and manifest coordinates mutually consistent?
 
 ```bash
 python3 scripts/birth-runner/l9_birth_adapter.py \
-  --binding /tmp/birth-handoff/binding.json \
+  --binding /tmp/birth-handoff/product-birth-binding.json \
   --manifest /tmp/birth-handoff/product-manifest.json \
-  --birth-contract /tmp/birth-handoff/birth-contract.json \
-  --payload /tmp/birth-handoff/birth-payload.json      # optional
+  --payload /tmp/birth-handoff/birth-payload.json
 ```
 
-The binding is `l9.product-birth-binding/v1`
+The binding is `l9.product-birth-binding/v2`
 (`scripts/birth-runner/schemas/l9-product-birth-binding.schema.json`): the
 product id and kind the manifest resolves, the manifest and topology refs and
-digests the manifest carries, the realized source snapshot, the birth contract
-and compiled payload by digest, and the factory revision. It is a **closed**
-shape. A `repository_shape`, a `kind_hint`, an inferred anything is malformed
-input, not a tolerated extra.
+digests the manifest carries, the realized source snapshot, the compiled
+payload by digest, the factory revision, and the **compiler coordinate** — the
+engine repository, revision and version that resolved the manifest, plus the
+exact repository-relative paths of the topology, repository-spec,
+workflow-spec, authority lock and (optionally) local contract catalog it read.
+It is a **closed** shape. A `repository_shape`, a `kind_hint`, a
+`birth_contract`, a `lineage` — any inferred anything — is malformed input, not
+a tolerated extra.
 
 | Proves | How |
 |--------|-----|
 | manifest schema identity is admitted | `schema == l9.product-manifest/v1`, and only that is reported against another schema |
 | manifest is resolved enough for birth | every block `product_manifest.schema.yaml` requires is present; `unresolved` is **empty** |
+| authority is known | `authority.semantic_owner` and `authority.authority_revision` are explicit tokens, never Unknown |
 | ProductKind is explicit upstream | `product.kind` and `product.archetype_ref` are explicit tokens; the binding may restate them, never supply them |
-| coordinates are consistent | binding digest == `manifest_digest`; binding topology == `source_topology`; birth contract binds the same clean source, the same payload digest, the same factory revision; the payload, when given, passes the factory's own `l9.birth-payload/v1` gate and names the same snapshot |
-| no repository-shape inference | the adapter never opens a source tree, spawns git, or calls the ownership-contract shape readers (a static unit test holds it to this) |
+| coordinates are consistent | binding digest == `manifest_digest`; binding topology == `source_topology`; binding compiler version == `compiler.compiler_version`; the payload passes the factory's own `l9.birth-payload/v1` gate, names the same snapshot, and lists every compiler input the binding names |
+| no repository-shape inference, no compiler run | the adapter never opens a source tree, spawns a process, or calls the ownership-contract shape readers (a static unit test holds it to this) |
 
 Two reading rules keep it an adapter rather than a second compiler:
 
-- **The semantic digest is compared, never recomputed.** `manifest_digest`'s
-  canonicalization belongs to the semantic compiler. Birth-contract and
-  payload digests are the factory's artifact convention, `sha256:` over the
-  bytes as written, which the factory's own packager already uses.
-- **Unresolved fails closed.** Upstream allows soft gaps to remain in a
-  gate-passing manifest but defines no per-entry severity this boundary could
-  read without interpreting semantics it does not own. Every unresolved entry
-  is therefore hard here. A later upstream revision that marks entries
-  non-material is a later adapter stage, not a guess today.
+- **The semantic digest is compared, never recomputed by the factory.**
+  `manifest_digest`'s canonicalization belongs to the semantic compiler. The
+  payload digest is the factory's artifact convention, `sha256:` over the bytes
+  as written, which the packager already uses.
+- **Unresolved and unknown fail closed.** Upstream allows soft gaps to remain
+  in a gate-passing manifest but defines no per-entry severity this boundary
+  could read without interpreting semantics it does not own. Every unresolved
+  entry is therefore hard here, and an authority the manifest cannot name is
+  not an authority.
 
-The output (`l9.product-birth-binding-result/v1`) is evidence for the factory,
+The output (`l9.product-birth-binding-result/v2`) is evidence for the factory,
 authority class `evidence`: admissible or not, the exact validated coordinates
 when it is, and every deterministic failure code when it is not. It grants
 nothing — not mutation, governance, semantic, or release authority.
 
-PREPARE invokes it. `stage_preflight` runs `_preflight_product_birth_adapter`
+### PREPARE reproduces the manifest with the pinned compiler
+
+The adapter proves the bundle agrees with itself. PREPARE proves it agrees
+with the product. `stage_preflight` runs `_preflight_product_birth_adapter`
 after `_preflight_payload_contract` has reproduced the compiled payload and
-before anything is assembled. The binding, the resolved ProductManifest and the
-repo-birth contract (`--product-birth-binding`, `--product-manifest`,
-`--repo-birth-contract`; workflow inputs `product_birth_binding_path`,
-`product_manifest_path`, `repo_birth_contract_path`, resolved inside the payload
-checkout) come all together or not at all, and with them the compiled payload is
-required. None of them: the birth is unchanged and the stage records SKIP. A
-partial bundle, a missing payload, or an inadmissible result stops PREPARE. The
-bundle never crosses into `l9.repo-birth-handoff/v1`; PUBLISH does not see it.
+before anything is assembled:
+
+1. the binding and the resolved ProductManifest (`--product-birth-binding`,
+   `--product-manifest`; workflow inputs `product_birth_binding_path`,
+   `product_manifest_path`, resolved inside the payload checkout) come
+   together or not at all, and with them the compiled payload and its source
+   are required;
+2. the adapter admits the bundle, and its validated `factory` coordinate must
+   be the exact repository and full revision actually running;
+3. the validated `compiler` coordinate must be the engine this factory pins in
+   `scripts/birth-runner/semantic-compiler.pin.json`
+   (`Quantum-L9/l9-semantic-compiler-engine`, exact 40-hex revision, package
+   version), and the checkout handed in through `--semantic-compiler-src` must
+   be proven to be it: clean, at that HEAD, `origin` naming that repository,
+   `pyproject.toml` declaring that package at that version;
+4. `product_resolution.py` runs the engine's own `product-build` capability in
+   an isolated child interpreter (`python -I -B`, a from-scratch environment, a
+   scratch working directory and `HOME`, output into scratch) against the
+   exact input files the binding names inside the verified payload tree;
+5. the reproduced manifest must be the supplied one — same `manifest_digest`
+   **and** same document — with no unresolved entry and exit code 0, and the
+   source snapshot must be exactly as it was once the engine has finished.
+
+None of them: the birth is unchanged and the stage records SKIP. A partial
+bundle, a missing payload, a missing or unproven engine, a compiler failure,
+a digest or document disagreement, an unresolved entry, an input the payload
+does not authorize, or a snapshot the compiler touched stops PREPARE. There is
+no fallback to trusting the supplied manifest. The bundle and the engine
+checkout never cross into `l9.repo-birth-handoff/v1`; PUBLISH does not see
+them.
+
+The pin is the factory's and only the factory's. It is read from the running
+factory checkout, never from a binding, a payload or an operator flag; the
+dispatch workflow fetches the engine at exactly that revision with the same
+read-only source authority it uses for the payload and proves the SHA on the
+runner before PREPARE proves the checkout again. Moving the pin is a reviewed
+factory change.
 
 ### Packaging the bundle
 
 The factory also emits that bundle. `scripts/birth-runner/package_birth_handoff.py`
-takes a clean realized source checkout, its `l9.repo-birth-evidence/v1` lineage,
-a resolved ProductManifest and that manifest's explicit semantic ref:
+takes a clean realized source checkout, a clean checkout of the pinned engine
+and the manifest's explicit semantic ref:
 
 ```bash
 python3 scripts/birth-runner/package_birth_handoff.py \
   --source /path/to/clean/source \
-  --evidence PE_BIRTH_EVIDENCE.json \
-  --manifest product-manifest.json \
+  --semantic-compiler-src /path/to/l9-semantic-compiler-engine \
   --manifest-ref l9.product-manifest/<product>@<version> \
   --out-dir /tmp/birth-handoff \
-  --operation local_validation          # or remote_birth
+  [--topology product-topology.yaml] [--repository-spec repository-spec.yaml] \
+  [--workflow-spec workflow-spec.yaml] [--authority-lock semantics.lock.yaml] \
+  [--contract-catalog contracts/compiler-core.yaml]   # only for a product that declares one
 ```
 
-It writes `birth-payload.json` (the existing compiler's output),
-`birth-contract.json` (`l9.repo-birth-contract/v1`,
-`schemas/birth-contract.schema.json`) and `product-birth-binding.json`, then
-proves them with the adapter. Packaging passes only when the adapter admits the
-bundle. A refused bundle leaves the output directory exactly as it was, and the
-output directory may not lie inside the source checkout, because writing there
-would dirty the snapshot the contract attests as clean.
+It writes `birth-payload.json` (the existing payload compiler's output),
+`product-manifest.json` (the pinned engine's output, rendered the one way the
+factory renders artifacts, byte for byte what PREPARE will reproduce) and
+`product-birth-binding.json`, then proves them with the adapter. Packaging
+passes only when the engine resolves the product with nothing unresolved and
+the adapter admits the bundle. A refused bundle leaves the output directory
+exactly as it was, and the output directory may not lie inside the source or
+the factory checkout, because writing there would dirty a snapshot a digest
+attests as clean.
 
 - **The running repository is the factory.** Its coordinate is its own clean,
   committed HEAD, and only a checkout whose `origin` is
   Quantum-L9/l9-repo-template qualifies. There is no `--factory` argument.
-- **The ProductManifest is consumed, never produced.** Its bytes are read and
-  never rewritten. Its ref is never derived from a product id, repository,
-  topology or filename, and a ProductKind the manifest does not state is a
-  refusal, not a default.
-- **Lineage is held exactly.** Each lineage digest must hash its `*_path` file,
-  acceptance evidence must exist, the PE receipt must declare a schema, and the
-  evidence must name the source's clean revision and tree.
+- **The ProductManifest is resolved, never authored.** The engine produces it
+  from the product's own files; the factory carries it and never edits it. Its
+  ref is never derived from a product id, repository, topology or filename,
+  and a ProductKind the manifest does not state is a refusal, not a default.
+- **The engine inputs are explicit.** The four every product has default to
+  the engine's own CLI conventions, relative to the source root, and are
+  recorded in the binding so PREPARE reads exactly the same files. The local
+  contract catalog is recorded only when supplied: a product whose
+  RepositorySpec declares none ships no such file, and the adapter refuses a
+  binding that names an input the payload does not carry. When the binding
+  omits it, PREPARE resolves the engine's default against the source root.
 
-Moving the bundle to a remote birth (the dispatch workflow reads the three
+Moving the bundle to a remote birth (the dispatch workflow reads the two
 paths from the payload checkout) is a separate concern; packaging does not
 upload anything.
+
+### Superseded: the birth contract and Program Execution lineage
+
+Until BIRTH-ARCH-REVISION-001 a product-backed birth also required an
+`l9.repo-birth-contract/v1` and an `l9.repo-birth-evidence/v1` carrying IdeaOS
+execute receipt, GAR decision, Plan, campaign source and Program Execution
+receipt digests plus acceptance evidence, all hashed into the source snapshot.
+None of that is a birth prerequisite any more: product resolution is
+reproduced from the snapshot by the pinned compiler, and source integrity is
+the compiled payload's. The retired schemas are kept as historical evidence
+under `scripts/birth-runner/schemas/superseded/` so an older bundle can still
+be read; no gate admits them, the v2 adapter refuses a v1 binding as a
+schema-identity failure, and the front door, the workflow and the engine have
+no argument left to carry a contract. A valid Node product with zero PE
+history completes PREPARE; a tampered manifest, stale topology, altered
+payload, wrong factory, unresolved semantic input, forged source coordinate or
+unpinned engine still fails closed
+(`tests/integration/test_compiler_backed_birth.py`).
 
 ## The org birth profile
 
@@ -931,6 +996,8 @@ name where they come from:
 | `payload_ref` | branch, tag, or commit SHA. Required with `payload_repo`. |
 | `payload_subpath` | directory inside that checkout to use; blank means its root |
 | `payload_contract_path` | compiled `l9.birth-payload/v1` inside that checkout — required only for a repository-shaped payload |
+| `product_birth_binding_path` | `l9.product-birth-binding/v2` inside that checkout — compiler-backed birth, with `product_manifest_path` and `payload_contract_path`; both binding and manifest or neither |
+| `product_manifest_path` | resolved `l9.product-manifest/v1` inside that checkout |
 
 The payload arrives as a **pinned git checkout**, never an archive URL. That is
 the shape `compile_birth_payload.py` already demands of a source — "clean
@@ -945,6 +1012,12 @@ a newborn's root commit under that token is a supply-chain hole. `..` and
 absolute paths are rejected in both path inputs for the same reason — either
 would resolve outside the checkout and hand `make new-repo` a directory of
 runner files to copy.
+
+A compiler-backed birth additionally fetches the semantic compiler at the
+revision `scripts/birth-runner/semantic-compiler.pin.json` names, with the same
+read-only source token, proves the SHA on the runner, and hands the checkout to
+PREPARE as `--semantic-compiler-src`; PREPARE proves it again and re-runs it.
+The pin is read from the checked-out factory, never from an input.
 
 Which mode applies is decided by the payload's shape, not by these inputs: a
 fragment overlays additively and needs no contract, a repository-shaped payload

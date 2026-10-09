@@ -74,7 +74,9 @@ def test_public_birth_target_forwards_the_adapter_bundle() -> None:
     assert proc.returncode == 0, proc.stderr
     assert '--product-birth-binding-path "birth/binding.json"' in proc.stdout
     assert '--product-manifest-path "birth/manifest.json"' in proc.stdout
-    assert '--repo-birth-contract-path "birth/contract.json"' in proc.stdout
+    assert "--repo-birth-contract-path" not in proc.stdout, (
+        "the retired contract has no Make surface"
+    )
 
 
 def test_direct_birth_target_forwards_the_adapter_bundle() -> None:
@@ -86,12 +88,14 @@ def test_direct_birth_target_forwards_the_adapter_bundle() -> None:
         "DESC=demo",
         "PRODUCT_BIRTH_BINDING=/x/binding.json",
         "PRODUCT_MANIFEST=/x/manifest.json",
+        "SEMANTIC_COMPILER_SRC=/x/engine",
         "REPO_BIRTH_CONTRACT=/x/contract.json",
     )
     assert proc.returncode == 0, proc.stderr
     assert '--product-birth-binding "/x/binding.json"' in proc.stdout
     assert '--product-manifest "/x/manifest.json"' in proc.stdout
-    assert '--repo-birth-contract "/x/contract.json"' in proc.stdout
+    assert '--semantic-compiler-src "/x/engine"' in proc.stdout
+    assert "--repo-birth-contract" not in proc.stdout, "the retired contract has no Make surface"
 
 
 def test_birth_targets_forward_no_adapter_flags_by_default() -> None:
@@ -99,4 +103,4 @@ def test_birth_targets_forward_no_adapter_flags_by_default() -> None:
         proc = _make("-n", target, "REPO=demo", "PKG=demo", "DESC=demo")
         assert proc.returncode == 0, proc.stderr
         assert "--product-" not in proc.stdout
-        assert "--repo-birth-contract" not in proc.stdout
+        assert "--semantic-compiler-src" not in proc.stdout

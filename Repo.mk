@@ -127,8 +127,7 @@ birth: ## Dispatch secure factory birth (REPO= PKG= DESC= [VISIBILITY=private|pu
 		$(if $(PAYLOAD_SUBPATH),--payload-subpath "$(PAYLOAD_SUBPATH)",) \
 		$(if $(PAYLOAD_CONTRACT_PATH),--payload-contract-path "$(PAYLOAD_CONTRACT_PATH)",) \
 		$(if $(PRODUCT_BIRTH_BINDING_PATH),--product-birth-binding-path "$(PRODUCT_BIRTH_BINDING_PATH)",) \
-		$(if $(PRODUCT_MANIFEST_PATH),--product-manifest-path "$(PRODUCT_MANIFEST_PATH)",) \
-		$(if $(REPO_BIRTH_CONTRACT_PATH),--repo-birth-contract-path "$(REPO_BIRTH_CONTRACT_PATH)",)
+		$(if $(PRODUCT_MANIFEST_PATH),--product-manifest-path "$(PRODUCT_MANIFEST_PATH)",)
 
 birth-status: ## Derive live lifecycle truth (REPO=<name|owner/name> [JSON=1])
 	@test -n "$(REPO)" || (echo "usage: make birth-status REPO=<name|owner/name> [JSON=1]" >&2; exit 2)
@@ -167,7 +166,7 @@ new-repo: ## Direct/debug birth primitive (REPO= PKG= DESC= [PAYLOAD= PAYLOAD_CO
 		$(if $(PAYLOAD_CONTRACT),--payload-contract "$(PAYLOAD_CONTRACT)",) \
 		$(if $(PRODUCT_BIRTH_BINDING),--product-birth-binding "$(PRODUCT_BIRTH_BINDING)",) \
 		$(if $(PRODUCT_MANIFEST),--product-manifest "$(PRODUCT_MANIFEST)",) \
-		$(if $(REPO_BIRTH_CONTRACT),--repo-birth-contract "$(REPO_BIRTH_CONTRACT)",) \
+		$(if $(SEMANTIC_COMPILER_SRC),--semantic-compiler-src "$(SEMANTIC_COMPILER_SRC)",) \
 		$(if $(WORK_DIR),--work-dir "$(WORK_DIR)",) \
 		$(if $(ORG_PROFILE_SRC),--org-profile-src "$(ORG_PROFILE_SRC)",) \
 		$(if $(CLASS),--repo-class "$(CLASS)",) \

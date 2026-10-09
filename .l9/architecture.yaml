@@ -37,8 +37,11 @@ boundaries:
   owns:
     - deterministic repository assembly and template/chassis application
     - compiled birth-payload production and verification (l9.birth-payload/v1)
-    - repository-birth packaging and the l9.repo-birth-contract/v1 schema
+    - repository-birth packaging and the l9.product-birth-binding/v2 schema
       (scripts/birth-runner/package_birth_handoff.py)
+    - compiler-backed product resolution — pinning and invoking the semantic
+      compiler engine, never interpreting its output
+      (scripts/birth-runner/product_resolution.py, semantic-compiler.pin.json)
     - additive versus authoritative payload application
     - repository birth provenance and lifecycle orchestration
     - local pre-publication validation
@@ -57,13 +60,19 @@ adapter_boundary:
   adapter: scripts/birth-runner/l9_birth_adapter.py
   packager: scripts/birth-runner/package_birth_handoff.py
   prepare_gate: scripts/birth-runner/new_repo_legacy.py::_preflight_product_birth_adapter
+  resolution: scripts/birth-runner/product_resolution.py
+  engine_pin: scripts/birth-runner/semantic-compiler.pin.json
   rule: >
-    The adapter decides whether an already-resolved product realization is
+    The adapter decides whether a compiler-resolved product realization is
     admissible for this exact birth; the packager emits that bundle from a
-    clean source snapshot, its lineage evidence and a supplied ProductManifest,
-    and PREPARE refuses assembly unless the adapter admits it for the running
-    factory. All three consume resolved product semantics and none produces
-    them: ProductManifest, ProductKind and archetypes stay upstream inputs.
+    clean source snapshot and the ProductManifest the pinned semantic compiler
+    resolves from it; PREPARE refuses assembly unless the adapter admits it for
+    the running factory and the pinned compiler, re-run against the verified
+    payload, reproduces the supplied manifest exactly. No IdeaOS, GAR, Plan,
+    campaign or Program Execution lineage is a birth prerequisite
+    (BIRTH-ARCH-REVISION-001). All of them consume resolved product semantics
+    and none produces them: ProductManifest, ProductKind and archetypes stay
+    upstream inputs, and the compiler's output is compared, never interpreted.
 org_birth_profile:
   class: non_constellation_python
   meaning: >

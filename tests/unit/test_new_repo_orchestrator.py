@@ -1539,8 +1539,8 @@ _FIXTURE_SPEC.loader.exec_module(adapter_fixtures)
 ADAPTER_FLAGS = {
     "binding": "--product-birth-binding",
     "manifest": "--product-manifest",
-    "birth_contract": "--repo-birth-contract",
 }
+ENGINE_FLAG = "--semantic-compiler-src"
 
 
 def _write_adapter_bundle(
@@ -1548,25 +1548,20 @@ def _write_adapter_bundle(
 ) -> dict[str, Path]:
     """One consistent realization on disk, as the adapter would read it.
 
-    `factory` re-packages the binding AND the birth contract for that factory
-    coordinate, so the bundle stays internally consistent — the adapter admits
-    it — while naming a factory other than the one running PREPARE.
+    `factory` re-packages the binding for that factory coordinate, so the
+    bundle stays internally consistent — the adapter admits it — while naming
+    a factory other than the one running PREPARE.
     """
     case = adapter_fixtures.Case()
     manifest_doc = adapter_fixtures.make_manifest(**manifest_overrides)
-    binding, contract_doc = case.binding, case.contract_doc
+    binding = case.binding
     if factory is not None:
-        contract_doc = adapter_fixtures.make_birth_contract(
-            case.payload, factory={**case.contract_doc["factory"], "revision": factory["revision"]}
-        )
-        contract = adapter_fixtures.adapter.Artifact.from_document(contract_doc)
         binding = adapter_fixtures.make_binding(
-            adapter_fixtures.make_manifest(), contract, case.payload, factory=dict(factory)
+            adapter_fixtures.make_manifest(), case.payload, factory=dict(factory)
         )
     documents = {
         "binding": binding,
         "manifest": manifest_doc,
-        "birth_contract": contract_doc,
         "payload": adapter_fixtures.make_payload(),
     }
     root.mkdir(parents=True, exist_ok=True)
@@ -1588,7 +1583,8 @@ def _running_factory_receipt() -> object:
 
 def _adapter_config(tmp_path: Path, bundle: dict[str, Path], *names: str) -> object:
     """A PREPARE config carrying the named adapter artifacts and, with "payload",
-    the compiled payload contract."""
+    the compiled payload contract and its source; with "engine", a semantic
+    compiler checkout path (the reproduction seam is stubbed in this suite)."""
     payload_dir = tmp_path / "payload"
     payload_dir.mkdir(exist_ok=True)
     argv = [
@@ -1604,6 +1600,8 @@ def _adapter_config(tmp_path: Path, bundle: dict[str, Path], *names: str) -> obj
     ]
     if "payload" in names:
         argv += ["--payload", str(payload_dir), "--payload-contract", str(bundle["payload"])]
+    if "engine" in names:
+        argv += [ENGINE_FLAG, str(tmp_path / "engine")]
     for name, flag in ADAPTER_FLAGS.items():
         if name in names:
             argv += [flag, str(bundle[name])]
@@ -1635,11 +1633,24 @@ def preflight_trace(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         trace.append("adapter")
         return real_bind(*args, **kwargs)
 
+    def resolve_product(**kwargs):
+        # The reproduction seam. The real pinned engine is driven by
+        # tests/integration/test_compiler_backed_birth.py; here only the order of
+        # the gates and what reaches this one are under test.
+        trace.append("compiler")
+        claimed = kwargs["claimed_compiler"]
+        return stages.product_resolution.Resolution(
+            engine={k: claimed[k] for k in ("engine", "revision", "version")},
+            manifest_digest=str(kwargs["supplied_manifest"]["manifest_digest"]),
+            inputs=dict(claimed["inputs"]),
+        )
+
     monkeypatch.setattr(stages, "_preflight_tools", lambda cfg, receipt: trace.append("tools"))
     monkeypatch.setattr(stages, "_preflight_sources", lambda cfg: trace.append("sources"))
     monkeypatch.setattr(stages, "_preflight_payload_contract", payload_proof)
     monkeypatch.setattr(stages, "_preflight_name_free", lambda cfg, receipt: trace.append("name"))
     monkeypatch.setattr(stages.birth_adapter, "bind", spy_bind)
+    monkeypatch.setattr(stages.product_resolution, "resolve_product", resolve_product)
     return trace
 
 
@@ -1683,7 +1694,7 @@ class TestProductBirthAdapterGate:
                 ]
             )
         )
-        assert (cfg.product_birth_binding, cfg.product_manifest, cfg.repo_birth_contract) == (
+        assert (cfg.product_birth_binding, cfg.product_manifest, cfg.semantic_compiler_src) == (
             None,
             None,
             None,
@@ -1691,22 +1702,13 @@ class TestProductBirthAdapterGate:
         receipt = new_repo.BirthReceipt()
         new_repo.stage_preflight(cfg, receipt)
         assert "adapter" not in preflight_trace
+        assert "compiler" not in preflight_trace
         assert _stage(receipt, "preflight.adapter").status == "SKIP"
         assert preflight_trace == ["tools", "sources", "payload", "name"]
         keys = [stage.key for stage in receipt.stages]
         assert keys[-2:] == ["preflight.adapter", "preflight.provenance"]
 
-    @pytest.mark.parametrize(
-        "names",
-        [
-            ("binding",),
-            ("manifest",),
-            ("birth_contract",),
-            ("binding", "manifest"),
-            ("binding", "birth_contract"),
-            ("manifest", "birth_contract"),
-        ],
-    )
+    @pytest.mark.parametrize("names", [("binding",), ("manifest",)])
     def test_a_partial_bundle_fails_closed_before_assembly(
         self,
         tmp_path: Path,
@@ -1715,34 +1717,80 @@ class TestProductBirthAdapterGate:
         names: tuple[str, ...],
     ) -> None:
         bundle = _write_adapter_bundle(tmp_path / "bundle")
-        cfg = _adapter_config(tmp_path, bundle, "payload", *names)
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *names)
         receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="partial product-birth adapter bundle"):
             _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
         assert "adapter" not in preflight_trace
+        assert "compiler" not in preflight_trace
         assert "assemble" not in preflight_trace
 
     def test_a_complete_bundle_without_the_compiled_payload_fails_closed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preflight_trace: list[str]
     ) -> None:
         bundle = _write_adapter_bundle(tmp_path / "bundle")
-        cfg = _adapter_config(tmp_path, bundle, *ADAPTER_FLAGS)
+        cfg = _adapter_config(tmp_path, bundle, "engine", *ADAPTER_FLAGS)
         receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="requires the compiled l9.birth-payload/v1"):
             _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
         assert "adapter" not in preflight_trace
         assert "assemble" not in preflight_trace
 
-    def test_an_admissible_bundle_invokes_the_adapter_and_reaches_assembly(
+    def test_a_complete_bundle_without_the_pinned_engine_fails_closed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preflight_trace: list[str]
     ) -> None:
+        """No engine, no reproduction, no birth — never a fallback to trusting the manifest."""
         bundle = _write_adapter_bundle(tmp_path / "bundle")
         cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
         receipt = _running_factory_receipt()
+        with pytest.raises(new_repo.BirthError, match="pinned semantic compiler"):
+            _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
+        assert "adapter" not in preflight_trace
+        assert "compiler" not in preflight_trace
+        assert "assemble" not in preflight_trace
+
+    def test_an_admissible_bundle_invokes_the_adapter_then_the_compiler_and_reaches_assembly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preflight_trace: list[str]
+    ) -> None:
+        bundle = _write_adapter_bundle(tmp_path / "bundle")
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
+        receipt = _running_factory_receipt()
         with pytest.raises(_ReachedAssembly):
             _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
-        assert preflight_trace == ["tools", "sources", "payload", "adapter", "name", "assemble"]
-        assert _stage(receipt, "preflight.adapter").status == "PASS"
+        assert preflight_trace == [
+            "tools",
+            "sources",
+            "payload",
+            "adapter",
+            "compiler",
+            "name",
+            "assemble",
+        ]
+        stage = _stage(receipt, "preflight.adapter")
+        assert stage.status == "PASS"
+        assert "reproduced by" in stage.detail
+
+    def test_a_manifest_the_engine_does_not_reproduce_stops_prepare(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preflight_trace: list[str]
+    ) -> None:
+        stages = new_repo._stages
+
+        def refuse(**kwargs):
+            preflight_trace.append("compiler")
+            raise stages.product_resolution.ProductResolutionError(
+                "manifest digest disagreement: the pinned engine resolves 'sha256:aa', "
+                "the supplied manifest declares 'sha256:bb'"
+            )
+
+        monkeypatch.setattr(stages.product_resolution, "resolve_product", refuse)
+        bundle = _write_adapter_bundle(tmp_path / "bundle")
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
+        receipt = _running_factory_receipt()
+        with pytest.raises(new_repo.BirthError, match="did not reproduce — manifest digest"):
+            _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
+        assert preflight_trace[-2:] == ["adapter", "compiler"]
+        assert "assemble" not in preflight_trace
+        assert not [s for s in receipt.stages if s.key == "preflight.adapter"]
 
     def _bundle_is_admissible_on_its_own(self, bundle: dict[str, Path]) -> None:
         """The adapter itself admits it: the defect is only the running-factory seam."""
@@ -1750,7 +1798,6 @@ class TestProductBirthAdapterGate:
         result = new_repo.birth_adapter.bind(
             new_repo.birth_adapter.load_binding(bundle["binding"]),
             manifest=load(bundle["manifest"]),
-            birth_contract=load(bundle["birth_contract"]),
             payload=load(bundle["payload"]),
         )
         assert result.admissible, result.failures
@@ -1762,11 +1809,12 @@ class TestProductBirthAdapterGate:
         other = {**adapter_fixtures.FACTORY, "revision": "d" * 40}
         bundle = _write_adapter_bundle(tmp_path / "bundle", factory=other)
         self._bundle_is_admissible_on_its_own(bundle)
-        cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
         receipt = _running_factory_receipt()
         with pytest.raises(new_repo.BirthError, match="running factory revision"):
             _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
         assert "adapter" in preflight_trace
+        assert "compiler" not in preflight_trace, "the engine never runs for another factory"
         assert "assemble" not in preflight_trace
         assert not [s for s in receipt.stages if s.key == "preflight.adapter"]
 
@@ -1777,7 +1825,7 @@ class TestProductBirthAdapterGate:
         other = {**adapter_fixtures.FACTORY, "repository": "Quantum-L9/another-factory"}
         bundle = _write_adapter_bundle(tmp_path / "bundle", factory=other)
         self._bundle_is_admissible_on_its_own(bundle)
-        cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
         receipt = _running_factory_receipt()
         with pytest.raises(new_repo.BirthError, match="running factory repository"):
             _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
@@ -1788,7 +1836,7 @@ class TestProductBirthAdapterGate:
     ) -> None:
         """Exact full revision only: a matching prefix is still a different factory."""
         bundle = _write_adapter_bundle(tmp_path / "bundle")
-        cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
         receipt = _running_factory_receipt()
         receipt.template_sha = receipt.template_sha[:12]
         with pytest.raises(new_repo.BirthError, match="running factory revision"):
@@ -1800,7 +1848,7 @@ class TestProductBirthAdapterGate:
     ) -> None:
         """T-F050-001-C: repository and full revision both match; the path continues."""
         bundle = _write_adapter_bundle(tmp_path / "bundle")
-        cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
         receipt = _running_factory_receipt()
         with pytest.raises(_ReachedAssembly):
             _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
@@ -1810,11 +1858,12 @@ class TestProductBirthAdapterGate:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preflight_trace: list[str]
     ) -> None:
         bundle = _write_adapter_bundle(tmp_path / "bundle", manifest_digest="sha256:" + "9" * 64)
-        cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
         receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="MANIFEST_DIGEST_MISMATCH"):
             _prepare_until_assembly(monkeypatch, cfg, preflight_trace, receipt)
         assert "adapter" in preflight_trace
+        assert "compiler" not in preflight_trace, "an inadmissible bundle never reaches the engine"
         assert "assemble" not in preflight_trace
 
     def test_the_payload_proof_runs_first_and_cannot_be_bypassed(
@@ -1822,14 +1871,15 @@ class TestProductBirthAdapterGate:
     ) -> None:
         """A payload contract the source proof did not reproduce never reaches the adapter."""
         bundle = _write_adapter_bundle(tmp_path / "bundle")
+        (tmp_path / "payload").mkdir()
         cfg = new_repo.BirthConfig(
             org="Quantum-L9",
             repo="l9-newborn",
             pkg="l9_newborn",
             desc="A product",
             work_dir=tmp_path / "work",
-            payload=None,  # the proof SKIPs: nothing was reproduced
-            payload_contract=bundle["payload"],
+            payload=tmp_path / "payload",
+            payload_contract=bundle["payload"],  # the receipt never recorded its proof
             template_src=REPO,
             org_profile_src=None,
             repo_class="non_constellation_python",
@@ -1840,18 +1890,19 @@ class TestProductBirthAdapterGate:
             bootstrap_timeout=1,
             product_birth_binding=bundle["binding"],
             product_manifest=bundle["manifest"],
-            repo_birth_contract=bundle["birth_contract"],
+            semantic_compiler_src=tmp_path / "engine",
         )
         receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="not reproduced against its source"):
             new_repo._stages._preflight_product_birth_adapter(cfg, receipt)
         assert "adapter" not in preflight_trace
+        assert "compiler" not in preflight_trace
 
     def test_a_missing_artifact_is_refused(
         self, tmp_path: Path, preflight_trace: list[str]
     ) -> None:
         bundle = _write_adapter_bundle(tmp_path / "bundle")
-        cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
         bundle["manifest"].unlink()
         receipt = new_repo.BirthReceipt()
         with pytest.raises(new_repo.BirthError, match="adapter input unreadable"):
@@ -1867,9 +1918,8 @@ class TestProductBirthAdapterGate:
         product = {"id": "l9.product/ideaos", "kind": kind, "archetype_ref": "l9.archetype/x@1"}
         manifest_doc = adapter_fixtures.make_manifest(product=product)
         documents = {
-            "binding": adapter_fixtures.make_binding(manifest_doc, case.contract, case.payload),
+            "binding": adapter_fixtures.make_binding(manifest_doc, case.payload),
             "manifest": manifest_doc,
-            "birth_contract": case.contract_doc,
             "payload": adapter_fixtures.make_payload(),
         }
         bundle: dict[str, Path] = {}
@@ -1878,7 +1928,7 @@ class TestProductBirthAdapterGate:
             bundle[name].write_text(
                 new_repo.birth_adapter.render_document(document), encoding="utf-8"
             )
-        cfg = _adapter_config(tmp_path, bundle, "payload", *ADAPTER_FLAGS)
+        cfg = _adapter_config(tmp_path, bundle, "payload", "engine", *ADAPTER_FLAGS)
         receipt = _running_factory_receipt()
         new_repo.stage_preflight(cfg, receipt)
         stage = _stage(receipt, "preflight.adapter")
@@ -1887,11 +1937,13 @@ class TestProductBirthAdapterGate:
         assert cfg.verified_payload_mode is None  # the gate set nothing on the config
 
     def test_the_gate_reads_no_product_semantics(self) -> None:
-        """Kind, archetype, topology stay upstream; only the factory coordinate is read.
+        """Kind, archetype, topology stay upstream; only factory and compiler are read.
 
-        The one validated coordinate PREPARE may consume is `factory`, to bind
-        the verdict to the factory actually running (F-050-001). Product,
-        topology and manifest coordinates are never read here.
+        The validated coordinates PREPARE may consume are `factory`, to bind
+        the verdict to the factory actually running (F-050-001), and
+        `compiler`, to hand the engine coordinate and input paths to the
+        reproduction. Product, topology and manifest coordinates are never
+        read here.
         """
         import ast
         import inspect
@@ -1910,4 +1962,4 @@ class TestProductBirthAdapterGate:
             and node.value.attr == "coordinates"
             and isinstance(node.slice, ast.Constant)
         }
-        assert read == {"factory"}, f"the PREPARE gate reads coordinates {sorted(read)}"
+        assert read == {"factory", "compiler"}, f"the PREPARE gate reads coordinates {sorted(read)}"

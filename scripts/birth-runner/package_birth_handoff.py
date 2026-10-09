@@ -1,36 +1,47 @@
 #!/usr/bin/env python3
-"""Package a verified source snapshot for an adapter-backed repository birth.
+"""Package a verified source snapshot for a compiler-backed repository birth.
 
 The factory owns every executable and schema that defines, produces, validates,
 prepares, assembles, seals, publishes or attests a repository birth. This is the
-packaging step: it turns a clean realized source checkout, its upstream lineage
-evidence and an already-resolved ProductManifest into exactly the bundle the
-PREPARE gate (`_preflight_product_birth_adapter`) admits.
+packaging step: it turns a clean realized source checkout into exactly the
+bundle the PREPARE gate (`_preflight_product_birth_adapter`) admits.
 
-    birth-payload.json           l9.birth-payload/v1       the existing compiler's output
-    birth-contract.json          l9.repo-birth-contract/v1 schemas/birth-contract.schema.json
-    product-birth-binding.json   l9.product-birth-binding/v1
+    birth-payload.json           l9.birth-payload/v1       the existing payload compiler's output
+    product-manifest.json        l9.product-manifest/v1    the pinned semantic compiler's output
+    product-birth-binding.json   l9.product-birth-binding/v2
 
-It does not own product semantics. The ProductManifest is read, never written,
-and its ref is an explicit input: nothing here derives a manifest ref, a
-ProductKind or an archetype from a product id, a repository name, a topology, a
-filename or a directory. The compiler compiles, the adapter decides, and this
+It does not own product semantics. The ProductManifest is produced by the
+pinned `l9-semantic-compiler-engine` (`product_resolution.py`) from the exact
+topology, repository-spec, workflow-spec and authority-lock files inside the
+snapshot, and the factory carries that output verbatim: nothing here derives a
+manifest ref, a ProductKind or an archetype from a product id, a repository
+name, a topology, a filename or a directory. The payload compiler compiles
+bytes, the semantic compiler compiles semantics, the adapter decides, and this
 module only carries proven coordinates between them.
 
 The running repository is the factory. Its coordinate is its own clean, committed
 HEAD, and only a checkout whose `origin` names Quantum-L9/l9-repo-template is the
 factory; there is no `--factory` argument to point the packager somewhere else.
+The engine is the factory's pin (`semantic-compiler.pin.json`): the checkout
+handed in through `--semantic-compiler-src` is proven to be exactly that
+revision before it runs.
 
-    package_birth_handoff.py --source DIR --evidence FILE --manifest FILE
+    package_birth_handoff.py --source DIR --semantic-compiler-src DIR
                              --manifest-ref REF --out-dir DIR
-                             [--operation local_validation|remote_birth]
+                             [--topology P] [--repository-spec P] [--workflow-spec P]
+                             [--authority-lock P] [--contract-catalog P (only when the
+                             product declares a local catalog)]
                              [--source-repository OWNER/NAME]
 
 Exit 0 and a PASS document when the existing adapter admits the bundle, 1
 otherwise. A refused bundle leaves the output directory exactly as it was, and
 the output directory may lie inside neither the source nor the factory checkout.
-Dependency-free at runtime, like the rest of the birth engine. Moved from
-Cursor-Governance `skills/l9-repo-birth` (BIRTH-OWNERSHIP-CONSOLIDATION-001A).
+Dependency-free at runtime, like the rest of the birth engine.
+
+v2 (BIRTH-ARCH-REVISION-001): the `l9.repo-birth-evidence/v1` lineage input and
+the emitted `l9.repo-birth-contract/v1` are gone. IdeaOS, GAR, Plan, campaign
+and Program Execution history are not inputs to a birth; the product's own
+semantic resolution, reproduced by the pinned engine, is.
 """
 
 from __future__ import annotations
@@ -38,9 +49,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import os
-import posixpath
-import re
 import shutil
 import sys
 import tempfile
@@ -62,292 +70,44 @@ def _load_sibling(name: str):
     return module
 
 
-# Reused, not restated: the compiler owns snapshot cleanliness, revision/tree
-# resolution, source identity, payload mode, digests and rendering; the adapter
-# owns every realization-consistency check.
+# Reused, not restated: the payload compiler owns snapshot cleanliness,
+# revision/tree resolution, source identity, payload mode, digests and
+# rendering; product resolution owns the pinned engine; the adapter owns every
+# realization-consistency check.
 compiler = _load_sibling("compile_birth_payload")
 birth_adapter = _load_sibling("l9_birth_adapter")
+product_resolution = _load_sibling("product_resolution")
 prov = compiler.prov
 
 TEMPLATE_ROOT = Path(__file__).resolve().parents[2]
 FACTORY_REPOSITORY = "Quantum-L9/l9-repo-template"
-CONTRACT_SCHEMA = birth_adapter.BIRTH_CONTRACT_SCHEMA
-CONTRACT_SCHEMA_PATH = Path(__file__).resolve().parent / "schemas" / "birth-contract.schema.json"
-EVIDENCE_SCHEMA = "l9.repo-birth-evidence/v1"
-OPERATIONS = ("local_validation", "remote_birth")
-COMPILER_REL = "scripts/birth-runner/compile_birth_payload.py"
-FRONT_DOOR_REL = "scripts/birth-runner/new_repo.py"
-LINEAGE_KEYS = (
-    "idea_execute_receipt",
-    "gar_decision",
-    "plan",
-    "campaign_source",
-    "pe_receipt",
-)
 PAYLOAD_NAME = "birth-payload.json"
-CONTRACT_NAME = "birth-contract.json"
+MANIFEST_NAME = "product-manifest.json"
 BINDING_NAME = "product-birth-binding.json"
+BUNDLE_NAMES = (PAYLOAD_NAME, MANIFEST_NAME, BINDING_NAME)
+
+# The engine's own CLI defaults for the inputs every product has, as
+# repository-relative paths inside the source. The optional contract catalog
+# has no default here: it is named in the binding only when the caller
+# supplies it, because a product whose RepositorySpec declares no local
+# catalog ships no such file, and a binding naming one the payload does not
+# carry is refused by the adapter. PREPARE resolves the engine's own default
+# against the source root when the binding omits it.
+DEFAULT_INPUTS: dict[str, str] = {
+    "topology": "product-topology.yaml",
+    "repository_spec": "repository-spec.yaml",
+    "workflow_spec": "workflow-spec.yaml",
+    "authority_lock": "semantics.lock.yaml",
+}
 
 
 class HandoffError(RuntimeError):
     """The bundle could not be packaged, or the adapter did not admit it."""
 
 
-def load_json(path: Path, what: str) -> dict[str, object]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HandoffError(f"cannot load {what} {path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise HandoffError(f"{what} {path} must be a JSON object")
-    return value
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# The birth contract, validated against its own schema without a schema library
+# Inputs: the running factory, the clean snapshot, the pinned engine
 # ─────────────────────────────────────────────────────────────────────────────
-
-# The keywords `birth-contract.schema.json` uses. A keyword outside this set is
-# a schema change this validator cannot honor, so it refuses instead of
-# silently ignoring it.
-_SUPPORTED_KEYWORDS = frozenset(
-    {
-        "$schema",
-        "$id",
-        "title",
-        "type",
-        "additionalProperties",
-        "required",
-        "properties",
-        "const",
-        "enum",
-        "pattern",
-        "minLength",
-        "minItems",
-        "items",
-    }
-)
-_JSON_TYPES: dict[str, tuple[type, ...]] = {
-    "object": (dict,),
-    "array": (list,),
-    "string": (str,),
-}
-
-
-def _same_json_value(a: object, b: object) -> bool:
-    """JSON equality: `true` is not `1`, as JSON Schema `const`/`enum` read it."""
-    return type(a) is type(b) and a == b
-
-
-# The patterns `birth-contract.schema.json` uses, compiled once. Like the
-# keyword set, the pattern set is closed: a schema value never becomes a
-# regular expression at runtime, and a pattern outside this set refuses.
-_KNOWN_PATTERNS: dict[str, re.Pattern[str]] = {
-    source: re.compile(source)
-    for source in (
-        r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$",
-        r"^[0-9a-f]{40}$",
-        r"^sha256:[0-9a-f]{64}$",
-    )
-}
-
-
-def _known_pattern(pattern: str) -> re.Pattern[str]:
-    compiled = _KNOWN_PATTERNS.get(pattern)
-    if compiled is None:
-        raise HandoffError(f"birth contract schema uses unsupported pattern {pattern!r}")
-    return compiled
-
-
-def _check_type(schema: Mapping[str, object], value: object, where: str) -> str | None:
-    expected = schema.get("type")
-    if expected is None:
-        return None
-    if not isinstance(expected, str) or expected not in _JSON_TYPES:
-        raise HandoffError(f"birth contract schema uses unsupported type {expected!r}")
-    return None if isinstance(value, _JSON_TYPES[expected]) else f"{where} is not a JSON {expected}"
-
-
-def _check_values(schema: Mapping[str, object], value: object, where: str) -> list[str]:
-    errors: list[str] = []
-    if "const" in schema and not _same_json_value(value, schema["const"]):
-        errors.append(f"{where} must equal {schema['const']!r}")
-    enum = schema.get("enum")
-    if isinstance(enum, list) and not any(_same_json_value(value, item) for item in enum):
-        errors.append(f"{where} must be one of {enum}")
-    return errors
-
-
-def _check_string(schema: Mapping[str, object], value: str, where: str) -> list[str]:
-    errors: list[str] = []
-    pattern = schema.get("pattern")
-    # search, as JSON Schema `pattern` is defined; the schema anchors its own.
-    if isinstance(pattern, str) and not _known_pattern(pattern).search(value):
-        errors.append(f"{where} does not match {pattern}")
-    min_length = schema.get("minLength")
-    if isinstance(min_length, int) and len(value) < min_length:
-        errors.append(f"{where} is shorter than {min_length}")
-    return errors
-
-
-def _check_array(schema: Mapping[str, object], value: list, where: str) -> list[str]:
-    errors: list[str] = []
-    min_items = schema.get("minItems")
-    if isinstance(min_items, int) and len(value) < min_items:
-        errors.append(f"{where} has fewer than {min_items} item(s)")
-    items = schema.get("items")
-    if isinstance(items, Mapping):
-        for index, item in enumerate(value):
-            errors.extend(validate_against(items, item, f"{where}[{index}]"))
-    return errors
-
-
-def _check_object(schema: Mapping[str, object], value: dict, where: str) -> list[str]:
-    properties = schema.get("properties")
-    props = properties if isinstance(properties, Mapping) else {}
-    required = schema.get("required")
-    errors = [
-        f"{where}.{key} is required"
-        for key in (required if isinstance(required, list) else [])
-        if key not in value
-    ]
-    if schema.get("additionalProperties") is False:
-        errors.extend(f"{where}.{key} is not allowed" for key in sorted(set(value) - set(props)))
-    for key, subschema in props.items():
-        if key in value and isinstance(subschema, Mapping):
-            errors.extend(validate_against(subschema, value[key], f"{where}.{key}"))
-    return errors
-
-
-def validate_against(schema: Mapping[str, object], value: object, where: str) -> list[str]:
-    """Every way `value` fails `schema`, for the closed keyword subset above."""
-    unsupported = sorted(set(schema) - _SUPPORTED_KEYWORDS)
-    if unsupported:
-        raise HandoffError(
-            f"birth contract schema uses unsupported keyword(s) at {where}: "
-            f"{', '.join(unsupported)}"
-        )
-    wrong_type = _check_type(schema, value, where)
-    if wrong_type:
-        return [wrong_type]
-    errors = _check_values(schema, value, where)
-    if isinstance(value, str):
-        errors.extend(_check_string(schema, value, where))
-    elif isinstance(value, list):
-        errors.extend(_check_array(schema, value, where))
-    elif isinstance(value, dict):
-        errors.extend(_check_object(schema, value, where))
-    return errors
-
-
-def load_contract_schema() -> dict[str, object]:
-    return load_json(CONTRACT_SCHEMA_PATH, "birth contract schema")
-
-
-def validate_contract_document(document: object) -> list[str]:
-    """Every way a birth contract fails `schemas/birth-contract.schema.json`."""
-    return validate_against(load_contract_schema(), document, "birth_contract")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Inputs: upstream lineage, the running factory, the ProductManifest
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def _require_digest(evidence: Mapping[str, object], key: str) -> str:
-    value = str(evidence.get(key) or "")
-    if not value.startswith("sha256:") or len(value) != 71:
-        raise HandoffError(f"evidence.{key} must be a sha256: digest")
-    return value
-
-
-def _snapshot_bytes(snapshot: Mapping[str, bytes], source: Path, ref: str) -> bytes:
-    """A lineage or acceptance artifact's bytes, from the verified snapshot only.
-
-    The ref is a key into the snapshot's tracked files, never a filesystem path:
-    relative refs name a tracked file; an absolute ref is accepted only when it
-    names one inside the source. Anything that resolves outside the snapshot, or
-    is not committed in it, is refused — lineage is bound to the snapshot it was
-    verified with, and nothing outside it is opened or probed.
-    """
-    raw = str(ref or "").strip()
-    if not raw:
-        raise HandoffError("lineage path is empty")
-    rel = os.path.relpath(raw, str(source)) if os.path.isabs(raw) else raw
-    key = posixpath.normpath(rel.replace(os.sep, "/"))
-    if key == ".." or key.startswith("../") or key.startswith("/"):
-        raise HandoffError(
-            f"lineage artifact {ref!r} is outside the source checkout — lineage is bound "
-            "to the snapshot it was verified with"
-        )
-    if key not in snapshot:
-        raise HandoffError(
-            f"lineage artifact missing: {ref} (not a tracked file in the source snapshot)"
-        )
-    return snapshot[key]
-
-
-def _require_receipt_schema(artifact: bytes) -> None:
-    """The PE receipt artifact carries its schema identity."""
-    try:
-        receipt = json.loads(artifact.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HandoffError(f"pe_receipt artifact is not JSON: {exc}") from exc
-    if not isinstance(receipt, dict) or not str(receipt.get("schema") or "").strip():
-        raise HandoffError("pe_receipt artifact must declare schema")
-
-
-def _verify_lineage(
-    evidence: Mapping[str, object], source: Path, snapshot: Mapping[str, bytes]
-) -> None:
-    """Each lineage digest hashes its `*_path` artifact; the PE receipt has a schema."""
-    for key in LINEAGE_KEYS:
-        digest = _require_digest(evidence, key)
-        path_key = f"{key}_path"
-        raw_path = str(evidence.get(path_key) or "").strip()
-        if not raw_path:
-            raise HandoffError(f"evidence.{path_key} must locate the {key} artifact")
-        artifact = _snapshot_bytes(snapshot, source, raw_path)
-        if birth_adapter.artifact_digest(artifact) != digest:
-            raise HandoffError(f"evidence.{key} does not match hashed {path_key}")
-        if key == "pe_receipt":
-            _require_receipt_schema(artifact)
-
-
-def _verify_acceptance(
-    evidence: Mapping[str, object], source: Path, snapshot: Mapping[str, bytes]
-) -> None:
-    refs = evidence.get("acceptance_evidence_refs")
-    if (
-        not isinstance(refs, list)
-        or not refs
-        or not all(isinstance(ref, str) and ref.strip() for ref in refs)
-    ):
-        raise HandoffError("evidence.acceptance_evidence_refs must be a non-empty string list")
-    for ref in refs:
-        _snapshot_bytes(snapshot, source, ref)
-
-
-def validate_evidence(evidence: Mapping[str, object], source: Path) -> tuple[str, str, str]:
-    """`(source repository, revision, tree)` of a clean snapshot the evidence binds."""
-    if evidence.get("schema") != EVIDENCE_SCHEMA:
-        raise HandoffError(f"evidence.schema must equal {EVIDENCE_SCHEMA}")
-    try:
-        compiler.assert_immutable_snapshot(source)
-        revision, tree_sha = compiler.source_revision(source)
-        snapshot = compiler.source_files(source)
-    except (compiler.PayloadCompileError, prov.ProvenanceError) as exc:
-        raise HandoffError(str(exc)) from exc
-    _verify_lineage(evidence, source, snapshot)
-    _verify_acceptance(evidence, source, snapshot)
-    if evidence.get("source_revision") != revision or evidence.get("source_tree_sha") != tree_sha:
-        raise HandoffError(
-            "PE evidence source revision/tree does not match the current clean source"
-        )
-    repository = str(evidence.get("source_repository") or "").strip()
-    if "/" not in repository:
-        raise HandoffError("evidence.source_repository must be owner/name")
-    return repository, revision, tree_sha
 
 
 def factory_revision(factory_root: Path) -> str:
@@ -399,18 +159,57 @@ def manifest_coordinates(manifest: Mapping[str, object]) -> dict[str, dict[str, 
     return coordinates
 
 
+def normalize_inputs(overrides: Mapping[str, str | None] | None) -> dict[str, str]:
+    """The engine inputs as the binding will name them: explicit, relative, closed.
+
+    Required inputs default to the engine's conventions; the optional contract
+    catalog is present only when supplied, never defaulted in.
+    """
+    inputs = dict(DEFAULT_INPUTS)
+    for key, value in (overrides or {}).items():
+        if key not in product_resolution.INPUT_KEYS:
+            raise HandoffError(f"unknown compiler input {key!r}")
+        if value is not None:
+            inputs[key] = value
+    for key, value in inputs.items():
+        if not product_resolution.usable_input_path(value):
+            raise HandoffError(f"compiler input {key} is not a repository-relative path: {value!r}")
+    return inputs
+
+
+def resolve_manifest(
+    *, engine_root: Path, source: Path, inputs: Mapping[str, str], factory_root: Path
+) -> dict[str, object]:
+    """The pinned engine's resolved manifest for the snapshot, or a refusal."""
+    try:
+        pin = product_resolution.load_pin(factory_root)
+        engine = product_resolution.prove_engine_checkout(engine_root, pin)
+        reproduction = product_resolution.reproduce_manifest(
+            engine_root=engine, pin=pin, source_root=source, inputs=inputs
+        )
+    except product_resolution.ProductResolutionError as exc:
+        raise HandoffError(f"semantic compiler did not resolve the product: {exc}") from exc
+    if not reproduction.resolved:
+        shown = "; ".join(str(entry)[:80] for entry in reproduction.unresolved[:6])
+        raise HandoffError(
+            f"the pinned semantic compiler left the product unresolved (exit "
+            f"{reproduction.exit_code}): {shown or 'no detail'} — birth does not package an "
+            "unresolved manifest"
+        )
+    return reproduction.manifest
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Self-proof
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def prove_bundle(*, binding: Path, manifest: Path, birth_contract: Path, payload: Path):
+def prove_bundle(*, binding: Path, manifest: Path, payload: Path):
     """The existing adapter's verdict on the bundle as written to disk."""
     try:
         result = birth_adapter.bind(
             birth_adapter.load_binding(binding),
             manifest=birth_adapter.load_artifact(manifest),
-            birth_contract=birth_adapter.load_artifact(birth_contract),
             payload=birth_adapter.load_artifact(payload),
         )
     except birth_adapter.AdapterInputError as exc:
@@ -426,15 +225,10 @@ def prove_bundle(*, binding: Path, manifest: Path, birth_contract: Path, payload
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _write(path: Path, document: Mapping[str, object]) -> None:
-    path.write_text(compiler.render_payload(dict(document)), encoding="utf-8")
-
-
 def _refuse_output_inside(out_dir: Path, source: Path, factory_root: Path) -> None:
     """The handoff lives outside both authoritative trees, checked before any write."""
     reasons = {
-        "source": "writing the bundle there would dirty the snapshot the birth contract "
-        "attests as clean",
+        "source": "writing the bundle there would dirty the snapshot the payload attests as clean",
         "factory": "writing the bundle there would dirty the factory after its coordinate "
         "is captured, and could carry packaging artifacts into a newborn",
     }
@@ -481,11 +275,10 @@ def _expose(staged: dict[str, Path], out_dir: Path, stage: Path) -> None:
 def package(
     *,
     source: Path,
-    evidence_path: Path,
-    manifest_path: Path,
+    semantic_compiler_src: Path,
     manifest_ref: str,
     out_dir: Path,
-    operation: str = "local_validation",
+    inputs: Mapping[str, str | None] | None = None,
     source_repository: str | None = None,
     factory_root: Path = TEMPLATE_ROOT,
 ) -> dict[str, object]:
@@ -496,59 +289,34 @@ def package(
             "factory never derives it from a product id, repository, topology or filename"
         )
     source, out_dir = source.resolve(), out_dir.resolve()
-    factory_root, manifest_path = factory_root.resolve(), manifest_path.resolve()
+    factory_root = factory_root.resolve()
     _refuse_output_inside(out_dir, source, factory_root)
+    engine_inputs = normalize_inputs(inputs)
 
-    manifest = load_json(manifest_path, "ProductManifest")
-    coordinates = manifest_coordinates(manifest)
     factory = factory_revision(factory_root)
-    evidence = load_json(evidence_path, "birth evidence")
-    repository, revision, tree_sha = validate_evidence(evidence, source)
-    if source_repository:
-        repository = source_repository
-
     try:
         payload_doc = compiler.compile_payload(
-            source, template_src=factory_root, source_repository_override=repository
+            source, template_src=factory_root, source_repository_override=source_repository
         )
     except (compiler.PayloadCompileError, prov.ProvenanceError) as exc:
         raise HandoffError(f"factory payload compiler failed: {exc}") from exc
     payload_source = payload_doc["source"]
     assert isinstance(payload_source, dict)
-    if payload_source.get("revision") != revision or payload_source.get("tree_sha") != tree_sha:
-        raise HandoffError("factory payload does not bind the verified PE source snapshot")
+
+    manifest = resolve_manifest(
+        engine_root=semantic_compiler_src.resolve(),
+        source=source,
+        inputs=engine_inputs,
+        factory_root=factory_root,
+    )
+    coordinates = manifest_coordinates(manifest)
+    pin = product_resolution.load_pin(factory_root)
 
     payload_path = out_dir / PAYLOAD_NAME
-    contract_path = out_dir / CONTRACT_NAME
+    manifest_path = out_dir / MANIFEST_NAME
     binding_path = out_dir / BINDING_NAME
     payload_bytes = compiler.render_payload(payload_doc).encode("utf-8")
-    contract = {
-        "schema": CONTRACT_SCHEMA,
-        "operation": operation,
-        "source": {
-            "path": str(source),
-            "repository": payload_source["repository"],
-            "revision": revision,
-            "tree_sha": tree_sha,
-            "clean": True,
-        },
-        "lineage": {key: evidence[key] for key in (*LINEAGE_KEYS, "acceptance_evidence_refs")},
-        "factory": {
-            "path": str(factory_root),
-            "revision": factory,
-            "compiler": str(factory_root / COMPILER_REL),
-            "birth_front_door": str(factory_root / FRONT_DOOR_REL),
-        },
-        "payload": {
-            "ref": str(payload_path),
-            "digest": birth_adapter.artifact_digest(payload_bytes),
-            "schema": compiler.SCHEMA,
-        },
-    }
-    errors = validate_contract_document(contract)
-    if errors:
-        raise HandoffError("birth contract schema failure: " + "; ".join(errors))
-    contract_bytes = compiler.render_payload(contract).encode("utf-8")
+    manifest_bytes = compiler.render_payload(manifest).encode("utf-8")
 
     binding = {
         "schema": birth_adapter.SCHEMA,
@@ -557,18 +325,15 @@ def package(
         "topology": coordinates["topology"],
         "source": {
             "repository": payload_source["repository"],
-            "revision": revision,
-            "tree_sha": tree_sha,
-        },
-        "birth_contract": {
-            "ref": str(contract_path),
-            "digest": birth_adapter.artifact_digest(contract_bytes),
+            "revision": payload_source["revision"],
+            "tree_sha": payload_source["tree_sha"],
         },
         "payload": {
             "ref": str(payload_path),
             "digest": birth_adapter.artifact_digest(payload_bytes),
         },
         "factory": {"repository": FACTORY_REPOSITORY, "revision": factory},
+        "compiler": {**pin.coordinate, "inputs": engine_inputs},
     }
     binding_errors = birth_adapter.validate_binding_document(binding)
     if binding_errors:
@@ -582,14 +347,13 @@ def package(
     out_dir.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".package-birth-handoff-", dir=out_dir))
     try:
-        staged = {name: stage / name for name in (PAYLOAD_NAME, CONTRACT_NAME, BINDING_NAME)}
+        staged = {name: stage / name for name in BUNDLE_NAMES}
         staged[PAYLOAD_NAME].write_bytes(payload_bytes)
-        staged[CONTRACT_NAME].write_bytes(contract_bytes)
-        _write(staged[BINDING_NAME], binding)
+        staged[MANIFEST_NAME].write_bytes(manifest_bytes)
+        staged[BINDING_NAME].write_text(compiler.render_payload(binding), encoding="utf-8")
         result = prove_bundle(
             binding=staged[BINDING_NAME],
-            manifest=manifest_path,
-            birth_contract=staged[CONTRACT_NAME],
+            manifest=staged[MANIFEST_NAME],
             payload=staged[PAYLOAD_NAME],
         )
         _expose(staged, out_dir, stage)
@@ -597,11 +361,11 @@ def package(
         shutil.rmtree(stage, ignore_errors=True)
     return {
         "status": "PASS",
-        "operation": operation,
         "payload": str(payload_path),
-        "contract": str(contract_path),
+        "manifest": str(manifest_path),
         "binding": str(binding_path),
         "factory": {"repository": FACTORY_REPOSITORY, "revision": factory},
+        "compiler": pin.coordinate,
         "adapter": {"schema": birth_adapter.RESULT_SCHEMA, "admissible": result.admissible},
     }
 
@@ -609,17 +373,30 @@ def package(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="package_birth_handoff.py",
-        description="Package a verified source snapshot for an adapter-backed repository birth.",
+        description="Package a verified source snapshot for a compiler-backed repository birth.",
     )
     parser.add_argument("--source", required=True, help="clean realized source checkout")
-    parser.add_argument("--evidence", required=True, help=f"{EVIDENCE_SCHEMA} document")
-    parser.add_argument("--manifest", required=True, help="resolved ProductManifest (JSON)")
+    parser.add_argument(
+        "--semantic-compiler-src",
+        required=True,
+        help="clean checkout of the pinned l9-semantic-compiler-engine (semantic-compiler.pin.json)",
+    )
     parser.add_argument(
         "--manifest-ref", required=True, help="the ProductManifest's semantic ref, as published"
     )
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--operation", choices=OPERATIONS, default="local_validation")
-    parser.add_argument("--source-repository", help="owner/name of the source, overriding evidence")
+    for key in product_resolution.INPUT_KEYS:
+        default = DEFAULT_INPUTS.get(key)
+        parser.add_argument(
+            f"--{key.replace('_', '-')}",
+            default=None,
+            help=(
+                f"engine input, relative to the source (default: {default})"
+                if default
+                else "engine input, relative to the source; named in the binding only when given"
+            ),
+        )
+    parser.add_argument("--source-repository", help="owner/name of the source, overriding origin")
     return parser.parse_args(argv)
 
 
@@ -628,11 +405,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = package(
             source=Path(args.source).expanduser(),
-            evidence_path=Path(args.evidence).expanduser(),
-            manifest_path=Path(args.manifest).expanduser(),
+            semantic_compiler_src=Path(args.semantic_compiler_src).expanduser(),
             manifest_ref=args.manifest_ref,
             out_dir=Path(args.out_dir).expanduser(),
-            operation=args.operation,
+            inputs={key: getattr(args, key) for key in product_resolution.INPUT_KEYS},
             source_repository=args.source_repository,
         )
     except (HandoffError, OSError) as exc:
