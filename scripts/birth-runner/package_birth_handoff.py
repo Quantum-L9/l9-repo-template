@@ -29,7 +29,8 @@ revision before it runs.
     package_birth_handoff.py --source DIR --semantic-compiler-src DIR
                              --manifest-ref REF --out-dir DIR
                              [--topology P] [--repository-spec P] [--workflow-spec P]
-                             [--authority-lock P] [--contract-catalog P]
+                             [--authority-lock P] [--contract-catalog P (only when the
+                             product declares a local catalog)]
                              [--source-repository OWNER/NAME]
 
 Exit 0 and a PASS document when the existing adapter admits the bundle, 1
@@ -85,13 +86,18 @@ MANIFEST_NAME = "product-manifest.json"
 BINDING_NAME = "product-birth-binding.json"
 BUNDLE_NAMES = (PAYLOAD_NAME, MANIFEST_NAME, BINDING_NAME)
 
-# The engine's own CLI defaults, as repository-relative paths inside the source.
+# The engine's own CLI defaults for the inputs every product has, as
+# repository-relative paths inside the source. The optional contract catalog
+# has no default here: it is named in the binding only when the caller
+# supplies it, because a product whose RepositorySpec declares no local
+# catalog ships no such file, and a binding naming one the payload does not
+# carry is refused by the adapter. PREPARE resolves the engine's own default
+# against the source root when the binding omits it.
 DEFAULT_INPUTS: dict[str, str] = {
     "topology": "product-topology.yaml",
     "repository_spec": "repository-spec.yaml",
     "workflow_spec": "workflow-spec.yaml",
     "authority_lock": "semantics.lock.yaml",
-    "contract_catalog": product_resolution.DEFAULT_CONTRACT_CATALOG,
 }
 
 
@@ -154,7 +160,11 @@ def manifest_coordinates(manifest: Mapping[str, object]) -> dict[str, dict[str, 
 
 
 def normalize_inputs(overrides: Mapping[str, str | None] | None) -> dict[str, str]:
-    """The engine inputs as the binding will name them: explicit, relative, closed."""
+    """The engine inputs as the binding will name them: explicit, relative, closed.
+
+    Required inputs default to the engine's conventions; the optional contract
+    catalog is present only when supplied, never defaulted in.
+    """
     inputs = dict(DEFAULT_INPUTS)
     for key, value in (overrides or {}).items():
         if key not in product_resolution.INPUT_KEYS:
@@ -375,11 +385,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--manifest-ref", required=True, help="the ProductManifest's semantic ref, as published"
     )
     parser.add_argument("--out-dir", required=True)
-    for key, default in DEFAULT_INPUTS.items():
+    for key in product_resolution.INPUT_KEYS:
+        default = DEFAULT_INPUTS.get(key)
         parser.add_argument(
             f"--{key.replace('_', '-')}",
             default=None,
-            help=f"engine input, relative to the source (default: {default})",
+            help=(
+                f"engine input, relative to the source (default: {default})"
+                if default
+                else "engine input, relative to the source; named in the binding only when given"
+            ),
         )
     parser.add_argument("--source-repository", help="owner/name of the source, overriding origin")
     return parser.parse_args(argv)
@@ -393,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
             semantic_compiler_src=Path(args.semantic_compiler_src).expanduser(),
             manifest_ref=args.manifest_ref,
             out_dir=Path(args.out_dir).expanduser(),
-            inputs={key: getattr(args, key) for key in DEFAULT_INPUTS},
+            inputs={key: getattr(args, key) for key in product_resolution.INPUT_KEYS},
             source_repository=args.source_repository,
         )
     except (HandoffError, OSError) as exc:

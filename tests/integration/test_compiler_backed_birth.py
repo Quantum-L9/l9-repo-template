@@ -431,6 +431,20 @@ class TestANodeProductWithZeroPEHistoryIsBorn:
         assert reproduced.resolved
         assert reproduced.manifest == _read(result["manifest"])
 
+    def test_a_product_without_a_local_contract_catalog_is_born(self, fx: Fixture) -> None:
+        """The fixture's RepositorySpec declares no local catalog; the file is optional
+        and the binding must not name it (Codex P2 on #52)."""
+        _git(fx.source, "rm", "-q", CONTRACT_CATALOG)
+        _commit_all(fx.source, "no local contract catalog")
+        result = fx.package()
+        assert result["status"] == "PASS"
+        assert "contract_catalog" not in _read(result["binding"])["compiler"]["inputs"]
+        assert _read(result["manifest"])["unresolved"] == []
+        cfg = fx.prepare_config(result)
+        receipt = fx.receipt(cfg)
+        _gate(fx, cfg, receipt)
+        assert receipt.stages[-1].status == "PASS"  # type: ignore[attr-defined]
+
     def test_packaging_is_deterministic(self, fx: Fixture) -> None:
         first = fx.package()
         bytes_first = {p.name: p.read_bytes() for p in fx.out.iterdir()}

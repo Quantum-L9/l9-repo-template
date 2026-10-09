@@ -650,7 +650,7 @@ python3 scripts/birth-runner/package_birth_handoff.py \
   --out-dir /tmp/birth-handoff \
   [--topology product-topology.yaml] [--repository-spec repository-spec.yaml] \
   [--workflow-spec workflow-spec.yaml] [--authority-lock semantics.lock.yaml] \
-  [--contract-catalog contracts/compiler-core.yaml]
+  [--contract-catalog contracts/compiler-core.yaml]   # only for a product that declares one
 ```
 
 It writes `birth-payload.json` (the existing payload compiler's output),
@@ -670,9 +670,13 @@ attests as clean.
   from the product's own files; the factory carries it and never edits it. Its
   ref is never derived from a product id, repository, topology or filename,
   and a ProductKind the manifest does not state is a refusal, not a default.
-- **The engine inputs are explicit.** They default to the engine's own CLI
-  defaults, relative to the source root, and are recorded in the binding so
-  PREPARE reads exactly the same files.
+- **The engine inputs are explicit.** The four every product has default to
+  the engine's own CLI conventions, relative to the source root, and are
+  recorded in the binding so PREPARE reads exactly the same files. The local
+  contract catalog is recorded only when supplied: a product whose
+  RepositorySpec declares none ships no such file, and the adapter refuses a
+  binding that names an input the payload does not carry. When the binding
+  omits it, PREPARE resolves the engine's default against the source root.
 
 Moving the bundle to a remote birth (the dispatch workflow reads the two
 paths from the payload checkout) is a separate concern; packaging does not

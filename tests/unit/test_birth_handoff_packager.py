@@ -451,6 +451,23 @@ class TestSourceAndInputs:
             fx.package(inputs={"topology": value})
         assert fx.engine_calls == []
 
+    def test_the_contract_catalog_is_named_only_when_supplied(self, fx: Fixture) -> None:
+        """A product without a local catalog ships no such file; the binding must not
+        invent one (Codex P2 on #52). Supplied, it is carried and must be in the payload."""
+        result = fx.package()
+        assert "contract_catalog" not in _read(result["binding"])["compiler"]["inputs"]
+        assert "contract_catalog" not in packager.DEFAULT_INPUTS
+        with pytest.raises(packager.HandoffError, match="COMPILER_INPUT_NOT_IN_PAYLOAD"):
+            fx.package(inputs={"contract_catalog": "contracts/compiler-core.yaml"})
+        (fx.source / "contracts").mkdir()
+        (fx.source / "contracts" / "compiler-core.yaml").write_text("# catalog\n", encoding="utf-8")
+        _git(fx.source, "add", "-A")
+        _git(fx.source, "commit", "-q", "-m", "local catalog")
+        result = fx.package(inputs={"contract_catalog": "contracts/compiler-core.yaml"})
+        binding = _read(result["binding"])
+        assert binding["compiler"]["inputs"]["contract_catalog"] == "contracts/compiler-core.yaml"
+        assert fx.engine_calls[-1]["inputs"]["contract_catalog"] == "contracts/compiler-core.yaml"
+
     def test_an_unknown_input_key_is_refused(self, fx: Fixture) -> None:
         with pytest.raises(packager.HandoffError, match="unknown compiler input"):
             fx.package(inputs={"lineage": "lineage/pe-receipt.json"})
