@@ -1,10 +1,14 @@
-"""The product-to-birth adapter boundary.
+"""The product-to-birth adapter boundary (l9.product-birth-binding/v2).
 
-One question is under test: given an already-resolved ProductManifest, a
-realized source snapshot, a digest-bound birth contract and a factory
-coordinate, does the adapter admit exactly the consistent realization and
-refuse — with a named, deterministic reason — every inconsistent one, without
-ever inferring a ProductKind, reading a source tree, or granting authority?
+One question is under test: given a compiler-resolved ProductManifest, a
+realized source snapshot bound by a compiled payload, a factory coordinate and
+the compiler coordinate the manifest was resolved by, does the adapter admit
+exactly the consistent realization and refuse — with a named, deterministic
+reason — every inconsistent one, without ever inferring a ProductKind, reading
+a source tree, running a compiler, or granting authority?
+
+v2 (BIRTH-ARCH-REVISION-001): no birth contract, no lineage. A binding that
+still carries either is malformed, not tolerated.
 
 Everything here is pure: no git, no network, no filesystem beyond the files the
 command-line tests write themselves. The adapter is a binding/validation
@@ -27,6 +31,7 @@ REPO = Path(__file__).resolve().parents[2]
 BIRTH_RUNNER = REPO / "scripts" / "birth-runner"
 ADAPTER_MODULE = BIRTH_RUNNER / "l9_birth_adapter.py"
 SCHEMA_FILE = BIRTH_RUNNER / "schemas" / "l9-product-birth-binding.schema.json"
+SUPERSEDED = BIRTH_RUNNER / "schemas" / "superseded"
 
 
 def _load(name: str, filename: str):
@@ -45,10 +50,30 @@ compiler = adapter.compiler
 REVISION = "a" * 40
 TREE = "b" * 40
 FACTORY_REVISION = "c" * 40
+ENGINE_REVISION = "d" * 40
 SOURCE = {"repository": "Quantum-L9/IdeaOS", "revision": REVISION, "tree_sha": TREE}
 FACTORY = {"repository": "Quantum-L9/l9-repo-template", "revision": FACTORY_REVISION}
 TOPOLOGY = {"ref": "l9.product-topology/ideaos@1", "digest": "sha256:" + "1" * 64}
 MANIFEST_DIGEST = "sha256:" + "2" * 64
+COMPILER_VERSION = "0.9.3"
+INPUTS = {
+    "topology": "product-topology.yaml",
+    "repository_spec": "repository-spec.yaml",
+    "workflow_spec": "workflow-spec.yaml",
+    "authority_lock": "semantics.lock.yaml",
+    "contract_catalog": "contracts/compiler-core.yaml",
+}
+COMPILER = {
+    "engine": "Quantum-L9/l9-semantic-compiler-engine",
+    "revision": ENGINE_REVISION,
+    "version": COMPILER_VERSION,
+    "inputs": dict(INPUTS),
+}
+PAYLOAD_FILES = {
+    "pyproject.toml": b'[project]\nname = "ideaos"\n',
+    "src/ideaos/__init__.py": b"",
+    **{rel: f"# {rel}\n".encode() for rel in INPUTS.values()},
+}
 
 
 def make_manifest(**overrides: object) -> dict[str, object]:
@@ -56,7 +81,9 @@ def make_manifest(**overrides: object) -> dict[str, object]:
 
     Every required block is present; the ones this adapter does not read are
     empty objects, because their content is upstream semantics the adapter must
-    stay blind to. `unresolved` is empty: the manifest passed its gate.
+    stay blind to. `unresolved` is empty: the manifest passed its gate. The
+    `compiler` block records the engine that resolved it, as the pinned engine
+    writes it.
     """
     manifest: dict[str, object] = {
         "schema": adapter.MANIFEST_SCHEMA,
@@ -66,7 +93,10 @@ def make_manifest(**overrides: object) -> dict[str, object]:
             "archetype_ref": "l9.node-archetype/worker@1",
         },
         "source_topology": dict(TOPOLOGY),
-        "authority": {},
+        "authority": {
+            "semantic_owner": "Quantum-L9/IdeaOS",
+            "authority_revision": "l9-ideaos-product-closure@1",
+        },
         "identity": {},
         "requirements": {},
         "capabilities": {},
@@ -81,8 +111,9 @@ def make_manifest(**overrides: object) -> dict[str, object]:
         "lifecycle": {},
         "conformance": {},
         "compiler": {
-            "profile_ref": "l9.compilation-profile/node-default@1",
+            "profile_ref": "l9.compilation/product-build@1",
             "profile_digest": "sha256:" + "3" * 64,
+            "compiler_version": COMPILER_VERSION,
         },
         "provenance": {},
         "unresolved": [],
@@ -92,13 +123,13 @@ def make_manifest(**overrides: object) -> dict[str, object]:
     return manifest
 
 
-def make_payload() -> dict[str, object]:
+def make_payload(files: dict[str, bytes] | None = None) -> dict[str, object]:
     """A compiled l9.birth-payload/v1 for the same snapshot, built by hand.
 
     `test_the_payload_fixture_is_a_real_payload` holds it to the factory's own
     validator, so a drift in that contract fails here rather than hiding.
     """
-    files = {"pyproject.toml": b'[project]\nname = "ideaos"\n', "src/ideaos/__init__.py": b""}
+    files = PAYLOAD_FILES if files is None else files
     return {
         "schema": compiler.SCHEMA,
         "source": dict(SOURCE),
@@ -113,41 +144,8 @@ def make_payload() -> dict[str, object]:
     }
 
 
-def make_birth_contract(payload: adapter.Artifact, **overrides: object) -> dict[str, object]:
-    """An l9.repo-birth-contract/v1 as the factory packager emits it."""
-    contract: dict[str, object] = {
-        "schema": adapter.BIRTH_CONTRACT_SCHEMA,
-        "operation": "local_validation",
-        "source": {"path": "/srv/pec/ideaos", **SOURCE, "clean": True},
-        "lineage": {
-            "idea_execute_receipt": "sha256:" + "4" * 64,
-            "gar_decision": "sha256:" + "5" * 64,
-            "plan": "sha256:" + "6" * 64,
-            "campaign_source": "sha256:" + "7" * 64,
-            "pe_receipt": "sha256:" + "8" * 64,
-            "acceptance_evidence_refs": ["reports/acceptance.md"],
-        },
-        "factory": {
-            "path": "/srv/l9-repo-template",
-            "revision": FACTORY_REVISION,
-            "compiler": "/srv/l9-repo-template/scripts/birth-runner/compile_birth_payload.py",
-            "birth_front_door": "/srv/l9-repo-template/scripts/birth-runner/new_repo.py",
-        },
-        "payload": {
-            "ref": "/tmp/birth-handoff/birth-payload.json",
-            "digest": payload.digest,
-            "schema": compiler.SCHEMA,
-        },
-    }
-    contract.update(overrides)
-    return contract
-
-
 def make_binding(
-    manifest: dict[str, object],
-    birth_contract: adapter.Artifact,
-    payload: adapter.Artifact,
-    **overrides: object,
+    manifest: dict[str, object], payload: adapter.Artifact, **overrides: object
 ) -> dict[str, object]:
     product = manifest["product"]
     assert isinstance(product, dict)
@@ -157,12 +155,9 @@ def make_binding(
         "manifest": {"ref": "l9.product-manifest/ideaos@1", "digest": manifest["manifest_digest"]},
         "topology": dict(TOPOLOGY),
         "source": dict(SOURCE),
-        "birth_contract": {
-            "ref": "/tmp/birth-handoff/birth-contract.json",
-            "digest": birth_contract.digest,
-        },
         "payload": {"ref": "/tmp/birth-handoff/birth-payload.json", "digest": payload.digest},
         "factory": dict(FACTORY),
+        "compiler": json.loads(json.dumps(COMPILER)),
     }
     binding.update(overrides)
     return binding
@@ -175,31 +170,18 @@ class Case:
         self.manifest_doc = make_manifest()
         self.manifest = adapter.Artifact.from_document(self.manifest_doc)
         self.payload = adapter.Artifact.from_document(make_payload())
-        self.contract_doc = make_birth_contract(self.payload)
-        self.contract = adapter.Artifact.from_document(self.contract_doc)
-        self.binding = make_binding(self.manifest_doc, self.contract, self.payload)
+        self.binding = make_binding(self.manifest_doc, self.payload)
 
     def bind(self, **kwargs: object) -> adapter.BindingResult:
-        args: dict[str, object] = {
-            "manifest": self.manifest,
-            "birth_contract": self.contract,
-            "payload": self.payload,
-        }
+        args: dict[str, object] = {"manifest": self.manifest, "payload": self.payload}
         args.update(kwargs)
         return adapter.bind(self.binding, **args)  # type: ignore[arg-type]
 
     def with_manifest(self, **overrides: object) -> adapter.BindingResult:
         return self.bind(manifest=adapter.Artifact.from_document(make_manifest(**overrides)))
 
-    def with_contract(self, **overrides: object) -> adapter.BindingResult:
-        return self.bind(
-            birth_contract=adapter.Artifact.from_document(
-                make_birth_contract(self.payload, **overrides)
-            )
-        )
-
     def with_binding(self, **overrides: object) -> adapter.BindingResult:
-        self.binding = make_binding(self.manifest_doc, self.contract, self.payload, **overrides)
+        self.binding = make_binding(self.manifest_doc, self.payload, **overrides)
         return self.bind()
 
 
@@ -227,11 +209,6 @@ class TestAConsistentRealizationIsAdmissible:
         assert result.failures == []
         assert result.admissible is True
 
-    def test_the_payload_artifact_is_optional_evidence(self, case: Case) -> None:
-        """The birth contract already binds the payload by digest; the artifact
-        itself is extra evidence, not a required input."""
-        assert case.bind(payload=None).admissible is True
-
     def test_the_validated_coordinates_are_exactly_the_bound_ones(self, case: Case) -> None:
         coordinates = case.bind().coordinates
         assert coordinates["product"] == {
@@ -246,9 +223,10 @@ class TestAConsistentRealizationIsAdmissible:
         }
         assert coordinates["topology"] == TOPOLOGY
         assert coordinates["source"] == SOURCE
-        assert coordinates["birth_contract"]["digest"] == case.contract.digest
         assert coordinates["payload"]["digest"] == case.payload.digest
         assert coordinates["factory"] == FACTORY
+        assert coordinates["compiler"] == COMPILER
+        assert "birth_contract" not in coordinates
 
     def test_the_result_is_evidence_not_authority(self, case: Case) -> None:
         document = case.bind().to_dict()
@@ -268,6 +246,13 @@ class TestAConsistentRealizationIsAdmissible:
         second = Case().bind().to_dict()
         assert first == second
 
+    def test_the_contract_catalog_input_is_optional(self, case: Case) -> None:
+        """A product with no local contract catalog names none; the engine's default applies."""
+        inputs = {k: v for k, v in INPUTS.items() if k != "contract_catalog"}
+        result = case.with_binding(compiler={**COMPILER, "inputs": inputs})
+        assert result.admissible is True
+        assert result.coordinates["compiler"]["inputs"] == inputs
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Reject — the manifest
@@ -281,7 +266,9 @@ class TestTheManifestMustBeAdmittedAndResolved:
         result = case.with_manifest(schema="l9.product-manifest/v2")
         assert result.admissible is False
         manifest_codes = [
-            c for c in codes(result) if c.startswith("MANIFEST") or c.startswith("PRODUCT")
+            c
+            for c in codes(result)
+            if c.startswith("MANIFEST") or c.startswith("PRODUCT") or c.startswith("COMPILER")
         ]
         assert manifest_codes == ["MANIFEST_SCHEMA_IDENTITY"]
 
@@ -295,6 +282,7 @@ class TestTheManifestMustBeAdmittedAndResolved:
             [{"ref": "l9.capability/search@1", "reason": "provider binding missing"}],
             ["l9.port/inbound-http@1"],
             [{"ref": "x", "material": False}],
+            ["resolved_manifest_gate:capability_closure_resolved"],
         ],
     )
     def test_any_unresolved_entry_fails_closed(self, case: Case, unresolved: list) -> None:
@@ -325,8 +313,10 @@ class TestTheManifestMustBeAdmittedAndResolved:
         [
             {"product": {"id": "l9.product/ideaos", "kind": "node"}},
             {"source_topology": {"ref": TOPOLOGY["ref"]}},
-            {"compiler": {"profile_ref": "l9.compilation-profile/node-default@1"}},
-            {"compiler": "l9.compilation-profile/node-default@1"},
+            {"compiler": {"profile_ref": "l9.compilation/product-build@1"}},
+            {"compiler": {"profile_ref": "x", "profile_digest": "y"}},
+            {"compiler": "l9.compilation/product-build@1"},
+            {"authority": {"semantic_owner": "Quantum-L9/IdeaOS"}},
             {"manifest_digest": ""},
             {"manifest_digest": None},
         ],
@@ -343,10 +333,27 @@ class TestTheManifestMustBeAdmittedAndResolved:
 
     def test_the_manifest_digest_is_compared_never_recomputed(self, case: Case) -> None:
         """Semantic canonicalization is the compiler's. A manifest whose bytes
-        change while its declared digest does not still binds — the adapter has
-        no standing to say the compiler's digest is wrong."""
+        change while its declared digest does not still binds here — the adapter
+        has no standing to say the compiler's digest is wrong. PREPARE, which
+        re-runs the compiler, is where that forgery is caught."""
         manifest = make_manifest(provenance={"authority_ref": "l9.authority/ideaos-owner"})
         assert case.bind(manifest=adapter.Artifact.from_document(manifest)).admissible is True
+
+
+class TestAuthorityIsExplicitOrNothing:
+    @pytest.mark.parametrize("key", adapter.MANIFEST_AUTHORITY_KEYS)
+    @pytest.mark.parametrize("value", [None, "", "  ", "unknown", "Unknown", 7])
+    def test_an_unknown_authority_is_inadmissible(
+        self, case: Case, key: str, value: object
+    ) -> None:
+        manifest = make_manifest()
+        authority = manifest["authority"]
+        assert isinstance(authority, dict)
+        authority[key] = value
+        result = case.bind(manifest=adapter.Artifact.from_document(manifest))
+        assert result.admissible is False
+        assert "MANIFEST_AUTHORITY_UNKNOWN" in codes(result)
+        assert result.coordinates == {}
 
 
 class TestProductKindIsExplicitUpstreamOrNothing:
@@ -393,11 +400,14 @@ class TestProductKindIsExplicitUpstreamOrNothing:
             {"kind_hint": "node"},
             {"inferred_kind": "dependency"},
             {"product": {"id": "l9.product/ideaos", "kind": "node", "shape": "node"}},
+            {"birth_contract": {"ref": "x", "digest": "sha256:" + "0" * 64}},
+            {"lineage": {"pe_receipt": "sha256:" + "0" * 64}},
         ],
     )
-    def test_repository_shape_is_not_an_input(self, case: Case, extra: dict) -> None:
-        """A binding carrying shape evidence or a kind hint is malformed, not
-        tolerated: the adapter never reads shape and never derives kind."""
+    def test_repository_shape_and_lineage_are_not_inputs(self, case: Case, extra: dict) -> None:
+        """A binding carrying shape evidence, a kind hint, a birth contract or
+        lineage is malformed, not tolerated: the adapter never reads shape,
+        never derives kind, and v2 has no contract to bind."""
         result = case.with_binding(**extra)
         assert result.admissible is False
         assert codes(result) == ["BINDING_MALFORMED"]
@@ -411,10 +421,13 @@ class TestProductKindIsExplicitUpstreamOrNothing:
             case.bind(manifest=adapter.Artifact.from_document(manifest))
         )
 
-    def test_the_adapter_never_reads_a_source_tree_or_infers_shape(self) -> None:
-        """Static: the module neither spawns git nor calls the ownership-contract
-        shape readers the compiler exposes. Loading the compiler for its payload
-        validator is reuse; calling its shape logic would be inference."""
+    def test_the_adapter_never_reads_a_source_tree_runs_a_compiler_or_infers_shape(self) -> None:
+        """Static: the module neither spawns processes nor calls the ownership-
+        contract shape readers the compiler exposes, and it never loads the
+        product-resolution module that runs the engine. Loading the payload
+        compiler for its validator is reuse; calling its shape logic would be
+        inference; running the engine would make the adapter the gate it only
+        informs."""
         source = ADAPTER_MODULE.read_text(encoding="utf-8")
         for forbidden in (
             "subprocess",
@@ -425,6 +438,8 @@ class TestProductKindIsExplicitUpstreamOrNothing:
             "ls-files",
             "source_files(",
             "assert_immutable_snapshot",
+            '_load_sibling("product_resolution")',
+            "reproduce_manifest",
         ):
             assert forbidden not in source, forbidden
         tree = ast.parse(source)
@@ -471,63 +486,75 @@ class TestProductCoordinatesMustAgree:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Reject — the birth handoff
+# Reject — the compiler coordinate
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class TestTheBirthContractMustBindTheSameSnapshot:
-    def test_a_wrong_contract_schema_is_refused(self, case: Case) -> None:
-        result = case.with_contract(schema="l9.repo-birth-contract/v2")
+class TestTheCompilerCoordinateMustAgree:
+    def test_a_binding_naming_another_compiler_version_is_a_mismatch(self, case: Case) -> None:
+        result = case.with_binding(compiler={**COMPILER, "version": "0.9.2"})
         assert result.admissible is False
-        assert "BIRTH_CONTRACT_SCHEMA_IDENTITY" in codes(result)
+        assert "COMPILER_COORDINATE_MISMATCH" in codes(result)
 
-    def test_a_contract_whose_bytes_moved_no_longer_matches_its_digest(self, case: Case) -> None:
-        result = case.with_contract(operation="remote_birth")
+    def test_a_manifest_resolved_by_another_compiler_is_a_mismatch(self, case: Case) -> None:
+        compiler_block = {
+            "profile_ref": "l9.compilation/product-build@1",
+            "profile_digest": "sha256:" + "3" * 64,
+            "compiler_version": "1.0.0",
+        }
+        result = case.with_manifest(compiler=compiler_block)
         assert result.admissible is False
-        assert "BIRTH_CONTRACT_DIGEST_MISMATCH" in codes(result)
+        assert "COMPILER_COORDINATE_MISMATCH" in codes(result)
 
-    @pytest.mark.parametrize("key", ["repository", "revision", "tree_sha"])
-    def test_a_contract_binding_a_different_snapshot(self, case: Case, key: str) -> None:
-        other = {"repository": "Quantum-L9/Other", "revision": "d" * 40, "tree_sha": "e" * 40}[key]
-        contract = make_birth_contract(case.payload)
-        source = contract["source"]
-        assert isinstance(source, dict)
-        source[key] = other
-        artifact = adapter.Artifact.from_document(contract)
-        case.binding = make_binding(case.manifest_doc, artifact, case.payload)
-        result = case.bind(birth_contract=artifact)
+    @pytest.mark.parametrize("key", sorted(INPUTS))
+    def test_a_compiler_input_the_payload_does_not_authorize_is_refused(
+        self, case: Case, key: str
+    ) -> None:
+        """The manifest is reproduced from these files; a file outside the
+        compiled payload is outside the snapshot the birth consumes."""
+        inputs = {**INPUTS, key: f"elsewhere/{Path(INPUTS[key]).name}"}
+        result = case.with_binding(compiler={**COMPILER, "inputs": inputs})
         assert result.admissible is False
-        assert "BIRTH_CONTRACT_SOURCE_MISMATCH" in codes(result)
+        assert "COMPILER_INPUT_NOT_IN_PAYLOAD" in codes(result)
 
-    def test_a_contract_over_a_dirty_source_is_refused(self, case: Case) -> None:
-        contract = make_birth_contract(case.payload)
-        source = contract["source"]
-        assert isinstance(source, dict)
-        source["clean"] = False
-        artifact = adapter.Artifact.from_document(contract)
-        case.binding = make_binding(case.manifest_doc, artifact, case.payload)
-        assert "BIRTH_CONTRACT_SOURCE_NOT_CLEAN" in codes(case.bind(birth_contract=artifact))
+    @pytest.mark.parametrize(
+        "inputs",
+        [
+            {k: v for k, v in INPUTS.items() if k != "topology"},
+            {**INPUTS, "extra": "x.yaml"},
+            {**INPUTS, "topology": "/etc/product-topology.yaml"},
+            {**INPUTS, "topology": "../product-topology.yaml"},
+            {**INPUTS, "topology": "./product-topology.yaml"},
+            {**INPUTS, "topology": ""},
+            {**INPUTS, "authority_lock": "a\\b.yaml"},
+            "product-topology.yaml",
+        ],
+    )
+    def test_malformed_inputs_are_a_malformed_binding(self, case: Case, inputs: object) -> None:
+        result = case.with_binding(compiler={**COMPILER, "inputs": inputs})
+        assert codes(result) == ["BINDING_MALFORMED"]
 
-    def test_a_contract_referencing_a_different_payload(self, case: Case) -> None:
-        contract = make_birth_contract(case.payload)
-        payload = contract["payload"]
-        assert isinstance(payload, dict)
-        payload["digest"] = "sha256:" + "f" * 64
-        artifact = adapter.Artifact.from_document(contract)
-        case.binding = make_binding(case.manifest_doc, artifact, case.payload)
-        result = case.bind(birth_contract=artifact)
-        assert result.admissible is False
-        assert "BIRTH_CONTRACT_PAYLOAD_MISMATCH" in codes(result)
+    @pytest.mark.parametrize(
+        "mutation",
+        [
+            {"engine": "not-a-slug"},
+            {"revision": "main"},
+            {"revision": ENGINE_REVISION[:12]},
+            {"version": ""},
+            {"version": " 0.9.3"},
+        ],
+    )
+    def test_a_malformed_engine_coordinate_is_a_malformed_binding(
+        self, case: Case, mutation: dict
+    ) -> None:
+        result = case.with_binding(compiler={**COMPILER, **mutation})
+        assert codes(result) == ["BINDING_MALFORMED"]
 
-    @pytest.mark.parametrize("block", ["source", "factory", "payload"])
-    def test_a_contract_missing_a_block_is_malformed(self, case: Case, block: str) -> None:
-        contract = make_birth_contract(case.payload)
-        del contract[block]
-        artifact = adapter.Artifact.from_document(contract)
-        case.binding = make_binding(case.manifest_doc, artifact, case.payload)
-        result = case.bind(birth_contract=artifact)
-        assert result.admissible is False
-        assert "BIRTH_CONTRACT_MALFORMED" in codes(result)
+    def test_the_compiler_block_may_not_be_defaulted(self, case: Case) -> None:
+        del case.binding["compiler"]
+        result = case.bind()
+        assert codes(result) == ["BINDING_MALFORMED"]
+        assert "compiler" in result.failures[0].detail
 
 
 class TestTheFactoryCoordinateIsExplicit:
@@ -537,17 +564,6 @@ class TestTheFactoryCoordinateIsExplicit:
         assert result.admissible is False
         assert codes(result) == ["BINDING_MALFORMED"]
         assert "factory" in result.failures[0].detail
-
-    def test_a_contract_packaged_against_another_factory_revision(self, case: Case) -> None:
-        contract = make_birth_contract(case.payload)
-        factory = contract["factory"]
-        assert isinstance(factory, dict)
-        factory["revision"] = "d" * 40
-        artifact = adapter.Artifact.from_document(contract)
-        case.binding = make_binding(case.manifest_doc, artifact, case.payload)
-        result = case.bind(birth_contract=artifact)
-        assert result.admissible is False
-        assert "FACTORY_COORDINATE_MISMATCH" in codes(result)
 
     def test_the_binding_may_not_default_the_factory(self, case: Case) -> None:
         result = case.with_binding(factory={"repository": "Quantum-L9/l9-repo-template"})
@@ -569,24 +585,29 @@ class TestTheSourceDigestMustReproduce:
     def test_a_payload_from_a_different_snapshot(self, case: Case) -> None:
         other = dict(case.payload.document, source=dict(SOURCE, tree_sha="e" * 40))
         artifact = adapter.Artifact.from_document(other)
-        contract = adapter.Artifact.from_document(make_birth_contract(artifact))
-        case.binding = make_binding(case.manifest_doc, contract, artifact)
-        result = case.bind(birth_contract=contract, payload=artifact)
+        case.binding = make_binding(case.manifest_doc, artifact)
+        result = case.bind(payload=artifact)
         assert result.admissible is False
         assert "PAYLOAD_SOURCE_MISMATCH" in codes(result)
 
     def test_a_malformed_payload_is_held_to_the_factory_gate(self, case: Case) -> None:
         broken = adapter.Artifact.from_document({"schema": compiler.SCHEMA})
-        contract = adapter.Artifact.from_document(make_birth_contract(broken))
-        case.binding = make_binding(case.manifest_doc, contract, broken)
-        result = case.bind(birth_contract=contract, payload=broken)
+        case.binding = make_binding(case.manifest_doc, broken)
+        result = case.bind(payload=broken)
         assert result.admissible is False
         assert "PAYLOAD_MALFORMED" in codes(result)
 
-    def test_a_binding_source_the_contract_does_not_bind(self, case: Case) -> None:
-        result = case.with_binding(source=dict(SOURCE, revision="d" * 40))
+    @pytest.mark.parametrize("key", ["repository", "revision", "tree_sha"])
+    def test_a_binding_source_the_payload_does_not_bind(self, case: Case, key: str) -> None:
+        other = {"repository": "Quantum-L9/Other", "revision": "d" * 40, "tree_sha": "e" * 40}[key]
+        result = case.with_binding(source=dict(SOURCE, **{key: other}))
         assert result.admissible is False
-        assert {"BIRTH_CONTRACT_SOURCE_MISMATCH", "PAYLOAD_SOURCE_MISMATCH"} <= set(codes(result))
+        assert "PAYLOAD_SOURCE_MISMATCH" in codes(result)
+
+    def test_the_payload_artifact_is_required_evidence(self, case: Case) -> None:
+        """v2 has no birth contract to bind the payload by digest in its stead."""
+        with pytest.raises(TypeError):
+            adapter.bind(case.binding, manifest=case.manifest)  # type: ignore[call-arg]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -599,10 +620,12 @@ class TestMalformedBindings:
     def test_a_non_object_is_named(self, document: object) -> None:
         assert adapter.validate_binding_document(document) == ["binding is not a JSON object"]
 
-    def test_an_unrecognized_schema_reports_only_that(self, case: Case) -> None:
-        errors = adapter.validate_binding_document(
-            dict(case.binding, schema="l9.product-birth-binding/v2")
-        )
+    @pytest.mark.parametrize(
+        "schema", ["l9.product-birth-binding/v1", "l9.product-birth-binding/v3", None]
+    )
+    def test_an_unrecognized_schema_reports_only_that(self, case: Case, schema: object) -> None:
+        """v1 included: there is no compatibility path through the retired contract."""
+        errors = adapter.validate_binding_document(dict(case.binding, schema=schema))
         assert len(errors) == 1
         assert "unrecognized binding schema" in errors[0]
 
@@ -616,7 +639,6 @@ class TestMalformedBindings:
                 "missing tree_sha",
             ),
             ({"factory": dict(FACTORY, revision="main")}, "factory.revision"),
-            ({"birth_contract": {"ref": "x", "digest": "0" * 64}}, "birth_contract.digest"),
             ({"payload": {"ref": "x", "digest": "sha256:nope"}}, "payload.digest"),
             ({"manifest": {"ref": "", "digest": MANIFEST_DIGEST}}, "manifest.ref"),
             ({"topology": {"ref": TOPOLOGY["ref"]}}, "missing digest"),
@@ -624,6 +646,8 @@ class TestMalformedBindings:
             ({"product": {"id": "l9.product/ideaos", "kind": " node"}}, "product.kind"),
             ({"product": {"id": "", "kind": "node"}}, "product.id"),
             ({"manifest": "l9.product-manifest/ideaos@1"}, "manifest is not an object"),
+            ({"compiler": {**COMPILER, "inputs": {}}}, "compiler.inputs is missing"),
+            ({"compiler": {"engine": COMPILER["engine"]}}, "compiler is missing"),
         ],
     )
     def test_malformed_fields_are_named(self, case: Case, mutation: dict, expected: str) -> None:
@@ -631,8 +655,8 @@ class TestMalformedBindings:
         assert any(expected in err for err in errors), errors
 
     def test_every_error_is_reported_not_just_the_first(self, case: Case) -> None:
-        broken = dict(case.binding, source={"repository": "bad"}, factory={})
-        assert len(adapter.validate_binding_document(broken)) >= 3
+        broken = dict(case.binding, source={"repository": "bad"}, factory={}, compiler={})
+        assert len(adapter.validate_binding_document(broken)) >= 4
 
     def test_a_malformed_binding_never_reaches_the_artifacts(self, case: Case) -> None:
         """BINDING_MALFORMED stands alone: coordinates checked against a
@@ -660,6 +684,10 @@ class TestTheContractSurfaceIsClosed:
         assert set(adapter.COORDINATE_KEYS) == set(case.bind().coordinates)
         assert "ADMISSIBLE" in text
 
+    def test_no_birth_contract_code_survives(self) -> None:
+        """The retired contract has no failure code left to route on."""
+        assert not [code for code in adapter.FAILURE_CODES if "CONTRACT" in code]
+
     def test_every_emitted_failure_code_is_published(self, case: Case) -> None:
         """Every reject path in the matrix above, driven once more, may only
         emit codes FAILURE_CODES declares — an undeclared code is a contract
@@ -669,33 +697,22 @@ class TestTheContractSurfaceIsClosed:
         assert isinstance(product, dict)
         product["kind"] = "unknown"
         product["archetype_ref"] = ""
-        contract = make_birth_contract(case.payload, operation="remote_birth")
-        source = contract["source"]
-        assert isinstance(source, dict)
-        source["clean"] = False
-        source["revision"] = "d" * 40
-        factory = contract["factory"]
-        assert isinstance(factory, dict)
-        factory["revision"] = "e" * 40
-        payload_ref = contract["payload"]
-        assert isinstance(payload_ref, dict)
-        payload_ref["digest"] = "sha256:" + "f" * 64
+        authority = manifest["authority"]
+        assert isinstance(authority, dict)
+        authority["authority_revision"] = "unknown"
         drifted = adapter.Artifact.from_document(dict(case.payload.document, mode="authoritative"))
         case.binding = make_binding(
             case.manifest_doc,
-            case.contract,
             case.payload,
             topology={"ref": "other", "digest": "other"},
             product={"id": "l9.product/other", "kind": "node"},
+            source=dict(SOURCE, revision="d" * 40),
+            compiler={**COMPILER, "version": "0.0.1", "inputs": {**INPUTS, "topology": "x.yaml"}},
         )
-        result = case.bind(
-            manifest=adapter.Artifact.from_document(manifest),
-            birth_contract=adapter.Artifact.from_document(contract),
-            payload=drifted,
-        )
+        result = case.bind(manifest=adapter.Artifact.from_document(manifest), payload=drifted)
         emitted = set(codes(result))
         assert emitted <= adapter.FAILURE_CODES, emitted - adapter.FAILURE_CODES
-        assert len(emitted) >= 8
+        assert len(emitted) >= 9
 
     def test_every_published_failure_code_is_reachable(self) -> None:
         """The inverse: a code nothing can emit is a promise nobody keeps."""
@@ -711,20 +728,15 @@ class TestEveryFailureIsReported:
         product = manifest["product"]
         assert isinstance(product, dict)
         product["kind"] = ""
-        contract = make_birth_contract(case.payload)
-        factory = contract["factory"]
-        assert isinstance(factory, dict)
-        factory["revision"] = "d" * 40
-        artifact = adapter.Artifact.from_document(contract)
-        case.binding = make_binding(case.manifest_doc, artifact, case.payload)
-        result = case.bind(
-            manifest=adapter.Artifact.from_document(manifest), birth_contract=artifact
+        case.binding = make_binding(
+            case.manifest_doc, case.payload, compiler={**COMPILER, "version": "x"}
         )
+        result = case.bind(manifest=adapter.Artifact.from_document(manifest))
         assert {
             "MANIFEST_UNRESOLVED",
             "MANIFEST_DIGEST_MISMATCH",
             "PRODUCT_KIND_NOT_EXPLICIT",
-            "FACTORY_COORDINATE_MISMATCH",
+            "COMPILER_COORDINATE_MISMATCH",
         } <= set(codes(result))
         assert result.coordinates == {}
 
@@ -736,7 +748,7 @@ class TestEveryFailureIsReported:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The published schema agrees with the gate
+# The published schema agrees with the gate; v1 is history, not a path
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -754,7 +766,11 @@ class TestThePublishedSchemaAgreesWithTheGate:
 
     def test_the_schema_file_is_where_the_module_says(self) -> None:
         assert SCHEMA_FILE == REPO / adapter.SCHEMA_PATH
-        assert json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))["title"] == adapter.SCHEMA
+        schema = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
+        assert schema["title"] == adapter.SCHEMA
+        assert schema["properties"]["schema"]["const"] == adapter.SCHEMA
+        assert "birth_contract" not in schema["properties"]
+        assert set(schema["required"]) == {"schema", *adapter.BINDING_SECTIONS}
 
     def test_a_consistent_binding_satisfies_the_published_schema(self, case: Case) -> None:
         assert list(self._validator().iter_errors(case.binding)) == []
@@ -763,10 +779,12 @@ class TestThePublishedSchemaAgreesWithTheGate:
     @pytest.mark.parametrize(
         "mutation",
         [
-            {"schema": "l9.product-birth-binding/v2"},
+            {"schema": "l9.product-birth-binding/v1"},
+            {"schema": "l9.product-birth-binding/v3"},
             {"schema": None},
             {"repository_shape": {"matched": ["src"]}},
             {"kind_hint": "node"},
+            {"birth_contract": {"ref": "x", "digest": "sha256:" + "0" * 64}},
             {"product": {"id": "l9.product/ideaos"}},
             {"product": {"id": "l9.product/ideaos", "kind": ""}},
             {"product": {"id": "l9.product/ideaos", "kind": "node", "shape": "x"}},
@@ -780,12 +798,25 @@ class TestThePublishedSchemaAgreesWithTheGate:
             {"source": {"repository": "Q/I", "revision": "short", "tree_sha": TREE}},
             {"source": {"repository": "Q/I", "revision": REVISION}},
             {"source": dict(SOURCE, path="/srv/x")},
-            {"birth_contract": {"ref": "x", "digest": "0" * 64}},
-            {"birth_contract": {"ref": "x", "digest": "sha256:" + "0" * 63}},
             {"payload": {"ref": "", "digest": "sha256:" + "0" * 64}},
+            {"payload": {"ref": "x", "digest": "0" * 64}},
             {"factory": {"repository": "Quantum-L9/l9-repo-template"}},
             {"factory": {"repository": "Quantum-L9/l9-repo-template", "revision": "main"}},
             {"factory": dict(FACTORY, path="/srv/factory")},
+            {"compiler": {**COMPILER, "revision": "main"}},
+            {"compiler": {**COMPILER, "engine": "engine"}},
+            {"compiler": {**COMPILER, "version": ""}},
+            {"compiler": {**COMPILER, "inputs": {**INPUTS, "topology": "/abs.yaml"}}},
+            {"compiler": {**COMPILER, "inputs": {**INPUTS, "topology": "../x.yaml"}}},
+            {"compiler": {**COMPILER, "inputs": {**INPUTS, "topology": "./x.yaml"}}},
+            {"compiler": {**COMPILER, "inputs": {**INPUTS, "extra": "x.yaml"}}},
+            {
+                "compiler": {
+                    **COMPILER,
+                    "inputs": {k: v for k, v in INPUTS.items() if k != "authority_lock"},
+                }
+            },
+            {"compiler": {k: v for k, v in COMPILER.items() if k != "inputs"}},
         ],
     )
     def test_both_readers_reject_the_same_documents(self, case: Case, mutation: dict) -> None:
@@ -800,6 +831,18 @@ class TestThePublishedSchemaAgreesWithTheGate:
             {"manifest": {"ref": "l9.product-manifest/ideaos@1", "digest": "blake3:abc"}},
             {"topology": {"ref": "ideaos", "digest": "v1"}},
             {"product": {"id": "ideaos", "kind": "dependency"}},
+            {
+                "compiler": {
+                    **COMPILER,
+                    "inputs": {k: v for k, v in INPUTS.items() if k != "contract_catalog"},
+                }
+            },
+            {
+                "compiler": {
+                    **COMPILER,
+                    "inputs": {**INPUTS, "topology": "nested/dir/topology.yaml"},
+                }
+            },
         ],
     )
     def test_both_readers_accept_the_same_documents(self, case: Case, mutation: dict) -> None:
@@ -808,6 +851,54 @@ class TestThePublishedSchemaAgreesWithTheGate:
         allowed = dict(case.binding, **mutation)
         assert adapter.validate_binding_document(allowed) == []
         assert list(self._validator().iter_errors(allowed)) == []
+
+
+class TestV1IsHistoryNotAPath:
+    def test_the_superseded_schemas_are_kept_as_evidence(self) -> None:
+        v1 = json.loads((SUPERSEDED / "l9-product-birth-binding.v1.schema.json").read_text())
+        contract = json.loads((SUPERSEDED / "birth-contract.v1.schema.json").read_text())
+        assert v1["title"] == "l9.product-birth-binding/v1"
+        assert "birth_contract" in v1["properties"]
+        assert contract["$id"] == "l9.repo-birth-contract/v1"
+        assert "lineage" in contract["properties"]
+        assert (SUPERSEDED / "README.md").is_file()
+
+    def test_no_live_birth_module_reads_the_superseded_schemas(self) -> None:
+        """Prose may name the history; no string a module could open or compare does."""
+        for module in sorted(BIRTH_RUNNER.glob("*.py")):
+            tree = ast.parse(module.read_text(encoding="utf-8"))
+            docstrings = {
+                node.body[0].value.value
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef)
+                and node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            }
+            literals = {
+                node.value
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value not in docstrings
+            }
+            for token in (
+                "superseded",
+                "birth-contract",
+                "repo-birth-contract",
+                "repo-birth-evidence",
+            ):
+                assert not [s for s in literals if token in s], f"{module.name}: {token!r}"
+
+    def test_a_v1_binding_is_refused_as_a_whole(self, case: Case) -> None:
+        v1 = dict(case.binding, schema="l9.product-birth-binding/v1")
+        del v1["compiler"]
+        v1["birth_contract"] = {"ref": "x", "digest": "sha256:" + "0" * 64}
+        result = adapter.bind(v1, manifest=case.manifest, payload=case.payload)
+        assert result.admissible is False
+        assert codes(result) == ["BINDING_MALFORMED"]
+        assert "unrecognized binding schema" in result.failures[0].detail
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -821,12 +912,10 @@ class TestCommandLine:
         paths = {
             "binding": tmp_path / "binding.json",
             "manifest": tmp_path / "manifest.json",
-            "contract": tmp_path / "birth-contract.json",
             "payload": tmp_path / "birth-payload.json",
         }
         paths["binding"].write_text(adapter.render_document(case.binding), encoding="utf-8")
         paths["manifest"].write_text(adapter.render_document(case.manifest_doc), encoding="utf-8")
-        paths["contract"].write_text(adapter.render_document(case.contract_doc), encoding="utf-8")
         paths["payload"].write_text(
             adapter.render_document(case.payload.document), encoding="utf-8"
         )
@@ -838,8 +927,6 @@ class TestCommandLine:
             str(paths["binding"]),
             "--manifest",
             str(paths["manifest"]),
-            "--birth-contract",
-            str(paths["contract"]),
             "--payload",
             str(paths["payload"]),
             *extra,
@@ -858,6 +945,7 @@ class TestCommandLine:
         assert document["schema"] == adapter.RESULT_SCHEMA
         assert document["admissible"] is True
         assert document["coordinates"]["factory"] == FACTORY
+        assert document["coordinates"]["compiler"] == COMPILER
 
     def test_an_inadmissible_binding_exits_one(self, tmp_path: Path, case: Case) -> None:
         paths = self._write(tmp_path, case)
@@ -866,14 +954,20 @@ class TestCommandLine:
         )
         assert adapter.main(self._argv(paths)) == 1
 
-    def test_the_payload_is_optional_on_the_command_line(self, tmp_path: Path, case: Case) -> None:
+    def test_the_payload_is_required_on_the_command_line(self, tmp_path: Path, case: Case) -> None:
         paths = self._write(tmp_path, case)
-        argv = self._argv(paths)[:-2]
-        assert adapter.main(argv) == 0
+        with pytest.raises(SystemExit) as exc:
+            adapter.main(self._argv(paths)[:-2])
+        assert exc.value.code == 2
+
+    def test_a_birth_contract_flag_is_gone(self, tmp_path: Path, case: Case) -> None:
+        paths = self._write(tmp_path, case)
+        with pytest.raises(SystemExit):
+            adapter.main(self._argv(paths, "--birth-contract", str(paths["binding"])))
 
     def test_an_unreadable_artifact_exits_two(self, tmp_path: Path, case: Case) -> None:
         paths = self._write(tmp_path, case)
-        paths["contract"].write_text("not json\n", encoding="utf-8")
+        paths["payload"].write_text("not json\n", encoding="utf-8")
         assert adapter.main(self._argv(paths)) == 2
 
     def test_a_missing_artifact_exits_two(self, tmp_path: Path, case: Case) -> None:

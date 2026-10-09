@@ -515,7 +515,7 @@ def test_boundary_refuses_anchor_and_handoff_while_product_descendant_survives(
         payload_contract=None,
         product_birth_binding=None,
         product_manifest=None,
-        repo_birth_contract=None,
+        semantic_compiler_src=None,
         work_dir=tmp_path / "work" / "births",
         template_src=tmp_path,
         org_profile_src=tmp_path,
@@ -809,10 +809,10 @@ def test_workflow_uses_trusted_venv_and_full_action_pins() -> None:
             assert all(ch in "0123456789abcdef" for ch in ref)
 
 
-# The product-birth adapter bundle is PREPARE input only.
+# The product-birth adapter bundle and the pinned engine are PREPARE input only.
 
 HANDOFF_SCHEMA = ROOT / "scripts" / "birth-runner" / "schemas" / "birth-handoff.schema.json"
-ADAPTER_ARGS = ("product_birth_binding", "product_manifest", "repo_birth_contract")
+ADAPTER_ARGS = ("product_birth_binding", "product_manifest", "semantic_compiler_src")
 
 
 def test_prepare_transports_the_adapter_bundle_to_the_engine(tmp_path: Path) -> None:
@@ -835,14 +835,38 @@ def test_prepare_transports_the_adapter_bundle_to_the_engine(tmp_path: Path) -> 
             str(tmp_path / "binding.json"),
             "--product-manifest",
             str(tmp_path / "manifest.json"),
-            "--repo-birth-contract",
-            str(tmp_path / "contract.json"),
+            "--semantic-compiler-src",
+            str(tmp_path / "engine"),
         ]
     )
     cfg = engine.build_config(engine.parse_args(boundary._prepare_argv(args)))
     assert cfg.product_birth_binding == (tmp_path / "binding.json").resolve()
     assert cfg.product_manifest == (tmp_path / "manifest.json").resolve()
-    assert cfg.repo_birth_contract == (tmp_path / "contract.json").resolve()
+    assert cfg.semantic_compiler_src == (tmp_path / "engine").resolve()
+
+
+def test_prepare_has_no_birth_contract_argument(tmp_path: Path) -> None:
+    """The retired l9.repo-birth-contract/v1 has no transport left (BIRTH-ARCH-REVISION-001)."""
+    with pytest.raises(SystemExit):
+        boundary.parse_args(
+            [
+                "prepare",
+                "--repo",
+                "example",
+                "--pkg",
+                "example",
+                "--desc",
+                "Example",
+                "--work-dir",
+                str(tmp_path / "births"),
+                "--org-profile-src",
+                str(tmp_path),
+                "--handoff",
+                str(tmp_path / "handoff.json"),
+                "--repo-birth-contract",
+                str(tmp_path / "contract.json"),
+            ]
+        )
 
 
 def test_prepare_without_the_bundle_forwards_nothing_new(tmp_path: Path) -> None:
@@ -864,14 +888,14 @@ def test_prepare_without_the_bundle_forwards_nothing_new(tmp_path: Path) -> None
         ]
     )
     argv = boundary._prepare_argv(args)
-    assert not [arg for arg in argv if arg.startswith(("--product-", "--repo-birth-contract"))]
+    assert not [arg for arg in argv if arg.startswith(("--product-", "--semantic-compiler"))]
 
 
 def test_the_handoff_contract_does_not_carry_the_adapter_bundle() -> None:
     """l9.repo-birth-handoff/v1 is unchanged: PUBLISH never sees adapter inputs."""
     schema = json.loads(HANDOFF_SCHEMA.read_text(encoding="utf-8"))
     text = json.dumps(schema)
-    for token in ("binding", "manifest", "birth_contract", "product_birth", "repo-birth-contract"):
+    for token in ("binding", "manifest", "product_birth", "semantic_compiler", "compiler"):
         assert token not in text.replace("contents_manifest_sha256", "")
     assert schema.get("additionalProperties") is False
 
@@ -889,20 +913,44 @@ def test_publish_reconstructs_a_config_without_adapter_inputs(tmp_path: Path) ->
 def test_workflow_reads_adapter_artifacts_only_inside_the_payload_checkout() -> None:
     document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     inputs = document[True]["workflow_dispatch"]["inputs"]
-    for name in ("product_birth_binding_path", "product_manifest_path", "repo_birth_contract_path"):
+    for name in ("product_birth_binding_path", "product_manifest_path"):
         assert inputs[name]["required"] is False
+    assert "repo_birth_contract_path" not in inputs
     steps = {step.get("id"): step for step in document["jobs"]["prepare"]["steps"]}
     fetch = steps["payload"]["run"]
     # The same read-only source checkout and path rules as the payload itself.
     assert "PRODUCT_BINDING_PATH" in steps["payload"]["env"]
+    assert "REPO_BIRTH_CONTRACT_PATH" not in steps["payload"]["env"]
     assert 'realpath -e "$dest/$1"' in fetch
     assert 'case "$resolved" in "$dest"/*)' in fetch
-    assert "all three adapter artifact paths" in fetch
+    assert "both adapter artifact paths" in fetch
     assert "adapter-backed birth requires payload_contract_path" in fetch
     prepare = steps["prepare_birth"]["run"]
-    for flag in ("--product-birth-binding", "--product-manifest", "--repo-birth-contract"):
+    for flag in ("--product-birth-binding", "--product-manifest", "--semantic-compiler-src"):
         assert flag in prepare
+    assert "--repo-birth-contract" not in prepare
     assert "adapter-backed birth requires payload_repo" in prepare
+    assert "adapter-backed birth requires the pinned semantic compiler checkout" in prepare
     publish_text = WORKFLOW.read_text(encoding="utf-8").split("\n  publish:", 1)[1]
-    for token in ("product_birth_binding", "product_manifest", "repo_birth_contract"):
+    for token in ("product_birth_binding", "product_manifest", "semantic_compiler"):
         assert token not in publish_text
+
+
+@factory_only
+def test_workflow_fetches_the_pinned_semantic_compiler_only_for_an_adapter_backed_birth() -> None:
+    """The engine is fetched at the factory's pin with the read-only source token,
+    its SHA is proven on the runner, and PREPARE receives nothing else."""
+    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = {step.get("id"): step for step in document["jobs"]["prepare"]["steps"]}
+    fetch = steps["semantic_compiler"]
+    assert fetch["if"] == "inputs.product_birth_binding_path != ''"
+    assert set(fetch["env"]) == {"SOURCE_TOKEN"}
+    run = fetch["run"]
+    assert "scripts/birth-runner/semantic-compiler.pin.json" in run
+    assert ".venv/bin/python -I" in run
+    assert 'fetch --depth 1 origin "$sha"' in run
+    assert 'test "$(git -C "$dest" rev-parse HEAD)" = "$sha"' in run
+    assert "GH_TOKEN" not in run and "L9_BIRTH_PRIVILEGED_TOKEN" not in run
+    prepare_env = steps["prepare_birth"]["env"]
+    assert prepare_env["BIRTH_SEMANTIC_COMPILER"] == "${{ steps.semantic_compiler.outputs.root }}"
+    assert "semantic_compiler_sha" in document["jobs"]["prepare"]["outputs"]
