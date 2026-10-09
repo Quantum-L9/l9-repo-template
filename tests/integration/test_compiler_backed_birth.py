@@ -100,8 +100,8 @@ def _engine_root() -> Path:
             f"a clean checkout at {candidate} ({exc}); set L9_SEMANTIC_COMPILER_SRC"
         )
         if os.environ.get("L9_REQUIRE_SEMANTIC_COMPILER") == "1":
-            pytest.fail(reason)
-        pytest.skip(reason)
+            raise pytest.fail.Exception(reason) from exc
+        raise pytest.skip.Exception(reason) from exc
 
 
 @pytest.fixture(scope="module")
@@ -452,8 +452,9 @@ class TestForgeriesFailClosed:
         manifest["capabilities"]["provides"][0]["contract_refs"] = ["urn:l9:fixture:Forged:1.0"]
         _rewrite(Path(str(result["manifest"])), manifest)
         cfg = fx.prepare_config(result)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="document disagreement"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)
 
     def test_a_tampered_manifest_digest_is_refused(self, fx: Fixture) -> None:
         """Binding and manifest agree with each other, not with the engine."""
@@ -466,8 +467,9 @@ class TestForgeriesFailClosed:
         binding["manifest"]["digest"] = forged
         _rewrite(Path(str(result["binding"])), binding)
         cfg = fx.prepare_config(result)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="digest disagreement"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)
 
     def test_a_stale_topology_is_refused(self, fx: Fixture) -> None:
         """The product moved after packaging; the manifest the bundle carries is stale."""
@@ -478,8 +480,9 @@ class TestForgeriesFailClosed:
         _rebind_topology_digest(fx.source)
         _commit_all(fx.source, "topology moved")
         cfg = fx.prepare_config(result)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="product resolution did not reproduce"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)
 
     def test_an_altered_payload_is_refused(self, fx: Fixture) -> None:
         result = fx.package()
@@ -487,14 +490,16 @@ class TestForgeriesFailClosed:
         payload["files"][0]["sha256"] = "0" * 64
         _rewrite(Path(str(result["payload"])), payload)
         cfg = fx.prepare_config(result)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="PAYLOAD_DIGEST_MISMATCH"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)
 
     def test_the_wrong_factory_identity_is_refused(self, fx: Fixture) -> None:
         result = fx.package()
         cfg = fx.prepare_config(result)
+        receipt = fx.receipt(cfg, template_sha="0" * 40)
         with pytest.raises(new_repo.BirthError, match="running factory revision"):
-            _gate(fx, cfg, fx.receipt(cfg, template_sha="0" * 40))
+            _gate(fx, cfg, receipt)
 
     def test_an_unresolved_semantic_input_is_refused_at_packaging(self, fx: Fixture) -> None:
         topology = _yaml(fx.source / "product-topology.yaml")
@@ -514,8 +519,9 @@ class TestForgeriesFailClosed:
         binding["source"]["revision"] = "f" * 40
         _rewrite(Path(str(result["binding"])), binding)
         cfg = fx.prepare_config(result)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="PAYLOAD_SOURCE_MISMATCH"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)
 
     def test_an_engine_that_is_not_the_pin_is_refused(self, fx: Fixture, tmp_path: Path) -> None:
         other = tmp_path / "other-engine"
@@ -530,8 +536,9 @@ class TestForgeriesFailClosed:
         _git(other, "commit", "-q", "--allow-empty", "-m", "one commit past the pin")
         result = fx.package()
         cfg = fx.prepare_config(result, semantic_compiler_src=other)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="the factory pins"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)
 
     def test_a_dirty_engine_checkout_is_refused(self, fx: Fixture, tmp_path: Path) -> None:
         other = tmp_path / "dirty-engine"
@@ -548,8 +555,9 @@ class TestForgeriesFailClosed:
         )
         result = fx.package()
         cfg = fx.prepare_config(result, semantic_compiler_src=other)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="dirty"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)
 
     def test_a_binding_naming_another_engine_is_refused(self, fx: Fixture) -> None:
         result = fx.package()
@@ -557,11 +565,13 @@ class TestForgeriesFailClosed:
         binding["compiler"]["revision"] = "e" * 40
         _rewrite(Path(str(result["binding"])), binding)
         cfg = fx.prepare_config(result)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="the factory pins"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)
 
     def test_without_the_engine_the_gate_refuses_rather_than_trusting(self, fx: Fixture) -> None:
         result = fx.package()
         cfg = fx.prepare_config(result, semantic_compiler_src=None)
+        receipt = fx.receipt(cfg)
         with pytest.raises(new_repo.BirthError, match="pinned semantic compiler"):
-            _gate(fx, cfg, fx.receipt(cfg))
+            _gate(fx, cfg, receipt)

@@ -950,7 +950,8 @@ def test_workflow_fetches_the_pinned_semantic_compiler_only_for_an_adapter_backe
     assert ".venv/bin/python -I" in run
     assert 'fetch --depth 1 origin "$sha"' in run
     assert 'test "$(git -C "$dest" rev-parse HEAD)" = "$sha"' in run
-    assert "GH_TOKEN" not in run and "L9_BIRTH_PRIVILEGED_TOKEN" not in run
+    assert "GH_TOKEN" not in run
+    assert "L9_BIRTH_PRIVILEGED_TOKEN" not in run
     prepare_env = steps["prepare_birth"]["env"]
     assert prepare_env["BIRTH_SEMANTIC_COMPILER"] == "${{ steps.semantic_compiler.outputs.root }}"
     assert "semantic_compiler_sha" in document["jobs"]["prepare"]["outputs"]

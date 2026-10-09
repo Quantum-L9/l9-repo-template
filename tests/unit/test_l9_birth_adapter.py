@@ -955,15 +955,16 @@ class TestCommandLine:
         assert adapter.main(self._argv(paths)) == 1
 
     def test_the_payload_is_required_on_the_command_line(self, tmp_path: Path, case: Case) -> None:
-        paths = self._write(tmp_path, case)
+        argv = self._argv(self._write(tmp_path, case))[:-2]
         with pytest.raises(SystemExit) as exc:
-            adapter.main(self._argv(paths)[:-2])
+            adapter.main(argv)
         assert exc.value.code == 2
 
     def test_a_birth_contract_flag_is_gone(self, tmp_path: Path, case: Case) -> None:
         paths = self._write(tmp_path, case)
+        argv = self._argv(paths, "--birth-contract", str(paths["binding"]))
         with pytest.raises(SystemExit):
-            adapter.main(self._argv(paths, "--birth-contract", str(paths["binding"])))
+            adapter.main(argv)
 
     def test_an_unreadable_artifact_exits_two(self, tmp_path: Path, case: Case) -> None:
         paths = self._write(tmp_path, case)

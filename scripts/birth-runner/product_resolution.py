@@ -92,7 +92,6 @@ DEFAULT_CONTRACT_CATALOG = "contracts/compiler-core.yaml"
 ENGINE_TIMEOUT_SECONDS = 600
 _VERSION_RE = re.compile(r'^\s*version\s*=\s*"([^"]+)"\s*$', re.M)
 _NAME_RE = re.compile(r'^\s*name\s*=\s*"([^"]+)"\s*$', re.M)
-_PROJECT_RE = re.compile(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", re.M | re.S)
 
 # Runs inside the child interpreter. argv: engine_src, result_path, then the
 # engine CLI's own product-build arguments. The engine writes its artifacts the
@@ -182,25 +181,23 @@ def engine_disagreements(claimed: Mapping[str, object], pin: EnginePin) -> list[
 
 
 def _project_table(pyproject: str) -> str:
-    match = _PROJECT_RE.search(pyproject)
-    return match.group(1) if match else ""
+    """The lines of the `[project]` table: from its header to the next table header."""
+    lines: list[str] = []
+    inside = False
+    for line in pyproject.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            if inside:
+                break
+            inside = stripped == "[project]"
+            continue
+        if inside:
+            lines.append(line)
+    return "\n".join(lines)
 
 
-def prove_engine_checkout(root: Path, pin: EnginePin) -> Path:
-    """A clean checkout of exactly the pinned engine, or a refusal naming why.
-
-    The same proof `--org-profile-src` gets: a tree that merely carries the
-    right files is not the pinned engine. Its `origin` must name the pinned
-    repository, HEAD must be the pinned revision, nothing may be modified or
-    untracked, and the package the tree declares must be the pinned package at
-    the pinned version. Only then does the revision the receipt records name
-    the code that actually resolved the product.
-    """
-    root = root.resolve()
-    if not root.is_dir():
-        raise ProductResolutionError(f"semantic compiler checkout is not a directory: {root}")
-    if not prov.is_git_repo(root):
-        raise ProductResolutionError(f"semantic compiler checkout is not a git checkout: {root}")
+def _git_facts(root: Path) -> tuple[Path, str, list[str], str]:
+    """`(toplevel, HEAD, dirty paths, origin url)` of a checkout, or a refusal."""
     try:
         top = Path(prov.git(root, "rev-parse", "--show-toplevel").strip()).resolve()
         head = prov.git(root, "rev-parse", "HEAD").strip()
@@ -208,6 +205,12 @@ def prove_engine_checkout(root: Path, pin: EnginePin) -> Path:
         origin = prov.git(root, "remote", "get-url", "origin").strip()
     except prov.ProvenanceError as exc:
         raise ProductResolutionError(f"semantic compiler checkout cannot be proven: {exc}") from exc
+    return top, head, dirty, origin
+
+
+def _assert_pinned_snapshot(root: Path, pin: EnginePin) -> None:
+    """Root of its own checkout, at the pinned HEAD, clean, with the pinned origin."""
+    top, head, dirty, origin = _git_facts(root)
     if top != root:
         raise ProductResolutionError(
             f"semantic compiler checkout {root} is not the root of its git checkout ({top})"
@@ -229,6 +232,10 @@ def prove_engine_checkout(root: Path, pin: EnginePin) -> Path:
         raise ProductResolutionError(
             f"semantic compiler checkout origin is {slug or origin!r}, not {pin.repository}"
         )
+
+
+def _assert_pinned_package(root: Path, pin: EnginePin) -> None:
+    """`pyproject.toml` declares exactly the pinned package at the pinned version."""
     try:
         pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
     except OSError as exc:
@@ -248,6 +255,25 @@ def prove_engine_checkout(root: Path, pin: EnginePin) -> Path:
             f"semantic compiler checkout declares version "
             f"{version.group(1) if version else None!r}, the factory pins {pin.version!r}"
         )
+
+
+def prove_engine_checkout(root: Path, pin: EnginePin) -> Path:
+    """A clean checkout of exactly the pinned engine, or a refusal naming why.
+
+    The same proof `--org-profile-src` gets: a tree that merely carries the
+    right files is not the pinned engine. Its `origin` must name the pinned
+    repository, HEAD must be the pinned revision, nothing may be modified or
+    untracked, and the package the tree declares must be the pinned package at
+    the pinned version. Only then does the revision the receipt records name
+    the code that actually resolved the product.
+    """
+    root = root.resolve()
+    if not root.is_dir():
+        raise ProductResolutionError(f"semantic compiler checkout is not a directory: {root}")
+    if not prov.is_git_repo(root):
+        raise ProductResolutionError(f"semantic compiler checkout is not a git checkout: {root}")
+    _assert_pinned_snapshot(root, pin)
+    _assert_pinned_package(root, pin)
     if not (root / pin.source_dir / pin.module / "__init__.py").is_file():
         raise ProductResolutionError(
             f"semantic compiler checkout carries no {pin.source_dir}/{pin.module} package"
