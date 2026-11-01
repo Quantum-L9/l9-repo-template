@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.3.0] — 2026-10-09
+
+### Changed
+
+- BIRTH-ARCH-REVISION-001 — compiler-backed birth without Program Execution. `l9.product-birth-binding/v2` supersedes v1: the mandatory `l9.repo-birth-contract/v1` and its IdeaOS / GAR / Plan / campaign / PE lineage are no longer birth prerequisites. The binding now carries the exact semantic-compiler engine and the exact input paths the ProductManifest was compiled from; PREPARE proves the engine checkout against `scripts/birth-runner/semantic-compiler.pin.json` (`Quantum-L9/l9-semantic-compiler-engine`, pinned revision and version), re-runs its `product-build` in an isolated interpreter against the verified payload, and refuses birth on compiler failure, digest or document disagreement, an unresolved entry, an unknown authority, an input the payload does not authorize, or a snapshot the compiler touched (`scripts/birth-runner/product_resolution.py`).
+- `package_birth_handoff.py` takes `--semantic-compiler-src` instead of `--evidence` and emits `product-manifest.json` (the engine's output, rendered by the factory) beside the payload and the binding; `--operation` is gone. The adapter's `--birth-contract` argument, the engine's `--repo-birth-contract`, the front door's `--repo-birth-contract-path`, the workflow input `repo_birth_contract_path` and the Make variables `REPO_BIRTH_CONTRACT*` are removed; `--semantic-compiler-src` / `SEMANTIC_COMPILER_SRC` is added. The dispatch workflow fetches the pinned engine with the read-only source token for an adapter-backed birth and proves its SHA before PREPARE.
+- The retired v1 schemas are kept as historical evidence under `scripts/birth-runner/schemas/superseded/`; no gate reads them and a v1 binding is refused as a schema-identity failure. Payload compilation, source/tree verification, per-file digests, factory identity, organization authorization, PREPARE/PUBLISH privilege separation, rollback, canonical CI enrolment and remote attestation are unchanged.
+
 ## [2.2.0] — 2026-10-02
 
 ### Changed

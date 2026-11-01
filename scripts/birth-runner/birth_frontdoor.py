@@ -41,11 +41,11 @@ class BirthIntent:
     payload_ref: str = ""
     payload_subpath: str = ""
     payload_contract_path: str = ""
-    # The adapter-backed birth bundle, as paths inside the payload checkout.
-    # Transported, never interpreted: PREPARE runs l9_birth_adapter on them.
+    # The compiler-backed birth bundle, as paths inside the payload checkout.
+    # Transported, never interpreted: PREPARE runs l9_birth_adapter on them and
+    # re-runs the pinned semantic compiler against the payload.
     product_birth_binding_path: str = ""
     product_manifest_path: str = ""
-    repo_birth_contract_path: str = ""
     factory_ref: str = DEFAULT_FACTORY_REF
 
 
@@ -53,7 +53,6 @@ def _adapter_paths(intent: BirthIntent) -> tuple[tuple[str, str], ...]:
     return (
         ("product_birth_binding_path", intent.product_birth_binding_path),
         ("product_manifest_path", intent.product_manifest_path),
-        ("repo_birth_contract_path", intent.repo_birth_contract_path),
     )
 
 
@@ -91,14 +90,14 @@ def validate_intent(intent: BirthIntent) -> None:
     ):
         if value.startswith("/"):
             raise BirthFrontDoorError(f"{name} must be relative")
-    # Operator intent only: an adapter-backed birth names all three artifacts and
+    # Operator intent only: an adapter-backed birth names both artifacts and
     # the compiled payload they bind, inside the payload checkout. Admissibility
     # is PREPARE's to decide.
     given = [name for name, value in _adapter_paths(intent) if value]
     if given and len(given) != len(_adapter_paths(intent)):
         missing = [name for name, value in _adapter_paths(intent) if not value]
         raise BirthFrontDoorError(
-            f"adapter-backed birth needs all three artifacts: {', '.join(missing)} missing"
+            f"adapter-backed birth needs both artifacts: {', '.join(missing)} missing"
         )
     if given and not (intent.payload_repo and intent.payload_contract_path):
         raise BirthFrontDoorError(
@@ -175,7 +174,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--payload-contract-path", default="")
     parser.add_argument("--product-birth-binding-path", default="")
     parser.add_argument("--product-manifest-path", default="")
-    parser.add_argument("--repo-birth-contract-path", default="")
     parser.add_argument("--factory-ref", default=DEFAULT_FACTORY_REF)
     return parser.parse_args(argv)
 
@@ -195,7 +193,6 @@ def intent_from_args(args: argparse.Namespace) -> BirthIntent:
         payload_contract_path=args.payload_contract_path,
         product_birth_binding_path=args.product_birth_binding_path,
         product_manifest_path=args.product_manifest_path,
-        repo_birth_contract_path=args.repo_birth_contract_path,
         factory_ref=args.factory_ref,
     )
 

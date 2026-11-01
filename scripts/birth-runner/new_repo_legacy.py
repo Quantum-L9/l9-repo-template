@@ -128,6 +128,11 @@ payload_verifier = _load_sibling("verify_birth_payload")
 # The product-to-birth adapter owns every realization-consistency check. PREPARE
 # only decides whether it was asked for and hands it the exact artifacts.
 birth_adapter = _load_sibling("l9_birth_adapter")
+# Compiler-backed product resolution: PREPARE re-runs the pinned semantic
+# compiler against the verified payload and refuses a manifest it cannot
+# reproduce. The pin, the proof of the engine checkout and the comparison all
+# live there; this engine only decides when the question is asked.
+product_resolution = _load_sibling("product_resolution")
 
 # Same reason, same mechanism: the CI verdict logic is loaded by path so a
 # renamed tree or a by-path harness still gets a working engine.
@@ -807,13 +812,17 @@ class BirthConfig:
     # Set by the first stage that needs the organization (assembly). See
     # `resolve_org_authority`.
     org_authority: OrgAuthority | None = None
-    # The adapter-backed birth bundle: an already-resolved product realization
-    # handed to `l9_birth_adapter`. All three or none — see
+    # The adapter-backed birth bundle: a compiler-resolved product realization
+    # handed to `l9_birth_adapter`. Both or none — see
     # `_preflight_product_birth_adapter`. PREPARE-only: the handoff never
     # carries them, so PUBLISH reconstructs a config without them.
     product_birth_binding: Path | None = None
     product_manifest: Path | None = None
-    repo_birth_contract: Path | None = None
+    # A clean checkout of the pinned semantic compiler engine
+    # (`semantic-compiler.pin.json`). Required with the bundle: PREPARE re-runs
+    # the engine's product-build against the verified payload and refuses a
+    # manifest it cannot reproduce. PREPARE-only, like the bundle.
+    semantic_compiler_src: Path | None = None
 
     @property
     def slug(self) -> str:
@@ -980,41 +989,50 @@ def _preflight_payload_contract(cfg: BirthConfig, receipt: BirthReceipt) -> None
 
 
 def _preflight_product_birth_adapter(cfg: BirthConfig, receipt: BirthReceipt) -> None:
-    """Stage 1's admissibility gate for an adapter-backed birth.
+    """Stage 1's admissibility gate for a compiler-backed (adapter-backed) birth.
 
-    `l9_birth_adapter` answers whether an already-resolved product realization
+    `l9_birth_adapter` answers whether a compiler-resolved product realization
     is consistent with THIS birth. This gate owns only whether that question was
-    asked: the binding, the resolved ProductManifest and the repo-birth contract
-    come all together or not at all, and an adapter-backed birth also carries the
-    compiled payload `_preflight_payload_contract` has just reproduced. A partial
-    bundle is a refusal, never a downgrade to a generic birth. Nothing here reads
-    a coordinate the adapter validated — product kind, archetype and topology are
-    upstream's, and the adapter's verdict is evidence, not authority.
+    asked, and then whether the answer can be reproduced: the binding and the
+    resolved ProductManifest come together or not at all, an adapter-backed
+    birth also carries the compiled payload `_preflight_payload_contract` has
+    just reproduced, and the pinned semantic compiler is re-run against that
+    verified payload so the manifest the birth was handed is the manifest the
+    product resolves to. A partial bundle, a missing payload, a missing or
+    unproven engine, or a manifest that does not reproduce is a refusal, never a
+    downgrade to a generic birth. Nothing here reads a coordinate the adapter
+    validated for its meaning — product kind, archetype and topology are
+    upstream's, and the adapter's verdict is evidence, not authority. Only the
+    factory and compiler coordinates are read, to bind the verdict to the
+    factory and the engine that are actually running.
+
+    No IdeaOS, GAR, Plan, campaign or Program Execution artifact is read here.
     """
     binding_path = cfg.product_birth_binding
     manifest_path = cfg.product_manifest
-    contract_path = cfg.repo_birth_contract
-    bundle = {
-        "product-birth binding": binding_path,
-        "product manifest": manifest_path,
-        "repo-birth contract": contract_path,
-    }
+    bundle = {"product-birth binding": binding_path, "product manifest": manifest_path}
     missing = [name for name, path in bundle.items() if path is None]
     if len(missing) == len(bundle):
         receipt.record(
             "preflight.adapter", "product-birth adapter", "SKIP", "no adapter bundle requested"
         )
         return
-    if binding_path is None or manifest_path is None or contract_path is None:
+    if binding_path is None or manifest_path is None:
         raise BirthError(
             f"partial product-birth adapter bundle: {', '.join(missing)} missing — an "
-            "adapter-backed birth carries the binding, the resolved ProductManifest and the "
-            "repo-birth contract together, and is never downgraded to a generic birth"
+            "adapter-backed birth carries the binding and the resolved ProductManifest "
+            "together, and is never downgraded to a generic birth"
         )
-    if cfg.payload_contract is None:
+    if cfg.payload_contract is None or cfg.payload is None:
         raise BirthError(
-            "an adapter-backed birth requires the compiled l9.birth-payload/v1 — pass "
-            "PAYLOAD_CONTRACT=<payload.json> with the adapter bundle"
+            "an adapter-backed birth requires the compiled l9.birth-payload/v1 and its source "
+            "— pass PAYLOAD=<source checkout> PAYLOAD_CONTRACT=<payload.json> with the bundle"
+        )
+    if cfg.semantic_compiler_src is None:
+        raise BirthError(
+            "an adapter-backed birth requires the pinned semantic compiler — pass "
+            "SEMANTIC_COMPILER_SRC=<clean checkout of the engine named in "
+            f"{product_resolution.PIN_PATH}>"
         )
     # Set only when `_preflight_payload_contract` reproduced THIS contract
     # against its source. The adapter never reads a payload that proof skipped.
@@ -1027,14 +1045,11 @@ def _preflight_product_birth_adapter(cfg: BirthConfig, receipt: BirthReceipt) ->
     try:
         binding = birth_adapter.load_binding(binding_path)
         manifest = birth_adapter.load_artifact(manifest_path)
-        contract = birth_adapter.load_artifact(contract_path)
         payload = birth_adapter.load_artifact(cfg.payload_contract)
     except birth_adapter.AdapterInputError as exc:
         raise BirthError(f"product-birth adapter input unreadable: {exc}") from exc
 
-    result = birth_adapter.bind(
-        binding, manifest=manifest, birth_contract=contract, payload=payload
-    )
+    result = birth_adapter.bind(binding, manifest=manifest, payload=payload)
     if not result.admissible:
         reasons = "; ".join(f"{f.code}: {f.detail}" for f in result.failures)
         raise BirthError(f"product-birth adapter refused this realization — {reasons}")
@@ -1053,11 +1068,29 @@ def _preflight_product_birth_adapter(cfg: BirthConfig, receipt: BirthReceipt) ->
             f"product-birth binding names factory revision {factory.get('revision')!r}, but "
             f"the running factory revision is {receipt.template_sha!r}"
         )
+    # The adapter compared coordinates; the compiler proves them. The pinned
+    # engine is re-run against the payload tree the source proof just
+    # reproduced, and the manifest it emits must be the one the birth was
+    # handed — same semantic digest, same document, nothing unresolved.
+    claimed_compiler = result.coordinates["compiler"]
+    assert isinstance(claimed_compiler, dict)
+    try:
+        resolution = product_resolution.resolve_product(
+            engine_root=cfg.semantic_compiler_src,
+            claimed_compiler=claimed_compiler,
+            source_root=cfg.payload,
+            supplied_manifest=manifest.document,
+            factory_root=cfg.template_src,
+        )
+    except product_resolution.ProductResolutionError as exc:
+        raise BirthError(f"product resolution did not reproduce — {exc}") from exc
     receipt.record(
         "preflight.adapter",
         "product-birth adapter",
         "PASS",
-        f"admissible — birth contract {contract.digest[:19]}, payload {payload.digest[:19]}",
+        f"admissible — manifest {resolution.manifest_digest[:19]} reproduced by "
+        f"{resolution.engine['engine']}@{resolution.engine['revision'][:12]}, "
+        f"payload {payload.digest[:19]}",
     )
 
 
@@ -2421,7 +2454,7 @@ def build_config(args: argparse.Namespace) -> BirthConfig:
         # `_preflight_product_birth_adapter` refuses a partial bundle.
         product_birth_binding=_optional_path(args.product_birth_binding),
         product_manifest=_optional_path(args.product_manifest),
-        repo_birth_contract=_optional_path(args.repo_birth_contract),
+        semantic_compiler_src=_optional_path(args.semantic_compiler_src),
     )
 
 
@@ -2447,16 +2480,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "(required when the payload is repository-shaped; see compile_birth_payload.py)"
         ),
     )
-    # The adapter-backed birth bundle (l9_birth_adapter.py). All three or none;
-    # with them, --payload-contract is required as well.
+    # The adapter-backed birth bundle (l9_birth_adapter.py). Both or none; with
+    # them, --payload, --payload-contract and --semantic-compiler-src are
+    # required as well.
     parser.add_argument(
-        "--product-birth-binding", default=None, help="l9.product-birth-binding/v1 document"
+        "--product-birth-binding", default=None, help="l9.product-birth-binding/v2 document"
     )
     parser.add_argument(
         "--product-manifest", default=None, help="resolved l9.product-manifest/v1 artifact"
     )
     parser.add_argument(
-        "--repo-birth-contract", default=None, help="l9.repo-birth-contract/v1 artifact"
+        "--semantic-compiler-src",
+        default=None,
+        help="clean checkout of the pinned semantic compiler engine (semantic-compiler.pin.json)",
     )
     parser.add_argument("--work-dir", default=os.environ.get("WORK_DIR") or str(default_work_dir()))
     parser.add_argument("--template-src", default=str(TEMPLATE_ROOT))

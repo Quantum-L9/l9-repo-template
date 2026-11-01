@@ -39,6 +39,8 @@ Optional dispatch inputs are exposed as Make variables:
 | `PAYLOAD_REF` | `payload_ref` |
 | `PAYLOAD_SUBPATH` | `payload_subpath` |
 | `PAYLOAD_CONTRACT_PATH` | `payload_contract_path` |
+| `PRODUCT_BIRTH_BINDING_PATH` | `product_birth_binding_path` (compiler-backed birth, with `PRODUCT_MANIFEST_PATH`) |
+| `PRODUCT_MANIFEST_PATH` | `product_manifest_path` |
 | `FACTORY_REF` | workflow ref (`main` by default; useful for stacked factory testing) |
 
 `make birth` returning successfully means GitHub accepted the birth request. It
@@ -105,6 +107,27 @@ make new-repo \
   PAYLOAD_CONTRACT=/tmp/source.payload.json
 ```
 
+For a compiler-backed birth (BIRTH-ARCH-REVISION-001), package the bundle from
+a clean source and a clean checkout of the pinned engine, then hand PREPARE the
+binding, the manifest and that engine; no IdeaOS, GAR, Plan, campaign or
+Program Execution artifact is involved:
+
+```bash
+python3 scripts/birth-runner/package_birth_handoff.py \
+  --source /path/to/source \
+  --semantic-compiler-src /path/to/l9-semantic-compiler-engine \
+  --manifest-ref l9.product-manifest/example@1 \
+  --out-dir /tmp/example-handoff
+
+make new-repo \
+  REPO=example PKG=example DESC="Example" \
+  PAYLOAD=/path/to/source \
+  PAYLOAD_CONTRACT=/tmp/example-handoff/birth-payload.json \
+  PRODUCT_BIRTH_BINDING=/tmp/example-handoff/product-birth-binding.json \
+  PRODUCT_MANIFEST=/tmp/example-handoff/product-manifest.json \
+  SEMANTIC_COMPILER_SRC=/path/to/l9-semantic-compiler-engine
+```
+
 `new_repo.py` owns the canonical birth state machine. PR A splits production
 execution across PREPARE/seal and PUBLISH so product-controlled code cannot run
 with repository-creation authority. The direct `all()` path remains a guarded
@@ -127,9 +150,11 @@ recomputes that manifest against the source tree and stops on disagreement via
 | [`schemas/birth-payload.schema.json`](schemas/birth-payload.schema.json) | `l9.birth-payload/v1` contract |
 | [`payload_ownership.py`](payload_ownership.py) | payload ownership reader |
 | [`l9_birth_adapter.py`](l9_birth_adapter.py) | product-to-birth adapter; PREPARE admits a bundle only on its verdict |
-| [`package_birth_handoff.py`](package_birth_handoff.py) | packages payload, birth contract and product-birth binding; proves them with the adapter |
-| [`schemas/birth-contract.schema.json`](schemas/birth-contract.schema.json) | `l9.repo-birth-contract/v1` contract |
-| [`schemas/l9-product-birth-binding.schema.json`](schemas/l9-product-birth-binding.schema.json) | `l9.product-birth-binding/v1` contract |
+| [`product_resolution.py`](product_resolution.py) | runs the pinned semantic compiler's `product-build` against the verified payload; PREPARE refuses a manifest it cannot reproduce |
+| [`semantic-compiler.pin.json`](semantic-compiler.pin.json) | the one engine this factory admits (repository, exact revision, package version) |
+| [`package_birth_handoff.py`](package_birth_handoff.py) | packages payload, the engine-resolved product manifest and the product-birth binding; proves them with the adapter |
+| [`schemas/l9-product-birth-binding.schema.json`](schemas/l9-product-birth-binding.schema.json) | `l9.product-birth-binding/v2` contract |
+| [`schemas/superseded/`](schemas/superseded/) | retired `l9.product-birth-binding/v1` and `l9.repo-birth-contract/v1`: historical evidence, read by no gate |
 
 Useful direct/debug flags on `new_repo.py`:
 

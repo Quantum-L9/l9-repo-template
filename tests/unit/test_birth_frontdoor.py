@@ -102,21 +102,30 @@ def test_front_door_never_passes_publication_credentials() -> None:
 ADAPTER_PATHS = {
     "product_birth_binding_path": "birth/product-birth-binding.json",
     "product_manifest_path": "birth/product-manifest.json",
-    "repo_birth_contract_path": "birth/repo-birth-contract.json",
 }
 
 
-def test_an_adapter_bundle_is_dispatched_as_three_relative_paths() -> None:
+def test_an_adapter_bundle_is_dispatched_as_two_relative_paths() -> None:
     fields = dict(front.dispatch_fields(_intent(**ADAPTER_PATHS)))
     for key, value in ADAPTER_PATHS.items():
         assert fields[key] == value
+    assert "repo_birth_contract_path" not in fields
 
 
 @pytest.mark.parametrize("dropped", sorted(ADAPTER_PATHS))
 def test_a_partial_adapter_bundle_is_refused(dropped: str) -> None:
     intent = _intent(**{**ADAPTER_PATHS, dropped: ""})
-    with pytest.raises(front.BirthFrontDoorError, match="all three artifacts"):
+    with pytest.raises(front.BirthFrontDoorError, match="both artifacts"):
         front.validate_intent(intent)
+
+
+def test_the_birth_contract_has_no_front_door(tmp_path) -> None:
+    """l9.repo-birth-contract/v1 is retired: the client cannot even name one."""
+    with pytest.raises(SystemExit):
+        front.parse_args(
+            ["--repo", "x", "--pkg", "x", "--desc", "x", "--repo-birth-contract-path", "c.json"]
+        )
+    assert not hasattr(front.BirthIntent(repo="x", pkg="x", desc="x"), "repo_birth_contract_path")
 
 
 def test_an_adapter_bundle_requires_the_compiled_payload() -> None:

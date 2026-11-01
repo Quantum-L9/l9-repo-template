@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/Quantum-L9/l9-repo-template/main/scripts/birth-runner/schemas/l9-product-birth-binding.schema.json",
-  "title": "l9.product-birth-binding/v1",
-  "description": "The exact coordinates a caller claims when binding an already-resolved product realization to one repository birth: product id and kind as resolved upstream, the ProductManifest and ProductTopology references and digests the manifest carries, the realized source snapshot, the l9.repo-birth-contract/v1 and l9.birth-payload/v1 artifacts by digest, and the factory revision. It is input to l9_birth_adapter.py, which holds every coordinate to the artifacts themselves. It is a closed shape: no repository shape, no kind hint, no inferred field is admitted, because the adapter never infers ProductKind or reads a source tree. Semantic refs and digests (manifest, topology) are owned upstream and are opaque non-empty strings here; artifact digests (birth contract, payload) are the factory convention `sha256:` over the artifact bytes.",
+  "title": "l9.product-birth-binding/v2",
+  "description": "The exact coordinates a caller claims when binding a compiler-resolved product realization to one repository birth: product id and kind as resolved by the semantic compiler, the ProductManifest and ProductTopology references and digests the manifest carries, the realized source snapshot, the compiled l9.birth-payload/v1 artifact by digest, the factory revision, and the exact semantic-compiler engine plus the exact input paths (inside the source snapshot) the manifest was compiled from. It is input to l9_birth_adapter.py, which holds every coordinate to the artifacts themselves, and to PREPARE, which re-runs the pinned engine against the same inputs and refuses birth unless the manifest reproduces. It is a closed shape: no repository shape, no kind hint, no inferred field, and no lineage or birth-contract coordinate is admitted. v2 supersedes l9.product-birth-binding/v1 (schemas/superseded/): the mandatory l9.repo-birth-contract/v1 and its IdeaOS / GAR / Plan / campaign / Program Execution lineage are no longer birth prerequisites. Semantic refs and digests (manifest, topology) are owned upstream and are opaque non-empty strings here; the payload digest is the factory convention `sha256:` over the artifact bytes.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,13 +11,13 @@
     "manifest",
     "topology",
     "source",
-    "birth_contract",
     "payload",
-    "factory"
+    "factory",
+    "compiler"
   ],
   "properties": {
     "schema": {
-      "const": "l9.product-birth-binding/v1"
+      "const": "l9.product-birth-binding/v2"
     },
     "product": {
       "description": "Restates the product coordinates the manifest resolves. The adapter compares them; it never supplies them.",
@@ -30,7 +30,7 @@
       }
     },
     "manifest": {
-      "description": "The exact ProductManifest: its semantic ref and the semantic digest it declares as manifest_digest. Compared as opaque strings; never recomputed here.",
+      "description": "The exact ProductManifest: its semantic ref and the semantic digest it declares as manifest_digest. Compared as opaque strings by the adapter; reproduced by PREPARE through the pinned engine, never recomputed by the factory.",
       "$ref": "#/$defs/semanticCoordinate"
     },
     "topology": {
@@ -38,7 +38,7 @@
       "$ref": "#/$defs/semanticCoordinate"
     },
     "source": {
-      "description": "The realized source snapshot the birth contract and the compiled payload both bind.",
+      "description": "The realized source snapshot the compiled payload binds and the manifest was compiled from.",
       "type": "object",
       "additionalProperties": false,
       "required": ["repository", "revision", "tree_sha"],
@@ -48,12 +48,8 @@
         "tree_sha": { "$ref": "#/$defs/gitObjectId" }
       }
     },
-    "birth_contract": {
-      "description": "The exact l9.repo-birth-contract/v1 artifact.",
-      "$ref": "#/$defs/artifactCoordinate"
-    },
     "payload": {
-      "description": "The exact compiled l9.birth-payload/v1 artifact the birth contract references.",
+      "description": "The exact compiled l9.birth-payload/v1 artifact: every byte the birth may consume, from that snapshot.",
       "$ref": "#/$defs/artifactCoordinate"
     },
     "factory": {
@@ -64,6 +60,30 @@
       "properties": {
         "repository": { "$ref": "#/$defs/repositorySlug" },
         "revision": { "$ref": "#/$defs/gitObjectId" }
+      }
+    },
+    "compiler": {
+      "description": "The exact semantic-compiler engine that resolved the ProductManifest, and the exact inputs it read. PREPARE admits only the engine the factory pins (scripts/birth-runner/semantic-compiler.pin.json) and re-runs its product-build capability against these inputs inside the verified payload tree.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "revision", "version", "inputs"],
+      "properties": {
+        "engine": { "$ref": "#/$defs/repositorySlug" },
+        "revision": { "$ref": "#/$defs/gitObjectId" },
+        "version": { "$ref": "#/$defs/semanticToken" },
+        "inputs": {
+          "description": "Repository-relative paths inside the source snapshot, each a file the compiled payload names. contract_catalog is optional: a product whose RepositorySpec declares no local contract catalog has none to bind, and the engine's own default is then resolved against the source root.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["topology", "repository_spec", "workflow_spec", "authority_lock"],
+          "properties": {
+            "topology": { "$ref": "#/$defs/relativePath" },
+            "repository_spec": { "$ref": "#/$defs/relativePath" },
+            "workflow_spec": { "$ref": "#/$defs/relativePath" },
+            "authority_lock": { "$ref": "#/$defs/relativePath" },
+            "contract_catalog": { "$ref": "#/$defs/relativePath" }
+          }
+        }
       }
     }
   },
@@ -101,6 +121,10 @@
     "artifactDigest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))(?!.*(^|/)\\.(/|$))[^\\\\\\u0000]+$"
     }
   }
 }
