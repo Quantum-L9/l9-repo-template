@@ -28,7 +28,10 @@ green, the repository created and pushed, org labels and settings applied, and
 the remote read back and attested. Nothing is created until validation passes.
 
 See [docs/ops/REPO_BIRTH.md](docs/ops/REPO_BIRTH.md) for the stages and
-every parameter.
+every parameter. A remote birth (`make birth`) of a compiled product names the
+source snapshot in `PAYLOAD_REF` and the commit carrying its birth bundle in
+`PAYLOAD_BUNDLE_REF` — the bundle pins the snapshot, so it never lives inside
+it ([scripts/birth-runner/README.md](scripts/birth-runner/README.md)).
 
 ## Manual path
 

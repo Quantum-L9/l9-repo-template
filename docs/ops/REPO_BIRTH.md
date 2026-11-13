@@ -354,9 +354,23 @@ shape, never by a flag.
 | a standalone repository | **authoritative** | **required** | the product does not own that surface. It is removed. |
 
 A payload is repository-shaped when it carries every path in
-`repository_shape` — today `pyproject.toml`, `.l9/architecture.yaml`, `src/`,
-`tests/`, and `scripts/inventory_check.py`. Identification is positive: a large
-payload, or one that merely happens to have a `src/` directory, stays additive.
+`repository_shape` — today `pyproject.toml`, `.l9/architecture.yaml`, `src/`
+and `tests/`. Identification is positive: a large payload, or one that merely
+happens to have a `src/` directory, stays additive.
+
+The list names only surfaces a standalone product legitimately owns. It once
+also named `scripts/inventory_check.py`, a template script, which meant a real
+product repository could be authoritative only by copying template machinery:
+otherwise it compiled additive and the newborn kept the template's example
+product. `.l9/architecture.yaml` stays, because it is the product's own
+architecture declaration; without it the newborn would inherit the template's
+birth-factory identity. A product that brings no `scripts/inventory_check.py`
+inherits the template's, and that checker reads the newborn's birth receipt:
+in a repository born from an authoritative payload it does not require the
+template's example product, and in any born repository it does not apply the
+two template-only anchors (the README naming the birth factory, and template
+wording in the organization-owned `.coderabbit.yaml`). It also accepts
+Cursor-Governance's `llm.txt` successor name for `llms.txt`.
 
 Shape is what the compiler reads to PROPOSE a classification. It is not what
 birth acts on: stage 1 re-derives the classification from the same ownership
@@ -453,7 +467,7 @@ should inherit a copy of.
     "tree_sha": "<git tree sha>"
   },
   "mode": "authoritative",
-  "repository_shape": { "matched": ["pyproject.toml", ".l9/architecture.yaml", "src", "tests", "scripts/inventory_check.py"] },
+  "repository_shape": { "matched": ["pyproject.toml", ".l9/architecture.yaml", "src", "tests"] },
   "packages": { "python": ["ideaos"] },
   "files": [
     { "path": "pyproject.toml", "sha256": "<sha256>" },
@@ -678,9 +692,18 @@ attests as clean.
   binding that names an input the payload does not carry. When the binding
   omits it, PREPARE resolves the engine's default against the source root.
 
-Moving the bundle to a remote birth (the dispatch workflow reads the two
-paths from the payload checkout) is a separate concern; packaging does not
-upload anything.
+Packaging does not upload anything. The bundle can never be committed inside
+the snapshot it attests: the payload and the binding pin the snapshot's commit
+and tree, and committing them creates a commit they do not name. A remote birth
+therefore carries it on a **second immutable ref** of the same payload
+repository — a commit, typically a child of the snapshot, that adds the three
+files — and dispatches with `payload_bundle_ref=<that commit's full SHA>`
+beside `payload_ref=<the snapshot>`. PREPARE reads the bundle only from that
+checkout and still reproduces everything against the snapshot; a compiled
+payload, binding or manifest read from inside the source checkout is refused
+with the reason, and so is a bundle ref equal to the snapshot. The binding also
+pins the factory revision, so the bundle is packaged by the factory commit the
+dispatch will run (`FACTORY_REF`).
 
 ### Superseded: the birth contract and Program Execution lineage
 
@@ -995,9 +1018,10 @@ name where they come from:
 | `payload_repo` | `owner/name` holding the product bytes. **This organization only.** |
 | `payload_ref` | branch, tag, or commit SHA. Required with `payload_repo`. |
 | `payload_subpath` | directory inside that checkout to use; blank means its root |
-| `payload_contract_path` | compiled `l9.birth-payload/v1` inside that checkout — required only for a repository-shaped payload |
-| `product_birth_binding_path` | `l9.product-birth-binding/v2` inside that checkout — compiler-backed birth, with `product_manifest_path` and `payload_contract_path`; both binding and manifest or neither |
-| `product_manifest_path` | resolved `l9.product-manifest/v1` inside that checkout |
+| `payload_bundle_ref` | full 40-character commit SHA of the same payload repository carrying the birth bundle; must not be the `payload_ref` snapshot. Required with `payload_contract_path`. |
+| `payload_contract_path` | compiled `l9.birth-payload/v1` inside the **bundle** checkout — required for a repository-shaped payload |
+| `product_birth_binding_path` | `l9.product-birth-binding/v2` inside the bundle checkout — compiler-backed birth, with `product_manifest_path` and `payload_contract_path`; both binding and manifest or neither |
+| `product_manifest_path` | resolved `l9.product-manifest/v1` inside the bundle checkout |
 
 The payload arrives as a **pinned git checkout**, never an archive URL. That is
 the shape `compile_birth_payload.py` already demands of a source — "clean
@@ -1009,7 +1033,7 @@ moving branch still leaves a record of what was actually assembled.
 Same-organization is enforced, not assumed. This job holds an organization
 Administration token; a birth that could pull an arbitrary third-party tree into
 a newborn's root commit under that token is a supply-chain hole. `..` and
-absolute paths are rejected in both path inputs for the same reason — either
+absolute paths are rejected in every path input for the same reason — either
 would resolve outside the checkout and hand `make new-repo` a directory of
 runner files to copy.
 
