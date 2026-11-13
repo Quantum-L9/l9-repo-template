@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -86,3 +88,142 @@ def test_repo_mk_ci_facade_required(tmp_path: Path) -> None:
     )
     assert proc.returncode == 1, proc.stderr + proc.stdout
     assert "Repo.mk must define a ci target" in proc.stderr
+
+
+# ─── Born repositories ──────────────────────────────────────────────────────
+# The checker runs in the template AND, renamed, in every repository it births
+# (stage 5). What is true of the template's own identity, or of a surface the
+# organization owns in a newborn, must not be demanded of a newborn.
+
+
+def _inventory_module():
+    spec = importlib.util.spec_from_file_location(
+        "l9_inventory_check_under_test", REPO / "scripts" / "inventory_check.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _ownership():
+    spec = importlib.util.spec_from_file_location(
+        "l9_payload_ownership_for_inventory",
+        REPO / "scripts" / "birth-runner" / "payload_ownership.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.load_ownership(REPO)
+
+
+def _is_product(patterns: list[str], rel: str) -> bool:
+    for pattern in patterns:
+        if pattern.endswith("/**") and rel.startswith(pattern[:-2]):
+            return True
+        if rel == pattern:
+            return True
+    return False
+
+
+def _tracked_copy(dest: Path) -> Path:
+    listed = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, check=True
+    ).stdout.decode("utf-8")
+    for rel in filter(None, listed.split("\0")):
+        source = REPO / rel
+        if not source.is_file():
+            continue
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+    return dest
+
+
+def _run(root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "inventory_check.py")],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "L9_INVENTORY_ROOT": str(root)},
+    )
+
+
+def _born(root: Path, mode: str) -> None:
+    receipt = {"schema": "l9.birth-receipt/v1", "payload_mode": mode}
+    (root / ".l9" / "birth-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+
+
+def _authoritative_newborn(tmp_path: Path) -> Path:
+    """The template tree as an authoritative birth leaves it: no example product,
+    an organization-owned .coderabbit.yaml, governance's llm.txt."""
+    root = _tracked_copy(tmp_path / "newborn")
+    for rel in _inventory_module().EXAMPLE_PRODUCT:
+        (root / rel).unlink()
+    (root / ".coderabbit.yaml").write_text("language: en-US\n", encoding="utf-8")
+    (root / "llms.txt").rename(root / "llm.txt")
+    (root / "README.md").write_text("# l9-state\n", encoding="utf-8")
+    _born(root, "authoritative")
+    return root
+
+
+def test_example_product_entries_are_product_surfaces() -> None:
+    """The exemption covers exactly what the ownership contract says the product owns."""
+    product = _ownership()["product"]
+    for rel in _inventory_module().EXAMPLE_PRODUCT:
+        assert _is_product(product, rel), rel
+
+
+def test_authoritative_newborn_passes_without_the_example_product(tmp_path: Path) -> None:
+    proc = _run(_authoritative_newborn(tmp_path))
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+def test_the_same_tree_without_a_birth_receipt_is_held_to_the_template(tmp_path: Path) -> None:
+    root = _authoritative_newborn(tmp_path)
+    (root / ".l9" / "birth-receipt.json").unlink()
+    proc = _run(root)
+    assert proc.returncode == 1
+    assert "missing required file: Dockerfile" in proc.stderr
+    assert "README.md must mention 'repository birth factory'" in proc.stderr
+    assert ".coderabbit.yaml must mention 'AGENTS.md'" in proc.stderr
+
+
+def test_additive_newborn_still_requires_the_example_product(tmp_path: Path) -> None:
+    root = _authoritative_newborn(tmp_path)
+    _born(root, "additive")
+    proc = _run(root)
+    assert proc.returncode == 1
+    assert "missing required file: Dockerfile" in proc.stderr
+    # The org-owned .coderabbit.yaml is not the template's to word, in any newborn.
+    assert ".coderabbit.yaml must mention" not in proc.stderr
+
+
+def test_unreadable_birth_receipt_is_refused_not_exempted(tmp_path: Path) -> None:
+    root = _authoritative_newborn(tmp_path)
+    (root / ".l9" / "birth-receipt.json").write_text("{not json", encoding="utf-8")
+    proc = _run(root)
+    assert proc.returncode == 1
+    assert "declares no readable payload_mode" in proc.stderr
+    assert "missing required file: Dockerfile" in proc.stderr
+
+
+def test_agent_wiring_is_still_checked_in_a_newborn(tmp_path: Path) -> None:
+    """Born or not, AGENTS.md must point agents at the repository's own contracts."""
+    root = _authoritative_newborn(tmp_path)
+    (root / "AGENTS.md").write_text("# agents\n", encoding="utf-8")
+    proc = _run(root)
+    assert proc.returncode == 1
+    assert "AGENTS.md must mention '.l9/architecture.yaml'" in proc.stderr
+
+
+def test_a_newborn_needs_one_of_the_agent_manifest_names(tmp_path: Path) -> None:
+    root = _authoritative_newborn(tmp_path)
+    (root / "llm.txt").unlink()
+    proc = _run(root)
+    assert proc.returncode == 1
+    assert "missing required file: llms.txt or llm.txt" in proc.stderr
