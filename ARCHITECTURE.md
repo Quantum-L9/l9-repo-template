@@ -18,15 +18,14 @@ of them.
 ## Layout
 
 ```
-Makefile                 # Core thin facade (identical to Makefile.template)
-Repo.mk                  # Product targets + gov-* WS= wrappers
-tools/l9_repo/           # Vendored repository-execution runtime (Core pin)
+Makefile                 # Core-generated make-v1 facade (Repository Execution V2)
+Repo.mk                  # repo-setup/validate/check/test leaves + product targets + gov-* WS= wrappers
 scripts/birth-runner/    # new_repo.py birth engine + payload compiler/verifier + provenance
 src/<pkg>/               # Reference example payload (thin FastAPI hello + helpers)
 tests/unit|integration/  # package + chassis compliance tests
 observability/           # optional local Grafana/Prom/Tempo/OTelCol (reference payload)
 .github/                 # repository-local GitHub config only
-.l9/runtime-provenance.yaml  # vendored execution-runtime harvest provenance
+.l9/repo-workflow.json       # l9.repo-execution/v2 contract (three fields)
 .l9/org-birth-profile.yaml   # the org repo class this repository declares
 ```
 
@@ -37,7 +36,7 @@ observability/           # optional local Grafana/Prom/Tempo/OTelCol (reference 
 | Birth engine, payload contract, provenance | **this repo** — `scripts/birth-runner/` |
 | Reference payload boundary (chassis vs product) | `scripts/birth-runner/payload-ownership.yaml` |
 | Product Make targets | `Repo.mk` |
-| Repository-execution facade | vendored `tools/l9_repo` |
+| Repository-execution facade | l9-ci-core `make-v1` (generated `Makefile`; `docs/repository-execution-runtime.md`) |
 | Governance pr-check / wiring | Cursor-Governance via `gov-*` / `WS=` |
 | CI execution semantics | l9-ci-core (future) |
 | Organization CI control | l9-ci-control-plane (future) |

@@ -2,8 +2,8 @@
 template: .cursor/rules/templates/fastapi.mdc.template
 template_sha256: 2d8aa969519235544d607a8784e96c64d3358df4783b3761982779ac2bf5e6a2
 config: plugin-config.yaml
-config_sha256: 1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19
-render_id: 53ee9df981fe010c7edc74c37a09c52cc52dac93e4b2cafb658c55bdcdf460c4
+config_sha256: aec170b171a011be3c483549119582e0245a14318ddcd222c67cadf12d152bad
+render_id: 2b44b8577580356e47d8d2212fd857eb18669ece497a8877df951f954f86e3dd
 /L9_RENDERED -->
 ---
 description: "l9-repo-template FastAPI conventions — generated for the reference payload"

@@ -1,31 +1,66 @@
-# Product targets and CG WS= wrappers. Core facade targets stay in Makefile.
+# l9-repo-template repository-owned Make implementation (Repository Execution V2).
+#
+# The root Makefile is the Core-generated `make-v1` facade (l9.repo-execution/v2,
+# declared in .l9/repo-workflow.json). It owns `help setup validate check test`
+# and routes each phase to the `repo-<phase>` leaf below; regenerate it with
+# Core's `python3 -m tools.l9_repo --workspace <repo> reconcile`, never by hand.
+# This file must not redefine a facade verb. Everything else here — product,
+# birth and governance wrappers — is repository-owned.
 PKG_APP ?= l9_example_pkg.app:app
 GOV_ROOT ?= $(HOME)/.cursor-governance
 OPEN_PR ?= 0
 FACTORY_REF ?= main
 VISIBILITY ?= private
+VENV ?= $(CURDIR)/.venv
 
-# Prefer local venv for facade + product recipes (L9_REPO uses deferred PYTHON).
-ifneq ($(wildcard $(CURDIR)/.venv/bin/python),)
-PYTHON := $(CURDIR)/.venv/bin/python
+# Prefer the repository venv once `make setup` has created it. Each facade phase
+# is its own `make` invocation, so phases after setup resolve to the venv.
+ifneq ($(wildcard $(VENV)/bin/python),)
+PYTHON := $(VENV)/bin/python
 endif
 PYTHON ?= python3
 
-.PHONY: help install-dev setup-hooks lint lint-fix typecheck inventory-check hygiene-check \
+.PHONY: repo-setup repo-validate repo-check repo-test agent-check clean \
+	install-dev setup-hooks lint lint-fix typecheck inventory-check hygiene-check \
 	check-rules render-rules check-config reconcile-config verify rename ci run dev wait-http \
 	preflight obs-up obs-down obs-ps pr-check PR-check Pr-check test-cov \
 	birth birth-status new-repo birth-payload birth-payload-check birth-check birth-preflight \
 	birth-bootstrap birth-verify \
-	gov-pr-check gov-pr gov-start gov-wiring-check regenerate-manifest
+	gov-pr-check gov-pr gov-start gov-wiring-check
 
-# Override thin-facade help to list product + governance wrappers.
-help:
-	@echo "Core facade (tools.l9_repo):"
-	@$(L9_REPO) help
-	@echo ""
-	@echo "Product / governance wrappers:"
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' Repo.mk \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+# ─── Repository Execution V2 leaves (reached through the generated facade) ───
+# setup installs into a repository venv: the hosted runner's system interpreter
+# is externally managed (PEP 668), and a venv keeps every later phase on the
+# same locked dependency set.
+repo-setup: ## Create .venv and install the project with its dev extras (uv sync when uv is present)
+	@if command -v uv >/dev/null 2>&1; then \
+		UV_PROJECT_ENVIRONMENT="$(VENV)" uv sync --locked --extra dev; \
+	else \
+		python3 -m venv "$(VENV)"; \
+		"$(VENV)/bin/python" -m pip install --upgrade pip; \
+		"$(VENV)/bin/python" -m pip install -e ".[dev]"; \
+	fi
+
+repo-validate: inventory-check hygiene-check ## Chassis inventory + hygiene validation (no mutation)
+
+repo-check: lint typecheck ## Static checks: ruff check, ruff format --check, mypy src
+
+repo-test: ## The repository test suite
+	$(PYTHON) -m pytest -q
+
+agent-check: ## Agent completion gate: validate + check + test, then prove the tree did not change
+	@before="$$(git rev-parse HEAD) $$(git status --porcelain --untracked-files=all | sha256sum)"; \
+	$(MAKE) --no-print-directory validate check test; \
+	after="$$(git rev-parse HEAD) $$(git status --porcelain --untracked-files=all | sha256sum)"; \
+	if [ "$$before" != "$$after" ]; then \
+		echo "agent-check FAIL: HEAD or worktree changed during verification" >&2; \
+		git status --porcelain --untracked-files=all >&2; \
+		exit 1; \
+	fi; \
+	echo "agent-check: PASS"
+
+clean: ## Remove tool caches (.pytest_cache .mypy_cache .ruff_cache)
+	rm -rf -- "$(CURDIR)/.pytest_cache" "$(CURDIR)/.mypy_cache" "$(CURDIR)/.ruff_cache"
 
 install-dev: ## Sync locked deps (uv) or pip editable+dev
 	@if command -v uv >/dev/null 2>&1; then \
@@ -196,9 +231,6 @@ rename: ## Rewrite l9_example_pkg identity; reinstall; re-render rules
 		$(PYTHON) -m pip install -e ".[dev]"; \
 	fi
 	$(PYTHON) scripts/render_cursor_rules.py --force
-
-regenerate-manifest: ## Refresh MANIFEST.sha256 for runtime-critical paths
-	$(PYTHON) scripts/regenerate_runtime_manifest.py
 
 pr-check: verify ## In-repo product gate (OPEN_PR stays 0; use gov-pr to open)
 	@if command -v uv >/dev/null 2>&1; then \

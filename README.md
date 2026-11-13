@@ -56,7 +56,7 @@ every parameter.
 |--------|---------|------|
 | Birth | `make new-repo` | One-command repository birth |
 | Product | `make verify` / `make pr-check` | In-repo chassis gate (`OPEN_PR=0`) |
-| Core facade | `make agent-check` / `make validate` | Vendored `tools.l9_repo` completion proof |
+| Core facade | `make setup validate check test` / `make agent-check` | Repository Execution V2 phases (`Repo.mk` leaves) |
 | Governance | `make gov-pr-check` | Cursor-Governance via `WS=$(pwd)` |
 
 ```bash

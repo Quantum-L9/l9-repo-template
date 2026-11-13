@@ -5,12 +5,12 @@ domain: "l9-repo-birth-factory"
 protected_paths:
   - "uv.lock"
   - "pyproject.toml"
-  - ".l9/runtime-provenance.yaml"
+  - ".l9/repo-workflow.json"
   - "scripts/bootstrap_rename.py"
   - "scripts/inventory_check.py"
   - "scripts/repo_hygiene_audit.py"
   - "Makefile"
-  - "tools/l9_repo/**"
+  - "Repo.mk"
 
 high_risk_commands:
   - "git push --force"

@@ -2,8 +2,8 @@
 template: .cursor/rules/templates/10-domain-cartridge.mdc.template
 template_sha256: 9eb1c85dbfa2d44905e1b0cc73c5ab54bb2e0df2b2f4dd386a7e491944406a52
 config: plugin-config.yaml
-config_sha256: 1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19
-render_id: 75418aac9164378fe65f185078a8676a4abc8dd51923cb41ed2d47ce77088173
+config_sha256: aec170b171a011be3c483549119582e0245a14318ddcd222c67cadf12d152bad
+render_id: f5c16512b01c712e1854b0506c4bda6adb254a0789c4b28a1d672238ef112ad0
 /L9_RENDERED -->
 ---
 description: "Domain cartridge rule — generated from plugin-config.yaml"
@@ -25,7 +25,7 @@ Rules must be reusable across repos. Repo-specific values belong in `plugin-conf
 - Repo: `l9-repo-template`
 - Domain: `l9-repo-birth-factory`
 - Plugin version: `1.2.0`
-- Config SHA: `1d1b5252725a`
+- Config SHA: `aec170b171a0`
 
 ## Template Variables
 
@@ -33,27 +33,27 @@ The renderer exposes scalar config keys directly and list keys as bullet/list/js
 
 - `- `uv.lock`
 - `pyproject.toml`
-- `.l9/runtime-provenance.yaml`
+- `.l9/repo-workflow.json`
 - `scripts/bootstrap_rename.py`
 - `scripts/inventory_check.py`
 - `scripts/repo_hygiene_audit.py`
 - `Makefile`
-- `tools/l9_repo/**`` / `- `uv.lock`
+- `Repo.mk`` / `- `uv.lock`
 - `pyproject.toml`
-- `.l9/runtime-provenance.yaml`
+- `.l9/repo-workflow.json`
 - `scripts/bootstrap_rename.py`
 - `scripts/inventory_check.py`
 - `scripts/repo_hygiene_audit.py`
 - `Makefile`
-- `tools/l9_repo/**`` / ``uv.lock`, `pyproject.toml`, `.l9/runtime-provenance.yaml`, `scripts/bootstrap_rename.py`, `scripts/inventory_check.py`, `scripts/repo_hygiene_audit.py`, `Makefile`, `tools/l9_repo/**`` / `[
+- `Repo.mk`` / ``uv.lock`, `pyproject.toml`, `.l9/repo-workflow.json`, `scripts/bootstrap_rename.py`, `scripts/inventory_check.py`, `scripts/repo_hygiene_audit.py`, `Makefile`, `Repo.mk`` / `[
   "uv.lock",
   "pyproject.toml",
-  ".l9/runtime-provenance.yaml",
+  ".l9/repo-workflow.json",
   "scripts/bootstrap_rename.py",
   "scripts/inventory_check.py",
   "scripts/repo_hygiene_audit.py",
   "Makefile",
-  "tools/l9_repo/**"
+  "Repo.mk"
 ]`
 - `- `git push --force`
 - `rm -rf .venv`` / `- `git push --force`

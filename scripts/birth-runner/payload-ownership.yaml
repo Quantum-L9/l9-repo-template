@@ -30,6 +30,20 @@
 # what semantic product a born repository is comes from its resolved product
 # semantics upstream, never from the shape of its payload.
 #
+# EXECUTION RUNTIME. The template's own contract is Repository Execution V2
+# (`l9.repo-execution/v2`): a three-field `.l9/repo-workflow.json`, the
+# Core-generated `make-v1` facade `Makefile`, and a repository-owned `Repo.mk`.
+# Its runtime is Core-owned and never vendored, so nothing executable is bound
+# here any more (the V1 runtime — `tools/l9_repo/**`,
+# `tools/check_workflow_integrity.py`, `.l9/repo-workflow.schema.json`,
+# `.l9/runtime-provenance.yaml`, `MANIFEST.sha256`,
+# `requirements-repo-runtime.txt`, `scripts/regenerate_runtime_manifest.py` —
+# was retired from the template itself). `execution_runtime.bound` keeps only
+# what describes the template's contract and nothing else. They stay `chassis`
+# for classification. When an AUTHORITATIVE payload supplies its own contract it
+# has replaced what they describe, so every bound file the payload does not
+# itself supply is removed; an additive payload, or an authoritative one that
+# keeps the template's contract, inherits them unchanged.
 # PRECEDENCE: `product` is evaluated first. A path matching both lists is
 # product-owned (`docs/**` is chassis, `docs/examples/**` is product).
 # PATTERN GRAMMAR: exact repository-relative path or one trailing `/**` prefix.
@@ -58,6 +72,13 @@
     ".env.example"
   ],
 
+  "execution_runtime": {
+    "contract": ".l9/repo-workflow.json",
+    "bound": [
+      "docs/repository-execution-runtime.md"
+    ]
+  },
+
   "chassis": [
     ".coderabbit.yaml",
     ".cursor/**",
@@ -79,7 +100,6 @@
     "CLAUDE.md",
     "CONTRIBUTING.md",
     "LICENSE",
-    "MANIFEST.sha256",
     "Makefile",
     "README.md",
     "Repo.mk",
@@ -91,9 +111,7 @@
     "llms.txt",
     "plugin-config.yaml",
     "pyproject.toml",
-    "requirements-repo-runtime.txt",
     "scripts/**",
-    "tools/**",
     "uv.lock"
   ]
 }

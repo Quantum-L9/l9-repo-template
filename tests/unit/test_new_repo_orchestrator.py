@@ -608,8 +608,17 @@ class TestSessionScaffoldingIsNeverBorn:
         assert "/.mcp.json" in ignored
 
 
+# The organization's own answer for the factory class at the pinned .github
+# (policies/repo-classes.yml @ f585547): ownership, rendered Dependabot, labels,
+# the missing-only CodeRabbit config and SECURITY.md.
 FACTORY_CLASS_DESTINATIONS = frozenset(
-    {Path(".github/CODEOWNERS"), Path(".github/dependabot.yml"), Path(".github/labels.yml")}
+    {
+        Path(".coderabbit.yaml"),
+        Path(".github/CODEOWNERS"),
+        Path(".github/dependabot.yml"),
+        Path(".github/labels.yml"),
+        Path("SECURITY.md"),
+    }
 )
 
 
@@ -633,11 +642,13 @@ class TestOrgOwnedCopiesAreNotInherited:
         assert "def resolve_org_authority" in source
 
     @needs_owner_resolver
-    def test_the_factory_class_withholds_exactly_its_three_files(self) -> None:
+    def test_the_factory_class_withholds_exactly_its_org_destinations(self) -> None:
         """`non_constellation_python` behavior is preserved, now derived."""
         assert ORG_SRC is not None
         profile = new_repo.resolve_org_profile(ORG_SRC, new_repo.BIRTH_PROFILE_CLASS)
-        dests = new_repo.org_materialize_destinations(ORG_SRC, profile, "Quantum-L9/x")
+        dests = new_repo.org_materialize_destinations(
+            ORG_SRC, profile, "Quantum-L9/x", shape_root=REPO
+        )
         assert dests == FACTORY_CLASS_DESTINATIONS
         # The exclusion is about what a NEWBORN inherits. This repository is
         # governed by the same organization and keeps its own materialized copies.
@@ -650,10 +661,14 @@ class TestOrgOwnedCopiesAreNotInherited:
         factory carries DIFFERENT copies of."""
         assert ORG_SRC is not None
         profile = new_repo.resolve_org_profile(ORG_SRC, "default")
-        dests = new_repo.org_materialize_destinations(ORG_SRC, profile, "Quantum-L9/x")
-        assert {Path("CONTRIBUTING.md"), Path("SECURITY.md")} <= dests
+        dests = new_repo.org_materialize_destinations(
+            ORG_SRC, profile, "Quantum-L9/x", shape_root=REPO
+        )
+        assert Path("SECURITY.md") in dests
+        # CONTRIBUTING.md is INHERITED org-wide for `default` now, not materialized.
+        assert Path("CONTRIBUTING.md") not in dests
         assert FACTORY_CLASS_DESTINATIONS - {Path(".github/labels.yml")} <= dests
-        for rel in ("CONTRIBUTING.md", "SECURITY.md"):
+        for rel in ("SECURITY.md",):
             assert (REPO / rel).read_bytes() != (ORG_SRC / rel).read_bytes(), (
                 f"{rel}: the factory's copy must differ for this test to discriminate"
             )
@@ -666,17 +681,18 @@ class TestOrgOwnedCopiesAreNotInherited:
         assert ORG_SRC is not None
         slug = "Quantum-L9/default-born"
         profile = new_repo.resolve_org_profile(ORG_SRC, "default")
-        dests = new_repo.org_materialize_destinations(ORG_SRC, profile, slug)
+        dests = new_repo.org_materialize_destinations(ORG_SRC, profile, slug, shape_root=REPO)
 
         src = tmp_path / "template"
         src.mkdir()
-        (src / "CONTRIBUTING.md").write_text("# stale factory contributing\n", encoding="utf-8")
+        (src / ".github").mkdir()
+        (src / ".github" / "CODEOWNERS").write_text("* @stale-factory\n", encoding="utf-8")
         (src / "SECURITY.md").write_text("# stale factory security\n", encoding="utf-8")
         (src / "README.md").write_text("# t\n", encoding="utf-8")
         dest = tmp_path / "newborn"
         dest.mkdir()
         new_repo.copy_tree(src, dest, org_owned=dests)
-        assert not (dest / "CONTRIBUTING.md").exists()
+        assert not (dest / ".github" / "CODEOWNERS").exists()
         assert not (dest / "SECURITY.md").exists()
         assert (dest / "README.md").is_file()
 
@@ -688,15 +704,18 @@ class TestOrgOwnedCopiesAreNotInherited:
                 "hasPython": True,
                 "hasPackageJson": False,
                 "repository": slug,
+                "shapeRoot": str(REPO),
             },
         )
         written, kept = new_repo.materialize_org_payload(dest, payload)
         assert kept == []
-        assert {"CONTRIBUTING.md", "SECURITY.md"} <= set(written)
-        # CONTRIBUTING.md carries no repository placeholder: byte-for-byte the
-        # pinned source. SECURITY.md is the organization's own rendering of its
+        assert {".github/CODEOWNERS", "SECURITY.md"} <= set(written)
+        # CODEOWNERS carries no repository placeholder: byte-for-byte the pinned
+        # policies/CODEOWNERS. SECURITY.md is the organization's own rendering of its
         # source for this repository (advisory URLs rewritten by the builder).
-        assert (dest / "CONTRIBUTING.md").read_bytes() == (ORG_SRC / "CONTRIBUTING.md").read_bytes()
+        assert (dest / ".github" / "CODEOWNERS").read_bytes() == (
+            ORG_SRC / "policies" / "CODEOWNERS"
+        ).read_bytes()
         assert (dest / "SECURITY.md").read_text(encoding="utf-8") == payload["SECURITY.md"]
         assert "stale factory" not in (dest / "SECURITY.md").read_text(encoding="utf-8")
 
@@ -813,7 +832,9 @@ def _local_config(src: Path) -> object:
         work_dir=Path("/nonexistent"),
         payload=None,
         payload_contract=None,
-        template_src=Path("/nonexistent"),
+        # Real template root: resolving the class probes it for the shape of
+        # the per-repository files the organization renders (dependabot.yml).
+        template_src=REPO,
         org_profile_src=src,
         repo_class="non_constellation_python",
         remote=False,
@@ -1087,7 +1108,7 @@ class TestPayloadOwnershipContract:
             "Makefile",
             "Repo.mk",
             "LICENSE",
-            "tools/l9_repo/__main__.py",
+            ".l9/repo-workflow.json",
             "scripts/birth-runner/new_repo.py",
             "scripts/inventory_check.py",
             "scripts/render_cursor_rules.py",
@@ -1269,7 +1290,7 @@ class TestReconcileProductOwnership:
             "LICENSE",
             "docs/LIFECYCLE.md",
             "scripts/render_cursor_rules.py",
-            "tools/l9_repo/__main__.py",
+            ".l9/repo-workflow.json",
             ".l9/org-birth-profile.yaml",
         ):
             target = root / rel
@@ -1306,7 +1327,7 @@ class TestReconcileProductOwnership:
             "LICENSE",
             "docs/LIFECYCLE.md",
             "scripts/render_cursor_rules.py",
-            "tools/l9_repo/__main__.py",
+            ".l9/repo-workflow.json",
             ".l9/org-birth-profile.yaml",
         ):
             assert (dest / rel).is_file(), f"reconciliation removed chassis surface {rel}"
@@ -1963,3 +1984,183 @@ class TestProductBirthAdapterGate:
             and isinstance(node.slice, ast.Constant)
         }
         assert read == {"factory", "compiler"}, f"the PREPARE gate reads coordinates {sorted(read)}"
+
+
+class TestExecutionRuntimeRetirement:
+    """A payload that replaces the execution contract also replaces what describes it.
+
+    The template's own contract is Repository Execution V2: a three-field
+    `.l9/repo-workflow.json`, the Core-generated `make-v1` facade `Makefile`, and
+    a repository-owned `Repo.mk`. Its runtime is Core-owned, so nothing
+    executable is vendored; `execution_runtime.bound` names only the document
+    that describes the template's contract. Under an authoritative payload that
+    supplies its own contract that document is stale and is retired; anything
+    the payload itself ships is kept.
+    """
+
+    BOUND = ("docs/repository-execution-runtime.md",)
+    RETIRED_V1 = (
+        "tools/l9_repo/__main__.py",
+        "tools/l9_repo/Makefile.template",
+        "tools/check_workflow_integrity.py",
+        ".l9/repo-workflow.schema.json",
+        ".l9/runtime-provenance.yaml",
+        "MANIFEST.sha256",
+        "requirements-repo-runtime.txt",
+        "scripts/regenerate_runtime_manifest.py",
+    )
+
+    def _newborn(self, root: Path) -> Path:
+        for rel in (*self.BOUND, "docs/LIFECYCLE.md", "scripts/render_cursor_rules.py", "Makefile"):
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("template\n", encoding="utf-8")
+        return root
+
+    def test_template_declares_its_runtime(self) -> None:
+        runtime = new_repo.load_ownership(REPO)["execution_runtime"]
+        assert runtime["contract"] == ".l9/repo-workflow.json"
+        assert sorted(runtime["bound"]) == sorted(self.BOUND)
+        # Bound paths stay classified chassis: retirement is conditional.
+        doc = new_repo.load_ownership(REPO)
+        for rel in self.BOUND:
+            assert new_repo.match_pattern(doc["chassis"], rel) is not None, rel
+
+    def test_the_template_vendors_no_v1_runtime(self) -> None:
+        """The V1 runtime is retired from the template, not merely unlisted."""
+        doc = new_repo.load_ownership(REPO)
+        for rel in self.RETIRED_V1:
+            assert not (REPO / rel).exists(), f"retired V1 runtime file {rel} is back"
+            assert new_repo.match_pattern(doc["execution_runtime"]["bound"], rel) is None, rel
+        # Exact chassis entries for retired runtime files are gone too (glob
+        # prefixes such as `.l9/**` legitimately still cover their old paths).
+        for rel in ("MANIFEST.sha256", "requirements-repo-runtime.txt"):
+            assert rel not in doc["chassis"], rel
+        assert "tools/**" not in doc["chassis"]
+
+    def test_retired_when_the_payload_supplies_the_contract(self, tmp_path: Path) -> None:
+        dest = self._newborn(tmp_path / "dest")
+        payload = _repository_payload(tmp_path / "payload")
+        (payload / ".l9" / "repo-workflow.json").write_text('{"schema": "x"}\n', encoding="utf-8")
+        removed = new_repo.retire_execution_runtime(dest, payload, new_repo.load_ownership(REPO))
+        assert removed == ["docs/repository-execution-runtime.md"]
+        assert (dest / "docs/LIFECYCLE.md").is_file(), "unbound chassis is kept"
+        assert (dest / "scripts/render_cursor_rules.py").is_file(), "unbound chassis is kept"
+        assert (dest / "Makefile").is_file()
+
+    def test_a_payload_supplied_bound_file_is_kept(self, tmp_path: Path) -> None:
+        dest = self._newborn(tmp_path / "dest")
+        payload = _repository_payload(tmp_path / "payload")
+        (payload / ".l9" / "repo-workflow.json").write_text('{"schema": "x"}\n', encoding="utf-8")
+        supplied = payload / "docs" / "repository-execution-runtime.md"
+        supplied.parent.mkdir(parents=True, exist_ok=True)
+        supplied.write_text("payload-owned\n", encoding="utf-8")
+        assert new_repo.retire_execution_runtime(dest, payload, new_repo.load_ownership(REPO)) == []
+        assert (dest / "docs/repository-execution-runtime.md").is_file()
+
+    def test_kept_when_the_payload_does_not_supply_the_contract(self, tmp_path: Path) -> None:
+        dest = self._newborn(tmp_path / "dest")
+        payload = _repository_payload(tmp_path / "payload")
+        assert new_repo.retire_execution_runtime(dest, payload, new_repo.load_ownership(REPO)) == []
+        for rel in self.BOUND:
+            assert (dest / rel).is_file(), rel
+
+    @pytest.mark.parametrize(
+        "runtime",
+        [{}, {"contract": "", "bound": ["x"]}, {"contract": "c"}, {"contract": "c", "bound": []}],
+    )
+    def test_an_unusable_runtime_block_stops_the_birth(self, tmp_path: Path, runtime: dict) -> None:
+        doc = {"repository_shape": ["a"], "product": ["b"], "chassis": ["c"]}
+        doc["execution_runtime"] = runtime
+        path = tmp_path / new_repo.OWNERSHIP_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        with pytest.raises(new_repo.BirthError):
+            new_repo.load_ownership(tmp_path)
+
+
+_STUB_SEED_BUILDER = """
+exports.seedNeedsRepoShape = ({ categories, profile }) =>
+  (categories || (profile && profile.seed_categories) || []).includes('dependabot');
+exports.buildSeedPayload = ({ repoShape, profile }) => {
+  if (profile.seed_categories.includes('dependabot') && !repoShape) {
+    throw new Error('seed category dependabot requires repoShape');
+  }
+  return { shape: JSON.stringify(repoShape === undefined ? null : repoShape) };
+};
+"""
+_STUB_RENDER_DEPENDABOT = """
+exports.shapeOfDirectory = ({ fs, dir }) => ({ names: fs.readdirSync(dir).sort() });
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed on runner PATH")
+class TestSeedBuilderReceivesTheRepositoryShape:
+    """The organization renders per-repository files (`.github/dependabot.yml`)
+    from the consumer's root shape and refuses to default one. The factory hands
+    the builder a root; the shape is derived by the organization's OWN
+    `shapeOfDirectory`, and only when its own `seedNeedsRepoShape` says so.
+
+    The two exports are stubbed with their real names and argument shapes: what
+    is under test is the factory's glue, not the organization's renderer (which
+    `needs_owner_resolver` tests exercise against a real checkout)."""
+
+    def _checkout(self, root: Path) -> Path:
+        (root / "ops").mkdir(parents=True)
+        (root / "ops" / "build-seed-payload.js").write_text(_STUB_SEED_BUILDER, encoding="utf-8")
+        (root / "ops" / "render-dependabot.js").write_text(
+            _STUB_RENDER_DEPENDABOT, encoding="utf-8"
+        )
+        return root
+
+    def test_shape_is_derived_from_the_supplied_root(self, tmp_path: Path) -> None:
+        checkout = self._checkout(tmp_path / "org")
+        shape_root = tmp_path / "newborn"
+        shape_root.mkdir()
+        (shape_root / "uv.lock").write_text("", encoding="utf-8")
+        payload = new_repo._stages._run_seed_builder(
+            checkout,
+            {"profile": {"seed_categories": ["dependabot"]}, "shapeRoot": str(shape_root)},
+        )
+        assert json.loads(payload["shape"]) == {"names": ["uv.lock"]}
+
+    def test_no_shape_when_the_class_does_not_render_one(self, tmp_path: Path) -> None:
+        checkout = self._checkout(tmp_path / "org")
+        payload = new_repo._stages._run_seed_builder(
+            checkout, {"profile": {"seed_categories": ["codeowners"]}}
+        )
+        assert json.loads(payload["shape"]) is None
+
+    def test_a_missing_root_fails_closed(self, tmp_path: Path) -> None:
+        checkout = self._checkout(tmp_path / "org")
+        with pytest.raises(new_repo.BirthError, match="needs a repository root"):
+            new_repo._stages._run_seed_builder(
+                checkout, {"profile": {"seed_categories": ["dependabot"]}}
+            )
+
+
+class TestOrdinaryOffspringExecutionContract:
+    """An ordinary (non-payload) birth copies the template's V2 execution contract.
+
+    Assembly is `copy_tree(template_src, dest)`; with no payload nothing replaces
+    the execution surfaces, so what the template declares is what the newborn
+    receives. Core's repository verification admits only `l9.repo-execution/v2`
+    in required mode, so the copy must never carry the retired V1 contract.
+    """
+
+    def test_a_default_assembly_emits_the_v2_contract(self, tmp_path: Path) -> None:
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        assert new_repo.copy_tree(REPO, dest) > 0
+        contract = json.loads((dest / ".l9" / "repo-workflow.json").read_text(encoding="utf-8"))
+        assert contract == {
+            "schema": "l9.repo-execution/v2",
+            "facade": "make-v1",
+            "required_phases": ["setup", "validate", "check", "test"],
+        }
+        assert "schema_version" not in contract
+        assert (dest / "Makefile").read_bytes() == (REPO / "Makefile").read_bytes()
+        assert (dest / "Repo.mk").read_bytes() == (REPO / "Repo.mk").read_bytes()
+        for rel in TestExecutionRuntimeRetirement.RETIRED_V1:
+            assert not (dest / rel).exists(), f"V1 runtime {rel} reached the newborn"
+        assert not (dest / "tools").exists()

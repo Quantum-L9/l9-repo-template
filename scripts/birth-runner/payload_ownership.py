@@ -86,6 +86,21 @@ def load_ownership(template_src: Path) -> dict:
         value = doc.get(key)
         if not isinstance(value, list) or not value or not all(isinstance(x, str) for x in value):
             raise OwnershipContractError(f"{OWNERSHIP_PATH} has no usable {key!r} list")
+    runtime = doc.get("execution_runtime")
+    if runtime is not None:
+        bound = runtime.get("bound") if isinstance(runtime, dict) else None
+        contract = runtime.get("contract") if isinstance(runtime, dict) else None
+        if (
+            not isinstance(contract, str)
+            or not contract
+            or not isinstance(bound, list)
+            or not bound
+            or not all(isinstance(x, str) for x in bound)
+        ):
+            raise OwnershipContractError(
+                f"{OWNERSHIP_PATH} has an unusable 'execution_runtime' "
+                "(needs a 'contract' path and a non-empty 'bound' list)"
+            )
     return doc
 
 

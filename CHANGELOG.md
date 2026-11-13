@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Repository Execution V2. The template's own `.l9/repo-workflow.json` is the exact three-field `l9.repo-execution/v2` contract, the root `Makefile` is l9-ci-core's generated `make-v1` facade, and `Repo.mk` implements `repo-setup` / `repo-validate` / `repo-check` / `repo-test` (Core's repository verification refuses a V1 contract in required mode). The vendored V1 runtime is retired: `tools/l9_repo/**`, `tools/check_workflow_integrity.py`, `.l9/repo-workflow.schema.json`, `.l9/runtime-provenance.yaml`, `MANIFEST.sha256`, `requirements-repo-runtime.txt`, `scripts/regenerate_runtime_manifest.py`; V1-only verbs `doctor`, `change-policy`, `status`, `reconcile`, `push`, `pr` go with it, and `agent-check` / `clean` are `Repo.mk` targets. An ordinary birth now emits the V2 contract.
+
 ## [2.3.0] — 2026-10-09
 
 ### Changed
