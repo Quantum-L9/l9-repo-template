@@ -25,7 +25,7 @@ from typing import Any
 
 SCHEMA = "l9.repo-birth-status/v1"
 DEFAULT_ORG = "Quantum-L9"
-REQUIRED_WORKFLOW_URL_TOKEN = "/actions/required_workflows/"
+REQUIRED_WORKFLOW_URL_MARKER = "/actions/required_workflows/"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REQUIRED_WORKFLOW_EVENTS = frozenset({"pull_request", "merge_group"})
 CONTAINED_COMPARE_STATUSES = frozenset({"identical", "ahead"})
@@ -348,7 +348,7 @@ def is_required_core_run(run: Any, *, born_at: datetime) -> bool:
         return False
     if str(run.get("path") or "") != canonical_ci.CI_AUTHORITY_WORKFLOW:
         return False
-    if REQUIRED_WORKFLOW_URL_TOKEN not in str(run.get("workflow_url") or ""):
+    if REQUIRED_WORKFLOW_URL_MARKER not in str(run.get("workflow_url") or ""):
         return False
     head_sha = str(run.get("head_sha") or "")
     if not SHA_RE.fullmatch(head_sha):
