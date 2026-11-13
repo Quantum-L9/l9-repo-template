@@ -86,6 +86,13 @@ EXAMPLE_PRODUCT = (
     "observability/docker-compose.observability.yml",
 )
 
+# What describes the TEMPLATE's own execution contract (`execution_runtime.bound`
+# in payload-ownership.yaml; tests/unit/test_inventory_check.py holds that). An
+# authoritative payload that supplies its own `.l9/repo-workflow.json` has
+# replaced what these describe, and birth removes them; one that keeps the
+# template's contract keeps them. Either way they are not the newborn's to owe.
+TEMPLATE_EXECUTION_DOCS = ("docs/repository-execution-runtime.md",)
+
 # Cursor-Governance's documentation projection (skills/l9-update-agent-docs,
 # PROJECTION_FILENAME) owns the agent manifest name and writes `llm.txt`,
 # dropping `llms.txt` once it exists. Birth runs that projection in stage 4, so a
@@ -125,7 +132,6 @@ REQUIRED = (
     "docs/WHEN_TO_USE.md",
     "docs/VALIDATION.md",
     "docs/LIFECYCLE.md",
-    "docs/repository-execution-runtime.md",
     "docs/ops/REPO_BIRTH.md",
     "scripts/bootstrap_rename.py",
     "scripts/inventory_check.py",
@@ -232,6 +238,7 @@ def main() -> int:
     required = list(REQUIRED)
     if mode != "authoritative":
         required.extend(EXAMPLE_PRODUCT)
+        required.extend(TEMPLATE_EXECUTION_DOCS)
     for rel in required:
         if not (ROOT / rel).is_file():
             errors.append(f"missing required file: {rel}")
@@ -270,7 +277,10 @@ def main() -> int:
     repo_mk = ROOT / "Repo.mk"
     if repo_mk.is_file():
         content = repo_mk.read_text(encoding="utf-8")
-        if not re.search(r"^ci:", content, re.M):
+        # `make ci` is the template's own repository-local facade, not part of
+        # the V2 contract (whose leaves are checked below in every repository).
+        # A repository born from an authoritative payload owns its Repo.mk.
+        if mode != "authoritative" and not re.search(r"^ci:", content, re.M):
             errors.append(
                 "Repo.mk must define a ci target (make ci repository-local execution facade)"
             )

@@ -235,3 +235,41 @@ def test_a_newborn_needs_one_of_the_agent_manifest_names(tmp_path: Path) -> None
     proc = _run(root)
     assert proc.returncode == 1
     assert "missing required file: llms.txt or llm.txt" in proc.stderr
+
+
+def test_template_execution_docs_are_the_ownership_contracts_bound_files() -> None:
+    bound = _ownership()["execution_runtime"]["bound"]
+    assert sorted(_inventory_module().TEMPLATE_EXECUTION_DOCS) == sorted(bound)
+
+
+def test_authoritative_newborn_owns_its_repo_mk_and_execution_docs(tmp_path: Path) -> None:
+    """A product's own V2 Repo.mk needs the four leaves, not the template's `ci`."""
+    root = _authoritative_newborn(tmp_path)
+    for rel in _inventory_module().TEMPLATE_EXECUTION_DOCS:
+        (root / rel).unlink(missing_ok=True)
+    (root / "Repo.mk").write_text(
+        "repo-setup:\n\ttrue\nrepo-validate:\n\ttrue\nrepo-check:\n\ttrue\nrepo-test:\n\ttrue\n",
+        encoding="utf-8",
+    )
+    proc = _run(root)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+def test_v2_leaves_are_still_required_of_an_authoritative_newborn(tmp_path: Path) -> None:
+    root = _authoritative_newborn(tmp_path)
+    (root / "Repo.mk").write_text("repo-setup:\n\ttrue\n", encoding="utf-8")
+    proc = _run(root)
+    assert proc.returncode == 1
+    assert "missing Repository Execution V2 leaf repo-test" in proc.stderr
+
+
+def test_additive_newborn_still_owes_the_template_execution_contract(tmp_path: Path) -> None:
+    root = _authoritative_newborn(tmp_path)
+    _born(root, "additive")
+    (root / "Repo.mk").write_text(
+        "repo-setup:\n\ttrue\nrepo-validate:\n\ttrue\nrepo-check:\n\ttrue\nrepo-test:\n\ttrue\n",
+        encoding="utf-8",
+    )
+    proc = _run(root)
+    assert proc.returncode == 1
+    assert "Repo.mk must define a ci target" in proc.stderr
