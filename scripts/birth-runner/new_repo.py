@@ -295,6 +295,12 @@ def sanitize_git_config(root: Path) -> None:
     Hooks, ``core.fsmonitor``, credential helpers, aliases, includes, filters,
     and every other product-writable execution surface live in this file.
     Rewriting it is the boundary; checking individual keys is not.
+
+    Automatic maintenance is off as well. Git runs ``maintenance run --auto``
+    after commands that write objects and, by default, detaches it into the
+    background (``maintenance.autoDetach``). A detached child of the seal is a
+    live descendant when the PREPARE anchor is checked, so the trusted seal
+    must start no background work of its own.
     """
     git_dir = root / ".git"
     if not git_dir.is_dir():
@@ -310,7 +316,13 @@ def sanitize_git_config(root: Path) -> None:
         "\tbare = false\n"
         "\tlogallrefupdates = true\n"
         "\tfsmonitor = false\n"
-        f"\thooksPath = {os.devnull}\n",
+        f"\thooksPath = {os.devnull}\n"
+        "[maintenance]\n"
+        "\tauto = false\n"
+        "\tautoDetach = false\n"
+        "[gc]\n"
+        "\tauto = 0\n"
+        "\tautoDetach = false\n",
         encoding="utf-8",
     )
     worktree_config = git_dir / "config.worktree"

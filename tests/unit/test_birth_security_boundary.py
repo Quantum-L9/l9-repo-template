@@ -228,6 +228,33 @@ def test_git_config_sanitizer_disables_hooks_and_removes_hostile_local_config(
     assert not (git / "config.worktree").exists()
 
 
+def test_git_config_sanitizer_disables_background_maintenance(tmp_path: Path) -> None:
+    """The seal's own git commit must not detach auto-maintenance: a detached
+    child is a live descendant at the PREPARE anchor (git 2.56 on the runner)."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".git" / "config").write_text(
+        "[core]\n\trepositoryformatversion = 0\n[maintenance]\n\tauto = true\n"
+        "[gc]\n\tauto = 1\n\tautoDetach = true\n",
+        encoding="utf-8",
+    )
+    engine.sanitize_git_config(tmp_path)
+
+    def effective(key: str) -> str:
+        return subprocess.run(
+            ["git", "config", "--local", "--get", key],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=engine.trusted_git_env(),
+        ).stdout.strip()
+
+    assert effective("maintenance.auto") == "false"
+    assert effective("maintenance.autoDetach") == "false"
+    assert effective("gc.auto") == "0"
+    assert effective("gc.autoDetach") == "false"
+
+
 def test_git_config_sanitizer_refuses_gitfile_roots(tmp_path: Path) -> None:
     (tmp_path / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
     with pytest.raises(engine.BirthError, match="no .git directory"):
