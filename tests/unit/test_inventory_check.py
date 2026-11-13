@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -128,17 +129,23 @@ def _is_product(patterns: list[str], rel: str) -> bool:
     return False
 
 
-def _tracked_copy(dest: Path) -> Path:
-    listed = subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, check=True
-    ).stdout.decode("utf-8")
-    for rel in filter(None, listed.split("\0")):
-        source = REPO / rel
-        if not source.is_file():
-            continue
-        target = dest / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(source.read_bytes())
+_MACHINE_STATE = shutil.ignore_patterns(
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    "node_modules",
+    "*.egg-info",
+)
+
+
+def _tree_copy(dest: Path) -> Path:
+    """The working tree as files. Not `git ls-files`: this suite also runs inside a
+    newborn during stage 5, before the newborn's first commit exists."""
+    shutil.copytree(REPO, dest, ignore=_MACHINE_STATE, symlinks=True)
     return dest
 
 
@@ -161,11 +168,12 @@ def _born(root: Path, mode: str) -> None:
 def _authoritative_newborn(tmp_path: Path) -> Path:
     """The template tree as an authoritative birth leaves it: no example product,
     an organization-owned .coderabbit.yaml, governance's llm.txt."""
-    root = _tracked_copy(tmp_path / "newborn")
+    root = _tree_copy(tmp_path / "newborn")
     for rel in _inventory_module().EXAMPLE_PRODUCT:
-        (root / rel).unlink()
+        (root / rel).unlink(missing_ok=True)
     (root / ".coderabbit.yaml").write_text("language: en-US\n", encoding="utf-8")
-    (root / "llms.txt").rename(root / "llm.txt")
+    if (root / "llms.txt").is_file():  # a newborn already carries governance's name
+        (root / "llms.txt").replace(root / "llm.txt")
     (root / "README.md").write_text("# l9-state\n", encoding="utf-8")
     _born(root, "authoritative")
     return root
