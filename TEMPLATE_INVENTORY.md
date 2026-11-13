@@ -9,7 +9,7 @@ ProductKind, archetypes) are upstream inputs owned by `Quantum-L9/.github`
 
 | Source | SHA | Role |
 |--------|-----|------|
-| Quantum-L9/l9-ci-core | `l9_ci_core_harvest_revision` in `.l9/runtime-provenance.yaml` | `tools/l9_repo` vendored |
+| Quantum-L9/l9-ci-core | none — the `make-v1` facade is generated, never vendored | Repository Execution V2 runtime |
 | Quantum-L9/.github | recorded per birth in `.l9/org-birth-profile.yaml` (`org_policy_sha`) | repo-class resolver + seed payload builder, invoked at birth, never copied |
 
 Earlier DX harvests from retired sibling templates are history, not law: no
@@ -19,13 +19,13 @@ active surface delegates a product kind to them.
 
 | Path | Role | Classification | Source |
 |------|------|----------------|--------|
-| `Makefile` / `Repo.mk` / `tools/l9_repo/` | Core facade + product/gov wrappers | ALREADY_HAVE | l9-ci-core |
+| `Makefile` / `Repo.mk` / `.l9/repo-workflow.json` | Core V2 facade + repo leaves + product/gov wrappers | ALREADY_HAVE | l9-ci-core |
 | `pyproject.toml` / `uv.lock` | Python project contract + locked dependency graph | ALREADY_HAVE | repository |
 | `requirements.txt` | Dependency source of truth | REJECT_DUPLICATED_AUTHORITY | `pyproject.toml` + `uv.lock` own dependencies; export only when a downstream platform requires it |
 | `AGENTS.md` | Cross-agent repository operating law | ALREADY_HAVE | repository |
 | `CLAUDE.md` | Thin Claude-specific overlay delegating to `AGENTS.md` + `.l9/*` | ADD_CRITICAL | L9 agent-doc pattern |
 | `llms.txt` | Machine-readable discovery map into authoritative repo surfaces | ADD_CRITICAL | L9 repo pattern |
-| `bootstrap.sh` | Root setup facade into `tools.l9_repo setup`; no duplicate setup logic | ADD_CRITICAL | repository execution runtime |
+| `bootstrap.sh` | Root setup facade into `make setup`; no duplicate setup logic | ADD_CRITICAL | repository execution runtime |
 | `.gitattributes` | Deterministic text/EOL and binary classification | HARDEN | repository |
 | `.pre-commit-config.yaml` | Local mechanical pre-commit enforcement | HARDEN | repository |
 | `.semgrep/semgrep-rules.yaml` | High-signal generic Python static-security rules | HARDEN | repository |
@@ -78,7 +78,7 @@ What a born repository *is* comes from its resolved product semantics upstream.
 `Justfile`, and every organization-CI distribution path named in
 `scripts/inventory_check.py` `DENY_CI_DISTRIBUTION`.
 
-`tools/` allowed only for `tools/l9_repo/` + `tools/check_workflow_integrity.py`.
+`tools/` is denied: the retired V1 runtime was its only allowed content.
 
 ## Baseline hardening ownership
 

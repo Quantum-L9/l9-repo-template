@@ -50,7 +50,6 @@ SKIP_REL_PATHS = {
     "scripts/birth-runner/new_repo.py",
     "scripts/birth-runner/new_repo_legacy.py",
     "scripts/render_cursor_rules.py",
-    "MANIFEST.sha256",
     "docs/repository-execution-runtime.md",
 }
 

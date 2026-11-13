@@ -1662,16 +1662,17 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
 
     _run_governance_docs(cfg, receipt)
 
-    # The runtime checksum manifest belongs to the template's execution runtime.
-    # Where an authoritative payload replaced that runtime's contract, assembly
-    # retired both, and regenerating it would resurrect a V1 artifact the
-    # newborn's own contract does not define.
+    # The runtime checksum manifest belonged to the vendored V1 execution
+    # runtime. The template's own contract is Repository Execution V2, whose
+    # runtime is Core-owned, so an ordinary birth has no manifest to regenerate;
+    # neither does an authoritative payload that supplies its own contract.
+    # Regenerating one would resurrect a V1 artifact no V2 contract defines.
     if not (cfg.dest / "scripts/regenerate_runtime_manifest.py").is_file():
         receipt.record(
             "finalize.manifest",
             "manifest",
             "SKIP",
-            "template execution runtime retired — payload owns its execution contract",
+            "no V1 runtime manifest — Repository Execution V2 runtime is Core-owned",
         )
         return
     run([str(_venv_python(cfg.dest)), "scripts/regenerate_runtime_manifest.py"], cwd=cfg.dest)

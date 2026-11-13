@@ -20,7 +20,7 @@ alwaysApply: true
 
 - Repository-local CI orchestration — CI execution semantics belong to l9-ci-core
 - A second task runner beside `make` (Justfile)
-- Expanding `tools/` beyond `l9_repo` + `check_workflow_integrity.py`
+- Re-vendoring a repository-execution runtime under `tools/` (V2 runtime is Core-owned)
 - Hand-editing generated `.cursor/rules/*.mdc`
 
 ## Required habits

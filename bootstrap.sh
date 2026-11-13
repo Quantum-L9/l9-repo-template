@@ -4,9 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "bootstrap: python3 is required" >&2
-  exit 1
-fi
+for tool in python3 make; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "bootstrap: $tool is required" >&2
+    exit 1
+  fi
+done
 
-exec python3 -m tools.l9_repo --workspace "$ROOT" setup
+# Repository Execution V2: setup is the make-v1 facade phase (Repo.mk repo-setup).
+exec make -C "$ROOT" setup

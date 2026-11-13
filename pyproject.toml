@@ -36,7 +36,6 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["tools/l9_repo"]
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "I", "UP"]

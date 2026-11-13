@@ -11,8 +11,9 @@ upstream_owns:
   product_meaning: the product semantic owner of each born repository
   org_repo_class_taxonomy: Quantum-L9/.github policies/repo-classes.yml + ops/repo-class-profile.js
 core_runtime_owns:
-  - tools/l9_repo/ (vendored)
-  - .l9/repo-workflow.json contract shape
+  - Repository Execution V2 runtime (l9-ci-core; never vendored)
+  - .l9/repo-workflow.json contract shape (l9.repo-execution/v2)
+  - Makefile (generated make-v1 facade)
 ci_ownership:
   repository: local execution contract (.l9/repo-workflow.json + make ci)
   execution_semantics: Quantum-L9/l9-ci-core

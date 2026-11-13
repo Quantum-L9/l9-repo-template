@@ -140,6 +140,35 @@ def test_birth_passes(born: tuple[subprocess.CompletedProcess[str], Path]) -> No
     assert "BIRTH: PASS" in proc.stdout
 
 
+def test_an_ordinary_birth_carries_the_v2_execution_contract(
+    born: tuple[subprocess.CompletedProcess[str], Path],
+) -> None:
+    """A default (non-payload) newborn is born Repository Execution V2.
+
+    Core's repository verification admits only `l9.repo-execution/v2` in
+    required mode, so a newborn must never be born with the retired V1 contract.
+    """
+    _, dest = born
+    contract = json.loads((dest / ".l9" / "repo-workflow.json").read_text(encoding="utf-8"))
+    assert contract == {
+        "schema": "l9.repo-execution/v2",
+        "facade": "make-v1",
+        "required_phases": ["setup", "validate", "check", "test"],
+    }
+    assert (dest / "Makefile").read_bytes() == (REPO / "Makefile").read_bytes()
+    repo_mk = (dest / "Repo.mk").read_text(encoding="utf-8")
+    for leaf in ("repo-setup", "repo-validate", "repo-check", "repo-test"):
+        assert f"\n{leaf}:" in repo_mk, leaf
+    for retired in (
+        "tools",
+        ".l9/repo-workflow.schema.json",
+        ".l9/runtime-provenance.yaml",
+        "MANIFEST.sha256",
+        "requirements-repo-runtime.txt",
+    ):
+        assert not (dest / retired).exists(), f"V1 runtime {retired} reached the newborn"
+
+
 def test_every_stage_reports(born: tuple[subprocess.CompletedProcess[str], Path]) -> None:
     proc, _ = born
     for label in ("uv.lock generated", "org defaults", "forbid clean", "inventory", "lock"):
@@ -768,9 +797,8 @@ def test_the_birth_chassis_survives_an_authoritative_payload(
         "Makefile",
         "Repo.mk",
         "LICENSE",
-        "MANIFEST.sha256",
         "uv.lock",
-        "tools/l9_repo/__main__.py",
+        ".l9/repo-workflow.json",
         "scripts/birth-runner/new_repo.py",
         "scripts/birth-runner/payload-ownership.yaml",
         "scripts/render_cursor_rules.py",

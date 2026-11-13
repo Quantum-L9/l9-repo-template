@@ -52,8 +52,10 @@ This is a thin Claude-specific overlay. It does not replace or duplicate
 
 ## Protected behavior
 
-- Root `Makefile` must remain byte-identical to
-  `tools/l9_repo/Makefile.template`; do not hand-edit one without the other.
+- Root `Makefile` is the Core-generated `make-v1` facade of the
+  `l9.repo-execution/v2` contract; never hand-edit it, regenerate it with
+  l9-ci-core's `python3 -m tools.l9_repo --workspace <repo> reconcile`, and put
+  repository behavior in `Repo.mk` (`docs/repository-execution-runtime.md`).
 - Generated `.cursor/rules/*.mdc` files are renderer output; change templates or
   `plugin-config.yaml`, then render.
 - If dependency resolution changes, keep `pyproject.toml` and `uv.lock`
