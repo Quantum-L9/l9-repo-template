@@ -44,7 +44,7 @@ adapter_fixtures = _load(
 
 ENGINE_REPOSITORY = "Quantum-L9/l9-semantic-compiler-engine"
 PACKAGE = "l9-semantic-compiler"
-VERSION = "0.9.3"
+VERSION = "0.11.0"
 
 # The fixture engine's CLI: the real product-build signature, writing the manifest
 # that ships beside it. `--dirty-source` and `--crash` exist so the factory's
@@ -216,7 +216,7 @@ class TestThePin:
             {"revision": "abc"},
             {"repository": "engine"},
             {"version": ""},
-            {"version": " 0.9.3"},
+            {"version": " 0.11.0"},
             {"module": "l9-semantic-compiler"},
             {"source_dir": "../src"},
             {"source_dir": "."},

@@ -16,6 +16,9 @@ sys.modules[_SPEC.name] = front
 _SPEC.loader.exec_module(front)
 
 
+BUNDLE_SHA = "1" * 40
+
+
 def _intent(**overrides: str):
     values = {
         "repo": "IdeaOS",
@@ -28,6 +31,7 @@ def _intent(**overrides: str):
         "payload_repo": "Quantum-L9/IdeaOS-seed",
         "payload_ref": "abc123",
         "payload_subpath": "",
+        "payload_bundle_ref": BUNDLE_SHA,
         "payload_contract_path": "birth.payload.json",
         "factory_ref": "main",
     }
@@ -60,6 +64,7 @@ def test_optional_blank_fields_are_not_dispatched() -> None:
         governance_ref="",
         payload_repo="",
         payload_ref="",
+        payload_bundle_ref="",
         payload_contract_path="",
     )
     fields = dict(front.dispatch_fields(intent))
@@ -182,3 +187,39 @@ def test_the_front_door_does_not_interpret_adapter_artifacts() -> None:
         if isinstance(node, ast.Call)
     }
     assert not called & {"open", "read_text", "read_bytes", "load", "loads"}
+
+
+# ─── The bundle is not inside the snapshot it attests ───────────────────────
+
+
+def test_the_bundle_ref_is_dispatched_beside_the_snapshot_ref() -> None:
+    fields = dict(front.dispatch_fields(_intent(**ADAPTER_PATHS)))
+    assert fields["payload_ref"] == "abc123"
+    assert fields["payload_bundle_ref"] == BUNDLE_SHA
+    assert fields["payload_contract_path"] == "birth.payload.json"
+
+
+def test_a_compiled_payload_without_a_bundle_ref_is_refused() -> None:
+    with pytest.raises(front.BirthFrontDoorError, match="requires PAYLOAD_BUNDLE_REF"):
+        front.validate_intent(_intent(payload_bundle_ref=""))
+
+
+def test_a_bundle_ref_without_a_compiled_payload_is_refused() -> None:
+    with pytest.raises(front.BirthFrontDoorError, match="PAYLOAD_CONTRACT_PATH is required"):
+        front.validate_intent(_intent(payload_contract_path=""))
+
+
+@pytest.mark.parametrize("ref", ["main", "1" * 39, "A" * 40, "agent/x"])
+def test_the_bundle_ref_must_be_a_full_commit_sha(ref: str) -> None:
+    with pytest.raises(front.BirthFrontDoorError, match="full 40-character"):
+        front.validate_intent(_intent(payload_bundle_ref=ref))
+
+
+def test_the_bundle_ref_must_not_be_the_snapshot_itself() -> None:
+    with pytest.raises(front.BirthFrontDoorError, match="snapshot itself"):
+        front.validate_intent(_intent(payload_ref=BUNDLE_SHA))
+
+
+def test_the_make_target_forwards_the_bundle_ref() -> None:
+    text = (REPO / "Repo.mk").read_text(encoding="utf-8")
+    assert '--payload-bundle-ref "$(PAYLOAD_BUNDLE_REF)"' in text

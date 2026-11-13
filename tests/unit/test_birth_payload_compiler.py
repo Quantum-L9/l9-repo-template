@@ -48,7 +48,6 @@ SOURCE_FILES: dict[str, str] = {
     "src/ideaos/__init__.py": '"""IdeaOS."""\n',
     "src/ideaos/core.py": "VALUE = 1\n",
     "tests/test_core.py": "def test_value() -> None:\n    assert True\n",
-    "scripts/inventory_check.py": "print('ok')\n",
 }
 
 
@@ -239,8 +238,23 @@ class TestClassificationIsProposedFromEvidence:
             ".l9/architecture.yaml",
             "src",
             "tests",
-            "scripts/inventory_check.py",
         ]
+
+    def test_a_product_need_not_carry_template_internals(self, payload: dict) -> None:
+        """Authoritative rests on product-owned surfaces only.
+
+        `scripts/inventory_check.py` is template machinery. A real product
+        repository that does not copy it is still a standalone repository.
+        """
+        assert "scripts/inventory_check.py" not in SOURCE_FILES
+        assert payload["mode"] == "authoritative"
+
+    def test_a_product_without_its_own_architecture_stays_additive(self, tmp_path: Path) -> None:
+        """No architecture declaration of its own: it would inherit the template's identity."""
+        files = {k: v for k, v in SOURCE_FILES.items() if k != ".l9/architecture.yaml"}
+        document = compile_from(make_source(tmp_path / "src", files))
+        assert document["mode"] == "additive"
+        assert document["repository_shape"]["matched"] == ["pyproject.toml", "src", "tests"]
 
     def test_a_fragment_compiles_as_additive(self, tmp_path: Path) -> None:
         source = make_source(tmp_path / "src", {"src/ideaos/extra.py": "X = 1\n"})
@@ -648,6 +662,77 @@ class TestTheBirthEngineConsumesOnlyWhatItReproduced:
         new_repo._preflight_payload_contract(cfg, receipt)
         assert receipt.payload_contract
         assert receipt.manifest_sha256 == ""
+
+
+class TestTheBundleLivesOutsideTheSnapshotItAttests:
+    """A remote birth carries its bundle on a ref that is NOT the attested snapshot.
+
+    The compiled payload pins its source commit and tree. Committing it into
+    that same tree creates a commit it cannot name, so a bundle read from inside
+    the checkout is refused with the reason, before any hash is compared.
+    """
+
+    @staticmethod
+    def _write(document: dict, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(compiler.render_payload(document), encoding="utf-8")
+        return path
+
+    def test_a_bundle_outside_the_snapshot_reproduces(
+        self, source: Path, payload: dict, tmp_path: Path
+    ) -> None:
+        contract = self._write(payload, tmp_path / "bundle-ref" / "birth" / "payload.json")
+        report = verifier.verify_payload(payload, source, template_src=REPO, contract_path=contract)
+        assert report.result == "PASS", report.render()
+        location = next(c for c in report.checks if c.key == "payload.location")
+        assert location.status == "PASS"
+
+    def test_a_bundle_that_pins_a_different_source_is_refused(
+        self, source: Path, payload: dict, tmp_path: Path
+    ) -> None:
+        contract = self._write(payload, tmp_path / "bundle-ref" / "payload.json")
+        other = make_source(tmp_path / "other", dict(SOURCE_FILES, **{"OTHER.md": "x\n"}))
+        report = verifier.verify_payload(payload, other, template_src=REPO, contract_path=contract)
+        assert report.result == "FAIL"
+        assert "payload pins" in report.reason
+        assert "recompile" in report.reason
+
+    def test_a_bundle_committed_into_the_tree_it_pins_is_refused_with_the_reason(
+        self, source: Path, payload: dict
+    ) -> None:
+        contract = self._write(payload, source / "birth" / "birth-payload.json")
+        _commit(source, "birth/birth-payload.json", message="commit the bundle")
+        report = verifier.verify_payload(payload, source, template_src=REPO, contract_path=contract)
+        assert report.result == "FAIL"
+        location = next(c for c in report.checks if c.key == "payload.location")
+        assert location.status == "FAIL"
+        assert "inside the source checkout it attests" in location.detail
+        assert "payload_bundle_ref" in location.detail
+
+    def test_the_whole_checkout_counts_not_only_the_payload_subpath(self, tmp_path: Path) -> None:
+        """`tree_sha` is the checkout's tree, so a sibling directory is still inside."""
+        checkout = make_source(
+            tmp_path / "mono", {f"product/{k}": v for k, v in SOURCE_FILES.items()}
+        )
+        document = compile_from(checkout / "product")
+        contract = self._write(document, checkout / "bundles" / "payload.json")
+        assert verifier.bundle_inside_snapshot(contract, checkout / "product") == checkout.resolve()
+
+    def test_the_engine_refuses_an_inside_contract_before_assembly(
+        self, source: Path, payload: dict, tmp_path: Path
+    ) -> None:
+        contract = self._write(payload, source / "birth" / "birth-payload.json")
+        _commit(source, "birth/birth-payload.json", message="commit the bundle")
+        cfg = TestTheBirthEngineConsumesOnlyWhatItReproduced._config(tmp_path, source, contract)
+        with pytest.raises(new_repo.BirthError, match="inside the source checkout it attests"):
+            new_repo._preflight_payload_contract(cfg, new_repo.BirthReceipt())
+
+    def test_the_command_line_checks_where_the_payload_was_read_from(
+        self, source: Path, payload: dict
+    ) -> None:
+        contract = self._write(payload, source / "birth" / "birth-payload.json")
+        _commit(source, "birth/birth-payload.json", message="commit the bundle")
+        assert verifier.main(["--payload", str(contract), "--source", str(source)]) == 1
 
 
 class TestTheOverlayWritesTheBytesTheManifestAuthorized:

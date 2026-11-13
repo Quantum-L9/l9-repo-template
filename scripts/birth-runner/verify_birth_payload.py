@@ -120,6 +120,49 @@ class Report:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def bundle_inside_snapshot(artifact: Path, source: Path) -> Path | None:
+    """The source checkout an artifact lies inside, or None when it lies outside.
+
+    A birth bundle (compiled payload, product-birth binding, ProductManifest)
+    attests a source snapshot: the payload and binding pin its exact commit and
+    tree. A bundle committed INTO that snapshot can never pin it — committing
+    the bundle creates a new commit the bundle does not name — so a bundle read
+    from inside the checkout is either stale by construction or about to make
+    the snapshot dirty. The whole checkout counts, not only the payload subpath:
+    `tree_sha` is the checkout's tree. Outside means outside the checkout.
+    """
+    try:
+        top = Path(prov.git(source, "rev-parse", "--show-toplevel").strip()).resolve()
+    except prov.ProvenanceError:
+        return None  # not a checkout: the snapshot check refuses it on its own terms
+    resolved = artifact.resolve()
+    return top if resolved == top or top in resolved.parents else None
+
+
+def inside_snapshot_reason(label: str, artifact: Path, checkout: Path) -> str:
+    return (
+        f"the {label} {artifact} is read from inside the source checkout it attests "
+        f"({checkout}) — a bundle committed into the snapshot it pins can never name that "
+        "snapshot's own commit. Package it outside the source "
+        "(package_birth_handoff.py --out-dir) and, for a remote birth, commit it on a "
+        "separate ref of the payload repository and dispatch with payload_bundle_ref"
+    )
+
+
+def _check_location(contract_path: Path | None, source: Path, report: Report) -> None:
+    if contract_path is None:
+        report.record("payload.location", "bundle location", "SKIP", "no contract path given")
+        return
+    checkout = bundle_inside_snapshot(contract_path, source)
+    report.ok(
+        "payload.location",
+        "bundle location",
+        checkout is None,
+        "outside the source checkout",
+        inside_snapshot_reason("compiled payload", contract_path, checkout or source),
+    )
+
+
 def _check_revision(document: dict, source: Path, report: Report) -> None:
     """The snapshot must still be the snapshot that was compiled.
 
@@ -267,8 +310,13 @@ def verify_payload(
     *,
     template_src: Path,
     pkg: str | None = None,
+    contract_path: Path | None = None,
 ) -> Report:
-    """Reproduce the compiled payload against the source tree, here and now."""
+    """Reproduce the compiled payload against the source tree, here and now.
+
+    `contract_path`, when given, is where the document was read from; it must
+    lie outside the source checkout the document attests.
+    """
     report = Report()
     source = source.resolve()
     declared_source = document.get("source")
@@ -292,6 +340,7 @@ def verify_payload(
         return report
     report.record("payload.snapshot", "source snapshot", "PASS", "clean git worktree")
 
+    _check_location(contract_path, source, report)
     _check_revision(document, source, report)
     _check_manifest(document, source, report)
     _check_engine_paths(document, report)
@@ -333,6 +382,7 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.source).expanduser(),
         template_src=Path(args.template_src).expanduser().resolve(),
         pkg=args.pkg,
+        contract_path=Path(args.payload).expanduser().resolve(),
     )
     print(json.dumps(report.to_dict(), indent=2) if args.json else report.render())
     return 1 if report.failed else 0

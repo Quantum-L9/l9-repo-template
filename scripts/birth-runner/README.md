@@ -23,9 +23,15 @@ make birth \
   PKG=idea_runtime \
   DESC="Idea runtime" \
   PAYLOAD_REPO=Quantum-L9/idea-runtime-source \
-  PAYLOAD_REF=<immutable-or-approved-ref> \
+  PAYLOAD_REF=<snapshot commit> \
+  PAYLOAD_BUNDLE_REF=<full SHA of the commit carrying the bundle> \
   PAYLOAD_CONTRACT_PATH=path/to/birth.payload.json
 ```
+
+The compiled payload pins the `PAYLOAD_REF` snapshot, so it is never committed
+inside it: commit the bundle on a separate commit of the same repository and
+name that commit in `PAYLOAD_BUNDLE_REF`. Every bundle path is read from that
+checkout.
 
 Optional dispatch inputs are exposed as Make variables:
 
@@ -38,6 +44,7 @@ Optional dispatch inputs are exposed as Make variables:
 | `PAYLOAD_REPO` | `payload_repo` |
 | `PAYLOAD_REF` | `payload_ref` |
 | `PAYLOAD_SUBPATH` | `payload_subpath` |
+| `PAYLOAD_BUNDLE_REF` | `payload_bundle_ref` (full commit SHA; required with `PAYLOAD_CONTRACT_PATH`) |
 | `PAYLOAD_CONTRACT_PATH` | `payload_contract_path` |
 | `PRODUCT_BIRTH_BINDING_PATH` | `product_birth_binding_path` (compiler-backed birth, with `PRODUCT_MANIFEST_PATH`) |
 | `PRODUCT_MANIFEST_PATH` | `product_manifest_path` |

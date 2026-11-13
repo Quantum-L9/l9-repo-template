@@ -221,6 +221,7 @@ def prepare(args: argparse.Namespace) -> int:
         "payload_repository": os.environ.get("L9_BIRTH_PAYLOAD_REPOSITORY", ""),
         "payload_requested_ref": os.environ.get("L9_BIRTH_PAYLOAD_REQUESTED_REF", ""),
         "payload_resolved_sha": os.environ.get("L9_BIRTH_PAYLOAD_RESOLVED_SHA", ""),
+        "payload_bundle_sha": os.environ.get("L9_BIRTH_PAYLOAD_BUNDLE_SHA", ""),
     }
     handoff: dict[str, Any] = {
         "schema": "l9.repo-birth-handoff/v1",

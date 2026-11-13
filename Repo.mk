@@ -144,7 +144,7 @@ obs-ps: ## Show optional local obs stack status
 # remains the direct/debug compatibility primitive and must not become the mobile
 # production entrypoint.
 
-birth: ## Dispatch secure factory birth (REPO= PKG= DESC= [VISIBILITY=private|public] [PAYLOAD_REPO= PAYLOAD_REF=])
+birth: ## Dispatch secure factory birth (REPO= PKG= DESC= [VISIBILITY=private|public] [PAYLOAD_REPO= PAYLOAD_REF= [PAYLOAD_BUNDLE_REF= PAYLOAD_CONTRACT_PATH=]])
 	@test -n "$(REPO)" || (echo "usage: make birth REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD_REPO=Quantum-L9/repo PAYLOAD_REF=<ref>]" >&2; exit 2)
 	@test -n "$(PKG)"  || (echo "usage: make birth REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD_REPO=Quantum-L9/repo PAYLOAD_REF=<ref>]" >&2; exit 2)
 	@test -n "$(DESC)" || (echo "usage: make birth REPO=<name> PKG=<pkg> DESC=<text> [PAYLOAD_REPO=Quantum-L9/repo PAYLOAD_REF=<ref>]" >&2; exit 2)
@@ -160,6 +160,7 @@ birth: ## Dispatch secure factory birth (REPO= PKG= DESC= [VISIBILITY=private|pu
 		$(if $(PAYLOAD_REPO),--payload-repo "$(PAYLOAD_REPO)",) \
 		$(if $(PAYLOAD_REF),--payload-ref "$(PAYLOAD_REF)",) \
 		$(if $(PAYLOAD_SUBPATH),--payload-subpath "$(PAYLOAD_SUBPATH)",) \
+		$(if $(PAYLOAD_BUNDLE_REF),--payload-bundle-ref "$(PAYLOAD_BUNDLE_REF)",) \
 		$(if $(PAYLOAD_CONTRACT_PATH),--payload-contract-path "$(PAYLOAD_CONTRACT_PATH)",) \
 		$(if $(PRODUCT_BIRTH_BINDING_PATH),--product-birth-binding-path "$(PRODUCT_BIRTH_BINDING_PATH)",) \
 		$(if $(PRODUCT_MANIFEST_PATH),--product-manifest-path "$(PRODUCT_MANIFEST_PATH)",)

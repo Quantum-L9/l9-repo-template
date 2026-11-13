@@ -1001,6 +1001,7 @@ def _preflight_payload_contract(cfg: BirthConfig, receipt: BirthReceipt) -> None
         cfg.payload,
         template_src=cfg.template_src,
         pkg=cfg.pkg,
+        contract_path=cfg.payload_contract,
     )
     if report.failed:
         # No fallback to a naked-directory overlay. An invalid compiled payload
@@ -1077,6 +1078,16 @@ def _preflight_product_birth_adapter(cfg: BirthConfig, receipt: BirthReceipt) ->
             "the compiled payload was not reproduced against its source before the "
             "product-birth adapter was reached — refusing to admit an unverified payload"
         )
+
+    # The bundle attests the snapshot, so it is never read from inside it
+    # (`_preflight_payload_contract` already refused an inside contract).
+    for label, path in (
+        ("product-birth binding", binding_path),
+        ("product manifest", manifest_path),
+    ):
+        checkout = payload_verifier.bundle_inside_snapshot(path, cfg.payload)
+        if checkout is not None:
+            raise BirthError(payload_verifier.inside_snapshot_reason(label, path, checkout))
 
     try:
         binding = birth_adapter.load_binding(binding_path)
