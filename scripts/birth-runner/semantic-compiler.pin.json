@@ -2,9 +2,9 @@
   "schema": "l9.semantic-compiler-pin/v1",
   "description": "The one semantic-compiler engine this factory admits for compiler-backed birth. PREPARE and the packager run its product-build capability from a checkout proven to be exactly this revision, and refuse any other. Moving the pin is a factory change reviewed like any other; it is never read from a binding, a payload, or an operator flag.",
   "repository": "Quantum-L9/l9-semantic-compiler-engine",
-  "revision": "87db45cd8d772b777c78448d0b2809a6978a0df4",
+  "revision": "814edc74b7b4cd1da2abd7e4b05ee466a6b0890d",
   "package": "l9-semantic-compiler",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "module": "l9_semantic_compiler",
   "source_dir": "src",
   "capability": "product-build"

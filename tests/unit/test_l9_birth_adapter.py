@@ -55,7 +55,7 @@ SOURCE = {"repository": "Quantum-L9/IdeaOS", "revision": REVISION, "tree_sha": T
 FACTORY = {"repository": "Quantum-L9/l9-repo-template", "revision": FACTORY_REVISION}
 TOPOLOGY = {"ref": "l9.product-topology/ideaos@1", "digest": "sha256:" + "1" * 64}
 MANIFEST_DIGEST = "sha256:" + "2" * 64
-COMPILER_VERSION = "0.10.0"
+COMPILER_VERSION = "0.11.0"
 INPUTS = {
     "topology": "product-topology.yaml",
     "repository_spec": "repository-spec.yaml",
@@ -541,7 +541,7 @@ class TestTheCompilerCoordinateMustAgree:
             {"revision": "main"},
             {"revision": ENGINE_REVISION[:12]},
             {"version": ""},
-            {"version": " 0.10.0"},
+            {"version": " 0.11.0"},
         ],
     )
     def test_a_malformed_engine_coordinate_is_a_malformed_binding(
