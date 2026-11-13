@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -22,10 +26,43 @@ def _make(*args: str, env: dict[str, str] | None = None) -> subprocess.Completed
     )
 
 
-def test_makefile_matches_template() -> None:
-    makefile = (REPO / "Makefile").read_bytes()
-    template = (REPO / "tools" / "l9_repo" / "Makefile.template").read_bytes()
-    assert makefile == template
+V2_CONTRACT = {
+    "schema": "l9.repo-execution/v2",
+    "facade": "make-v1",
+    "required_phases": ["setup", "validate", "check", "test"],
+}
+
+
+def test_contract_is_repository_execution_v2() -> None:
+    contract = json.loads((REPO / ".l9" / "repo-workflow.json").read_text(encoding="utf-8"))
+    assert contract == V2_CONTRACT
+
+
+def test_makefile_is_the_generated_make_v1_facade() -> None:
+    """The root Makefile is Core's released make-v1 facade, byte for byte.
+
+    `tests/fixtures/birth_v2_payload/Makefile.fixture` is a verbatim copy of
+    Core's `tools/l9_repo/facades/make-v1.mk`; Core's repository verification
+    re-proves the same bytes against its own pinned facade in CI.
+    """
+    facade = (REPO / "tests" / "fixtures" / "birth_v2_payload" / "Makefile.fixture").read_bytes()
+    assert (REPO / "Makefile").read_bytes() == facade
+
+
+@pytest.mark.parametrize("phase", ["setup", "validate", "check", "test"])
+def test_each_phase_routes_to_its_repo_leaf(phase: str) -> None:
+    text = (REPO / "Repo.mk").read_text(encoding="utf-8")
+    assert re.search(rf"^repo-{phase}[ \t]*:", text, re.M), f"missing repo-{phase}"
+    assert not re.search(rf"^{phase}[ \t]*:(?!=)", text, re.M), f"Repo.mk redefines {phase}"
+    proc = _make("-n", phase)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_agent_check_runs_the_phases_and_proves_non_mutation() -> None:
+    proc = _make("-n", "agent-check")
+    assert proc.returncode == 0, proc.stderr
+    assert "validate check test" in proc.stdout
+    assert "git status --porcelain" in proc.stdout
 
 
 def test_help_lists_product_and_facade() -> None:
@@ -36,7 +73,9 @@ def test_help_lists_product_and_facade() -> None:
     assert "hygiene-check" in out
     assert "pr-check" in out
     assert "gov-pr-check" in out
-    assert "agent-check" in out or "Common targets" in out
+    assert "agent-check" in out
+    for phase in ("setup", "validate", "check", "test"):
+        assert phase in out
 
 
 def test_repo_mk_gov_wrappers_use_ws() -> None:

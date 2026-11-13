@@ -14,6 +14,7 @@ duplicated chassis configuration.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -47,12 +48,28 @@ DENY_CI_DISTRIBUTION = (
     ".github/codeql/codeql-config.yml",
 )
 
-TOOLS_ALLOW = frozenset({"l9_repo", "check_workflow_integrity.py"})
+# Repository Execution V2 (l9.repo-execution/v2): the execution runtime is
+# Core-owned and never vendored. `tools/` was only ever the vendored V1 runtime,
+# so it must not reappear.
+V2_CONTRACT = {
+    "schema": "l9.repo-execution/v2",
+    "facade": "make-v1",
+    "required_phases": ["setup", "validate", "check", "test"],
+}
+FACADE_HEADER = "# GENERATED repository execution facade: make-v1. DO NOT EDIT."
+FACADE_VERBS = ("help", "setup", "validate", "check", "test")
+V2_LEAVES = ("repo-setup", "repo-validate", "repo-check", "repo-test")
+RETIRED_V1_RUNTIME = (
+    "tools",
+    ".l9/repo-workflow.schema.json",
+    ".l9/runtime-provenance.yaml",
+    "MANIFEST.sha256",
+    "requirements-repo-runtime.txt",
+    "scripts/regenerate_runtime_manifest.py",
+)
 
 REQUIRED = (
-    ".l9/runtime-provenance.yaml",
     ".l9/repo-workflow.json",
-    ".l9/repo-workflow.schema.json",
     ".l9/architecture.yaml",
     ".l9/ownership.yaml",
     ".l9/org-birth-profile.yaml",
@@ -70,8 +87,6 @@ REQUIRED = (
     "Repo.mk",
     "bootstrap.sh",
     "llms.txt",
-    "MANIFEST.sha256",
-    "requirements-repo-runtime.txt",
     "LICENSE",
     "README.md",
     "AGENTS.md",
@@ -97,7 +112,6 @@ REQUIRED = (
     "scripts/reconcile_plugin_config.py",
     "scripts/wait_for_http.py",
     "scripts/preflight_local_env.py",
-    "scripts/regenerate_runtime_manifest.py",
     "scripts/birth-runner/README.md",
     "scripts/birth-runner/new_repo.py",
     "scripts/birth-runner/birth_provenance.py",
@@ -117,9 +131,6 @@ REQUIRED = (
     "scripts/birth-runner/01_preflight.sh",
     "scripts/birth-runner/02_bootstrap.sh",
     "scripts/birth-runner/03_verify.sh",
-    "tools/l9_repo/Makefile.template",
-    "tools/l9_repo/__main__.py",
-    "tools/check_workflow_integrity.py",
     "plugin-config.yaml",
     ".semgrep/semgrep-rules.yaml",
     "observability/docker-compose.observability.yml",
@@ -141,7 +152,7 @@ MENTION_CHECKS = (
     ("AGENTS.md", (".l9/architecture.yaml", ".l9/ownership.yaml")),
     ("CLAUDE.md", ("AGENTS.md", ".l9/architecture.yaml", ".l9/org-birth-profile.yaml")),
     ("llms.txt", ("AGENTS.md", "CLAUDE.md", ".l9/architecture.yaml", "bootstrap.sh")),
-    ("bootstrap.sh", ("python3 -m tools.l9_repo", "setup")),
+    ("bootstrap.sh", ("make", "setup")),
     (".gitleaks.toml", ("[extend]", "useDefault = true")),
     (".coderabbit.yaml", ("AGENTS.md", ".l9/architecture.yaml", ".l9/ownership.yaml")),
 )
@@ -158,16 +169,12 @@ def main() -> int:
                 f"repository-local CI/control surface present: {name} — "
                 "CI execution belongs to l9-ci-core / central targeting"
             )
-    tools = ROOT / "tools"
-    if tools.exists():
-        if not tools.is_dir():
-            errors.append("tools must be a directory when present")
-        else:
-            for child in sorted(tools.iterdir()):
-                if child.name in {"__pycache__", ".DS_Store"}:
-                    continue
-                if child.name not in TOOLS_ALLOW:
-                    errors.append(f"deny tools entry (not runtime surface): tools/{child.name}")
+    for name in RETIRED_V1_RUNTIME:
+        if (ROOT / name).exists():
+            errors.append(
+                f"retired V1 execution runtime present: {name} — the repository "
+                "execution contract is l9.repo-execution/v2 and its runtime is Core-owned"
+            )
     for rel in REQUIRED:
         if not (ROOT / rel).is_file():
             errors.append(f"missing required file: {rel}")
@@ -188,11 +195,18 @@ def main() -> int:
                 ".l9/org-birth-profile.yaml declares no parseable `profile:` — "
                 "Quantum-L9/.github resolves an unreadable marker to the default class"
             )
-    provenance = ROOT / ".l9" / "runtime-provenance.yaml"
-    if provenance.is_file():
-        text = provenance.read_text(encoding="utf-8")
-        if "l9_ci_core_harvest_revision" not in text:
-            errors.append(".l9/runtime-provenance.yaml missing l9_ci_core_harvest_revision")
+    contract = ROOT / ".l9" / "repo-workflow.json"
+    if contract.is_file():
+        try:
+            declared = json.loads(contract.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            errors.append(f".l9/repo-workflow.json is not valid JSON: {error}")
+        else:
+            if declared != V2_CONTRACT:
+                errors.append(
+                    ".l9/repo-workflow.json must be exactly the three-field "
+                    "l9.repo-execution/v2 contract"
+                )
     repo_mk = ROOT / "Repo.mk"
     if repo_mk.is_file():
         content = repo_mk.read_text(encoding="utf-8")
@@ -200,11 +214,22 @@ def main() -> int:
             errors.append(
                 "Repo.mk must define a ci target (make ci repository-local execution facade)"
             )
+        for verb in FACADE_VERBS:
+            if re.search(rf"^{verb}[ \t]*::?(?!=)", content, re.M):
+                errors.append(f"Repo.mk redefines facade target {verb!r}; implement repo-{verb}")
+        for leaf in V2_LEAVES:
+            if not re.search(rf"^{leaf}[ \t]*:", content, re.M):
+                errors.append(f"Repo.mk is missing Repository Execution V2 leaf {leaf}")
     makefile = ROOT / "Makefile"
-    template = ROOT / "tools" / "l9_repo" / "Makefile.template"
-    if makefile.is_file() and template.is_file():
-        if makefile.read_bytes() != template.read_bytes():
-            errors.append("Makefile must be byte-identical to tools/l9_repo/Makefile.template")
+    if makefile.is_file():
+        # Byte-exactness against the released facade is Core's check
+        # (run-repository-verification); this only catches a hand-written runner.
+        lines = makefile.read_text(encoding="utf-8").splitlines()
+        if not lines or lines[0] != FACADE_HEADER or "include Repo.mk" not in lines:
+            errors.append(
+                "Makefile must be the Core-generated make-v1 facade "
+                "(python3 -m tools.l9_repo --workspace <repo> reconcile from l9-ci-core)"
+            )
     for rel, needles in MENTION_CHECKS:
         path = ROOT / rel
         if not path.is_file():

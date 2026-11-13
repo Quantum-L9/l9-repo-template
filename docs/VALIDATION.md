@@ -16,10 +16,10 @@ What green means for the L9 repository birth factory chassis.
 | Tests | `make test` | Unit + integration |
 | Canonical CI binding | `make new-repo` stage 6 | A newborn ships no CI workflow (correct); a binding to a non-canonical authority fails closed |
 | Product | `make verify` / `make pr-check` | Full local ladder (`OPEN_PR=0`) |
-| Core facade | `make agent-check` | Vendored `tools.l9_repo` completion proof |
+| Core facade | `make agent-check` | V2 phases `validate check test` + non-mutation proof |
 | Governance | `make gov-pr-check` | Cursor-Governance against `WS=$(pwd)` when wired |
 
-The root `bootstrap.sh` delegates to the existing `tools.l9_repo setup` command;
+The root `bootstrap.sh` delegates to the facade's `make setup` phase;
 it does not create a second bootstrap implementation. Repo-local security
 configuration does not imply repo-local CI ownership.
 

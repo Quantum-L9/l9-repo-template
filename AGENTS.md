@@ -40,7 +40,7 @@ repository is born. It does not own **what** semantic product is being born.
 - Hand-editing generated `.cursor/rules/*.mdc`
 - Copying Cursor-Governance Makefile/ops into this repo
 - Requiring `make obs-up` for verify/CI
-- Editing root `Makefile` by hand — must match `tools/l9_repo/Makefile.template`
+- Editing root `Makefile` by hand — it is the Core-generated `make-v1` facade (Repository Execution V2; regenerate with Core's `tools.l9_repo reconcile`)
 
 ## When to use
 
@@ -76,7 +76,9 @@ make -C "$HOME/.cursor-governance" pr-check WS="$(pwd)"
 ## CI ownership boundary
 
 - Repository owns deterministic local verification: `make verify` / `make ci`
-  (inventory, hygiene, rules, lint, typecheck, pytest) via `.l9/repo-workflow.json`.
+  (inventory, hygiene, rules, lint, typecheck, pytest); Core runs the
+  `l9.repo-execution/v2` contract in `.l9/repo-workflow.json` as
+  `make setup validate check test` (`docs/repository-execution-runtime.md`).
 - l9-ci-core owns CI execution semantics (future invocation through the
   repository execution contract).
 - l9-ci-control-plane owns organization CI targeting, versioning, and

@@ -2,8 +2,8 @@
 template: .cursor/rules/templates/l9-agents.mdc.template
 template_sha256: 741e60b0f0073d06e78fc59136e9724f4149c31d8cdd8df700d5b1bd54bd0a24
 config: plugin-config.yaml
-config_sha256: 1d1b5252725a52b75310d810fe98d0493fe7754efe9d747318e5f275590e7b19
-render_id: 1f087c9796728827553f96ed247ba6517f35822a2103da49c4a935c9bf837ee1
+config_sha256: aec170b171a011be3c483549119582e0245a14318ddcd222c67cadf12d152bad
+render_id: e6c222174ab97f9a45e06043c2fda63b6f989759288472b1a173091f1a8660f3
 /L9_RENDERED -->
 ---
 description: "l9-repo-template autonomous agent guardrails — generated from domain cartridge"
@@ -27,12 +27,12 @@ alwaysApply: false
 - Any protected path:
 - `uv.lock`
 - `pyproject.toml`
-- `.l9/runtime-provenance.yaml`
+- `.l9/repo-workflow.json`
 - `scripts/bootstrap_rename.py`
 - `scripts/inventory_check.py`
 - `scripts/repo_hygiene_audit.py`
 - `Makefile`
-- `tools/l9_repo/**`
+- `Repo.mk`
 
 - Any high-risk command:
 - `git push --force`

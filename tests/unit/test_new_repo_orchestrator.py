@@ -1108,7 +1108,7 @@ class TestPayloadOwnershipContract:
             "Makefile",
             "Repo.mk",
             "LICENSE",
-            "tools/l9_repo/__main__.py",
+            ".l9/repo-workflow.json",
             "scripts/birth-runner/new_repo.py",
             "scripts/inventory_check.py",
             "scripts/render_cursor_rules.py",
@@ -1290,7 +1290,7 @@ class TestReconcileProductOwnership:
             "LICENSE",
             "docs/LIFECYCLE.md",
             "scripts/render_cursor_rules.py",
-            "tools/l9_repo/__main__.py",
+            ".l9/repo-workflow.json",
             ".l9/org-birth-profile.yaml",
         ):
             target = root / rel
@@ -1327,7 +1327,7 @@ class TestReconcileProductOwnership:
             "LICENSE",
             "docs/LIFECYCLE.md",
             "scripts/render_cursor_rules.py",
-            "tools/l9_repo/__main__.py",
+            ".l9/repo-workflow.json",
             ".l9/org-birth-profile.yaml",
         ):
             assert (dest / rel).is_file(), f"reconciliation removed chassis surface {rel}"
@@ -1987,18 +1987,31 @@ class TestProductBirthAdapterGate:
 
 
 class TestExecutionRuntimeRetirement:
-    """A payload that replaces the execution contract also replaces its runtime.
+    """A payload that replaces the execution contract also replaces what describes it.
 
-    The template vendors a V1 repository-execution runtime that exists only to
-    serve its own `.l9/repo-workflow.json`. Under an authoritative payload that
-    supplies its own contract (a Core-generated V2 facade + `Repo.mk`), that
-    runtime is stale and is retired; anything the payload itself ships is kept.
+    The template's own contract is Repository Execution V2: a three-field
+    `.l9/repo-workflow.json`, the Core-generated `make-v1` facade `Makefile`, and
+    a repository-owned `Repo.mk`. Its runtime is Core-owned, so nothing
+    executable is vendored; `execution_runtime.bound` names only the document
+    that describes the template's contract. Under an authoritative payload that
+    supplies its own contract that document is stale and is retired; anything
+    the payload itself ships is kept.
     """
 
-    BOUND = ("tools/l9_repo/__main__.py", "tools/check_workflow_integrity.py", "MANIFEST.sha256")
+    BOUND = ("docs/repository-execution-runtime.md",)
+    RETIRED_V1 = (
+        "tools/l9_repo/__main__.py",
+        "tools/l9_repo/Makefile.template",
+        "tools/check_workflow_integrity.py",
+        ".l9/repo-workflow.schema.json",
+        ".l9/runtime-provenance.yaml",
+        "MANIFEST.sha256",
+        "requirements-repo-runtime.txt",
+        "scripts/regenerate_runtime_manifest.py",
+    )
 
     def _newborn(self, root: Path) -> Path:
-        for rel in (*self.BOUND, "scripts/render_cursor_rules.py", "Makefile"):
+        for rel in (*self.BOUND, "docs/LIFECYCLE.md", "scripts/render_cursor_rules.py", "Makefile"):
             target = root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("template\n", encoding="utf-8")
@@ -2007,24 +2020,43 @@ class TestExecutionRuntimeRetirement:
     def test_template_declares_its_runtime(self) -> None:
         runtime = new_repo.load_ownership(REPO)["execution_runtime"]
         assert runtime["contract"] == ".l9/repo-workflow.json"
-        for rel in (*self.BOUND, ".l9/repo-workflow.schema.json"):
-            assert new_repo.match_pattern(runtime["bound"], rel) is not None, rel
+        assert sorted(runtime["bound"]) == sorted(self.BOUND)
         # Bound paths stay classified chassis: retirement is conditional.
         doc = new_repo.load_ownership(REPO)
         for rel in self.BOUND:
             assert new_repo.match_pattern(doc["chassis"], rel) is not None, rel
 
+    def test_the_template_vendors_no_v1_runtime(self) -> None:
+        """The V1 runtime is retired from the template, not merely unlisted."""
+        doc = new_repo.load_ownership(REPO)
+        for rel in self.RETIRED_V1:
+            assert not (REPO / rel).exists(), f"retired V1 runtime file {rel} is back"
+            assert new_repo.match_pattern(doc["execution_runtime"]["bound"], rel) is None, rel
+        # Exact chassis entries for retired runtime files are gone too (glob
+        # prefixes such as `.l9/**` legitimately still cover their old paths).
+        for rel in ("MANIFEST.sha256", "requirements-repo-runtime.txt"):
+            assert rel not in doc["chassis"], rel
+        assert "tools/**" not in doc["chassis"]
+
     def test_retired_when_the_payload_supplies_the_contract(self, tmp_path: Path) -> None:
         dest = self._newborn(tmp_path / "dest")
         payload = _repository_payload(tmp_path / "payload")
         (payload / ".l9" / "repo-workflow.json").write_text('{"schema": "x"}\n', encoding="utf-8")
-        (payload / "MANIFEST.sha256").write_text("payload-owned\n", encoding="utf-8")
         removed = new_repo.retire_execution_runtime(dest, payload, new_repo.load_ownership(REPO))
-        assert removed == ["tools/check_workflow_integrity.py", "tools/l9_repo/__main__.py"]
-        assert not (dest / "tools").exists(), "emptied runtime directories are pruned"
-        assert (dest / "MANIFEST.sha256").is_file(), "a payload-supplied file is kept"
+        assert removed == ["docs/repository-execution-runtime.md"]
+        assert (dest / "docs/LIFECYCLE.md").is_file(), "unbound chassis is kept"
         assert (dest / "scripts/render_cursor_rules.py").is_file(), "unbound chassis is kept"
         assert (dest / "Makefile").is_file()
+
+    def test_a_payload_supplied_bound_file_is_kept(self, tmp_path: Path) -> None:
+        dest = self._newborn(tmp_path / "dest")
+        payload = _repository_payload(tmp_path / "payload")
+        (payload / ".l9" / "repo-workflow.json").write_text('{"schema": "x"}\n', encoding="utf-8")
+        supplied = payload / "docs" / "repository-execution-runtime.md"
+        supplied.parent.mkdir(parents=True, exist_ok=True)
+        supplied.write_text("payload-owned\n", encoding="utf-8")
+        assert new_repo.retire_execution_runtime(dest, payload, new_repo.load_ownership(REPO)) == []
+        assert (dest / "docs/repository-execution-runtime.md").is_file()
 
     def test_kept_when_the_payload_does_not_supply_the_contract(self, tmp_path: Path) -> None:
         dest = self._newborn(tmp_path / "dest")
@@ -2105,3 +2137,30 @@ class TestSeedBuilderReceivesTheRepositoryShape:
             new_repo._stages._run_seed_builder(
                 checkout, {"profile": {"seed_categories": ["dependabot"]}}
             )
+
+
+class TestOrdinaryOffspringExecutionContract:
+    """An ordinary (non-payload) birth copies the template's V2 execution contract.
+
+    Assembly is `copy_tree(template_src, dest)`; with no payload nothing replaces
+    the execution surfaces, so what the template declares is what the newborn
+    receives. Core's repository verification admits only `l9.repo-execution/v2`
+    in required mode, so the copy must never carry the retired V1 contract.
+    """
+
+    def test_a_default_assembly_emits_the_v2_contract(self, tmp_path: Path) -> None:
+        dest = tmp_path / "newborn"
+        dest.mkdir()
+        assert new_repo.copy_tree(REPO, dest) > 0
+        contract = json.loads((dest / ".l9" / "repo-workflow.json").read_text(encoding="utf-8"))
+        assert contract == {
+            "schema": "l9.repo-execution/v2",
+            "facade": "make-v1",
+            "required_phases": ["setup", "validate", "check", "test"],
+        }
+        assert "schema_version" not in contract
+        assert (dest / "Makefile").read_bytes() == (REPO / "Makefile").read_bytes()
+        assert (dest / "Repo.mk").read_bytes() == (REPO / "Repo.mk").read_bytes()
+        for rel in TestExecutionRuntimeRetirement.RETIRED_V1:
+            assert not (dest / rel).exists(), f"V1 runtime {rel} reached the newborn"
+        assert not (dest / "tools").exists()

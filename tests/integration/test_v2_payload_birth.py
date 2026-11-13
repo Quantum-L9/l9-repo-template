@@ -40,8 +40,8 @@ CORE_STAMPED = {
 }
 EXECUTION_SURFACES = (*CORE_STAMPED.values(), "Repo.mk")
 
-# The template's V1 runtime: must not survive into a newborn whose payload
-# replaced `.l9/repo-workflow.json`.
+# The retired V1 runtime plus the template's bound contract description: none
+# may survive into a newborn whose payload replaced `.l9/repo-workflow.json`.
 V1_RUNTIME = (
     "tools/l9_repo/__main__.py",
     "tools/l9_repo/Makefile.template",
@@ -275,9 +275,9 @@ def test_template_v1_contract_is_not_overlaid(
     _, dest, _ = born
     contract = json.loads((dest / ".l9/repo-workflow.json").read_text(encoding="utf-8"))
     assert "schema_version" not in contract
-    assert (dest / "Makefile").read_bytes() != (
-        REPO / "tools" / "l9_repo" / "Makefile.template"
-    ).read_bytes()
+    # The template is itself V2 now, so the payload's Repo.mk is what proves the
+    # payload's contract — not the template's — reached the newborn.
+    assert (dest / "Repo.mk").read_bytes() != (REPO / "Repo.mk").read_bytes()
 
 
 @pytest.mark.parametrize("rel", V1_RUNTIME)
