@@ -48,7 +48,6 @@ SOURCE_FILES: dict[str, str] = {
     "src/ideaos/__init__.py": '"""IdeaOS."""\n',
     "src/ideaos/core.py": "VALUE = 1\n",
     "tests/test_core.py": "def test_value() -> None:\n    assert True\n",
-    "scripts/inventory_check.py": "print('ok')\n",
 }
 
 
@@ -239,8 +238,23 @@ class TestClassificationIsProposedFromEvidence:
             ".l9/architecture.yaml",
             "src",
             "tests",
-            "scripts/inventory_check.py",
         ]
+
+    def test_a_product_need_not_carry_template_internals(self, payload: dict) -> None:
+        """Authoritative rests on product-owned surfaces only.
+
+        `scripts/inventory_check.py` is template machinery. A real product
+        repository that does not copy it is still a standalone repository.
+        """
+        assert "scripts/inventory_check.py" not in SOURCE_FILES
+        assert payload["mode"] == "authoritative"
+
+    def test_a_product_without_its_own_architecture_stays_additive(self, tmp_path: Path) -> None:
+        """No architecture declaration of its own: it would inherit the template's identity."""
+        files = {k: v for k, v in SOURCE_FILES.items() if k != ".l9/architecture.yaml"}
+        document = compile_from(make_source(tmp_path / "src", files))
+        assert document["mode"] == "additive"
+        assert document["repository_shape"]["matched"] == ["pyproject.toml", "src", "tests"]
 
     def test_a_fragment_compiles_as_additive(self, tmp_path: Path) -> None:
         source = make_source(tmp_path / "src", {"src/ideaos/extra.py": "X = 1\n"})

@@ -25,6 +25,16 @@
 #   3. product-payload-owned   supplied by the payload; always wins
 #   4. optional / template-demo `product` below; absent means remove under an authoritative payload
 #
+# `repository_shape` names ONLY surfaces a standalone product legitimately owns:
+# its build declaration (`pyproject.toml`), its own architecture declaration
+# (`.l9/architecture.yaml` — without it a newborn would inherit the template's
+# birth-factory identity), its source (`src/`) and its tests (`tests/`). It must
+# never name a template internal: a product repository cannot be required to
+# copy template machinery (`scripts/inventory_check.py` was once listed and made
+# every real product additive). A fragment that merely carries `src/` matches
+# one of four paths and stays additive — the template-demo protection this
+# list exists for.
+#
 # `repository_shape` is evidence for exactly one decision — whether a payload is
 # ADDITIVE or AUTHORITATIVE. It is not a ProductKind, and nothing reads it as one:
 # what semantic product a born repository is comes from its resolved product
@@ -57,8 +67,7 @@
     "pyproject.toml",
     ".l9/architecture.yaml",
     "src",
-    "tests",
-    "scripts/inventory_check.py"
+    "tests"
   ],
 
   "product": [
