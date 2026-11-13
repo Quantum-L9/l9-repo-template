@@ -679,6 +679,22 @@ class TestThePrepareGateStillDecides:
             new_repo._stages._preflight_product_birth_adapter(cfg, receipt)
         assert calls == [], "the engine never runs for a bundle bound to another factory"
 
+    @pytest.mark.parametrize("artifact", ["binding", "manifest"])
+    def test_an_adapter_artifact_inside_the_source_checkout_is_refused(
+        self, fx: Fixture, monkeypatch: pytest.MonkeyPatch, artifact: str
+    ) -> None:
+        """The bundle attests the snapshot; it is never read from inside it."""
+        result = fx.package()
+        inside = fx.source / "birth" / Path(str(result[artifact])).name
+        inside.parent.mkdir(parents=True, exist_ok=True)
+        inside.write_bytes(Path(str(result[artifact])).read_bytes())
+        cfg = self._cfg(fx, {**result, artifact: str(inside)})
+        receipt = self._receipt(cfg, fx.factory_revision)
+        calls = self._resolved(monkeypatch, fx)
+        with pytest.raises(new_repo.BirthError, match="inside the source checkout it attests"):
+            new_repo._stages._preflight_product_birth_adapter(cfg, receipt)
+        assert calls == [], "the engine never runs for a bundle read from inside the snapshot"
+
 
 def test_the_cli_reports_a_refusal_and_exits_nonzero(
     fx: Fixture, capsys: pytest.CaptureFixture[str]

@@ -22,6 +22,7 @@ FACTORY_WORKFLOW = "repo-birth-dispatch.yml"
 DEFAULT_FACTORY_REF = "main"
 REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 PKG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 class BirthFrontDoorError(RuntimeError):
@@ -40,10 +41,15 @@ class BirthIntent:
     payload_repo: str = ""
     payload_ref: str = ""
     payload_subpath: str = ""
+    # The birth bundle attests the payload_ref snapshot, so it cannot be
+    # committed inside it: it is read from a second, immutable commit of the
+    # same payload repository. Every bundle path below is relative to that
+    # checkout, never to the snapshot.
+    payload_bundle_ref: str = ""
     payload_contract_path: str = ""
-    # The compiler-backed birth bundle, as paths inside the payload checkout.
-    # Transported, never interpreted: PREPARE runs l9_birth_adapter on them and
-    # re-runs the pinned semantic compiler against the payload.
+    # The compiler-backed birth bundle. Transported, never interpreted: PREPARE
+    # runs l9_birth_adapter on it and re-runs the pinned semantic compiler
+    # against the payload.
     product_birth_binding_path: str = ""
     product_manifest_path: str = ""
     factory_ref: str = DEFAULT_FACTORY_REF
@@ -90,6 +96,28 @@ def validate_intent(intent: BirthIntent) -> None:
     ):
         if value.startswith("/"):
             raise BirthFrontDoorError(f"{name} must be relative")
+    if intent.payload_contract_path and not intent.payload_bundle_ref:
+        raise BirthFrontDoorError(
+            "PAYLOAD_CONTRACT_PATH requires PAYLOAD_BUNDLE_REF — a bundle committed into the "
+            "snapshot it pins can never name that snapshot's commit, so it is read from a "
+            "separate commit of the payload repository"
+        )
+    if intent.payload_bundle_ref:
+        if not intent.payload_repo:
+            raise BirthFrontDoorError("PAYLOAD_BUNDLE_REF requires PAYLOAD_REPO")
+        if not intent.payload_contract_path:
+            raise BirthFrontDoorError(
+                "PAYLOAD_BUNDLE_REF carries a birth bundle: PAYLOAD_CONTRACT_PATH is required"
+            )
+        if not SHA_RE.fullmatch(intent.payload_bundle_ref):
+            raise BirthFrontDoorError(
+                "PAYLOAD_BUNDLE_REF must be a full 40-character lowercase commit SHA"
+            )
+        if intent.payload_bundle_ref == intent.payload_ref:
+            raise BirthFrontDoorError(
+                "PAYLOAD_BUNDLE_REF is the PAYLOAD_REF snapshot itself — the bundle must come "
+                "from a different commit"
+            )
     # Operator intent only: an adapter-backed birth names both artifacts and
     # the compiled payload they bind, inside the payload checkout. Admissibility
     # is PREPARE's to decide.
@@ -102,7 +130,7 @@ def validate_intent(intent: BirthIntent) -> None:
     if given and not (intent.payload_repo and intent.payload_contract_path):
         raise BirthFrontDoorError(
             "adapter-backed birth requires PAYLOAD_REPO and PAYLOAD_CONTRACT_PATH — its "
-            "artifacts are read from the payload checkout"
+            "artifacts are read from the payload bundle checkout (PAYLOAD_BUNDLE_REF)"
         )
 
 
@@ -120,6 +148,7 @@ def dispatch_fields(intent: BirthIntent) -> list[tuple[str, str]]:
         ("payload_repo", intent.payload_repo),
         ("payload_ref", intent.payload_ref),
         ("payload_subpath", intent.payload_subpath),
+        ("payload_bundle_ref", intent.payload_bundle_ref),
         ("payload_contract_path", intent.payload_contract_path),
         *_adapter_paths(intent),
     ]
@@ -171,6 +200,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--payload-repo", default="")
     parser.add_argument("--payload-ref", default="")
     parser.add_argument("--payload-subpath", default="")
+    parser.add_argument("--payload-bundle-ref", default="")
     parser.add_argument("--payload-contract-path", default="")
     parser.add_argument("--product-birth-binding-path", default="")
     parser.add_argument("--product-manifest-path", default="")
@@ -190,6 +220,7 @@ def intent_from_args(args: argparse.Namespace) -> BirthIntent:
         payload_repo=args.payload_repo,
         payload_ref=args.payload_ref,
         payload_subpath=args.payload_subpath,
+        payload_bundle_ref=args.payload_bundle_ref,
         payload_contract_path=args.payload_contract_path,
         product_birth_binding_path=args.product_birth_binding_path,
         product_manifest_path=args.product_manifest_path,

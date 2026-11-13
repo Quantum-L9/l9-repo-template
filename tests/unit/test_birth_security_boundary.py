@@ -910,19 +910,31 @@ def test_publish_reconstructs_a_config_without_adapter_inputs(tmp_path: Path) ->
 
 
 @factory_only
-def test_workflow_reads_adapter_artifacts_only_inside_the_payload_checkout() -> None:
+def test_workflow_reads_the_bundle_only_inside_the_bundle_checkout() -> None:
+    """The bundle attests the payload_ref snapshot, so it is read from a second,
+    immutable commit of the same repository — never from the snapshot itself."""
     document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     inputs = document[True]["workflow_dispatch"]["inputs"]
-    for name in ("product_birth_binding_path", "product_manifest_path"):
+    for name in ("product_birth_binding_path", "product_manifest_path", "payload_bundle_ref"):
         assert inputs[name]["required"] is False
     assert "repo_birth_contract_path" not in inputs
     steps = {step.get("id"): step for step in document["jobs"]["prepare"]["steps"]}
     fetch = steps["payload"]["run"]
-    # The same read-only source checkout and path rules as the payload itself.
+    # The same read-only source token; paths confined to the bundle checkout.
     assert "PRODUCT_BINDING_PATH" in steps["payload"]["env"]
+    assert "PAYLOAD_BUNDLE_REF" in steps["payload"]["env"]
     assert "REPO_BIRTH_CONTRACT_PATH" not in steps["payload"]["env"]
-    assert 'realpath -e "$dest/$1"' in fetch
-    assert 'case "$resolved" in "$dest"/*)' in fetch
+    assert 'realpath -e "$bundle_dest/$1"' in fetch
+    assert 'case "$resolved" in "$bundle_dest"/*)' in fetch
+    assert 'realpath -e "$dest/$1"' not in fetch
+    assert 'contract="$(bundle_file "$PAYLOAD_CONTRACT_PATH")"' in fetch
+    # Fail closed on every way the bundle could alias the snapshot or drift.
+    assert "payload_contract_path requires payload_bundle_ref" in fetch
+    assert "[0-9a-f]{40}" in fetch
+    assert "is the payload_ref snapshot itself" in fetch
+    assert '[ "$bundle_sha" = "$PAYLOAD_BUNDLE_REF" ]' in fetch
+    assert fetch.count('"http.extraheader=$header" clone --no-checkout') == 2
+    assert "bundle_sha" in document["jobs"]["prepare"]["outputs"]["payload_bundle_sha"]
     assert "both adapter artifact paths" in fetch
     assert "adapter-backed birth requires payload_contract_path" in fetch
     prepare = steps["prepare_birth"]["run"]

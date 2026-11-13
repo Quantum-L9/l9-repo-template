@@ -45,16 +45,20 @@ on:
         description: "Relative payload directory inside checkout"
         required: false
         type: string
+      payload_bundle_ref:
+        description: "Full commit SHA of the payload repo carrying the birth bundle; never the payload_ref snapshot"
+        required: false
+        type: string
       payload_contract_path:
-        description: "Relative compiled l9.birth-payload/v1 path when required"
+        description: "Relative compiled l9.birth-payload/v1 path inside the payload_bundle_ref checkout"
         required: false
         type: string
       product_birth_binding_path:
-        description: "Relative l9.product-birth-binding/v2 path; compiler-backed birth, both or none"
+        description: "Relative l9.product-birth-binding/v2 path in the bundle checkout; both or none"
         required: false
         type: string
       product_manifest_path:
-        description: "Relative resolved l9.product-manifest/v1 path; compiler-backed birth, both or none"
+        description: "Relative resolved l9.product-manifest/v1 path in the bundle checkout; both or none"
         required: false
         type: string
 
@@ -74,6 +78,7 @@ jobs:
       factory_sha: ${{ steps.factory.outputs.sha }}
       governance_sha: ${{ steps.governance.outputs.sha }}
       payload_sha: ${{ steps.payload.outputs.sha }}
+      payload_bundle_sha: ${{ steps.payload.outputs.bundle_sha }}
       semantic_compiler_sha: ${{ steps.semantic_compiler.outputs.sha }}
       handoff_digest: ${{ steps.prepare_birth.outputs.handoff_digest }}
       root_sha: ${{ steps.prepare_birth.outputs.root_sha }}
@@ -132,6 +137,7 @@ jobs:
           PAYLOAD_REPO: ${{ inputs.payload_repo }}
           PAYLOAD_REF: ${{ inputs.payload_ref }}
           PAYLOAD_SUBPATH: ${{ inputs.payload_subpath }}
+          PAYLOAD_BUNDLE_REF: ${{ inputs.payload_bundle_ref }}
           PAYLOAD_CONTRACT_PATH: ${{ inputs.payload_contract_path }}
           PRODUCT_BINDING_PATH: ${{ inputs.product_birth_binding_path }}
           PRODUCT_MANIFEST_PATH: ${{ inputs.product_manifest_path }}
@@ -156,29 +162,53 @@ jobs:
             2) [ -n "$PAYLOAD_CONTRACT_PATH" ] || { echo "adapter-backed birth requires payload_contract_path" >&2; exit 2; };;
             *) echo "adapter-backed birth needs both adapter artifact paths" >&2; exit 2;;
           esac
+          # The birth bundle attests the payload_ref snapshot (its commit and
+          # tree), so it can never be committed inside that snapshot. It is read
+          # from a second immutable ref of the SAME repository: a full commit
+          # SHA that is not the snapshot. Integrity is unchanged — PREPARE
+          # still reproduces the payload against the snapshot and the manifest
+          # with the pinned compiler — only the bundle's location moves.
+          if [ -n "$PAYLOAD_CONTRACT_PATH" ] && [ -z "$PAYLOAD_BUNDLE_REF" ]; then
+            echo "payload_contract_path requires payload_bundle_ref: a bundle committed into the snapshot it pins can never name that snapshot's commit" >&2; exit 2
+          fi
+          if [ -n "$PAYLOAD_BUNDLE_REF" ]; then
+            [ -n "$PAYLOAD_CONTRACT_PATH" ] || { echo "payload_bundle_ref carries a birth bundle: payload_contract_path is required with it" >&2; exit 2; }
+            printf '%s' "$PAYLOAD_BUNDLE_REF" | grep -Eqx '[0-9a-f]{40}' || { echo "payload_bundle_ref must be a full 40-character commit SHA" >&2; exit 2; }
+          fi
           dest="$RUNNER_TEMP/payload-src"
           header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$dest"
           git -C "$dest" -c "http.extraheader=$header" fetch --depth 1 origin "$PAYLOAD_REF"
           git -C "$dest" checkout --detach FETCH_HEAD
+          sha="$(git -C "$dest" rev-parse HEAD)"
           root="$dest"; [ -z "$PAYLOAD_SUBPATH" ] || root="$dest/$PAYLOAD_SUBPATH"
           [ -d "$root" ] || { echo "payload_subpath is not a directory" >&2; exit 2; }
-          contract=""
-          if [ -n "$PAYLOAD_CONTRACT_PATH" ]; then contract="$dest/$PAYLOAD_CONTRACT_PATH"; [ -f "$contract" ] || exit 2; fi
-          adapter_file() {
+          bundle_dest=""; bundle_sha=""
+          if [ -n "$PAYLOAD_BUNDLE_REF" ]; then
+            [ "$PAYLOAD_BUNDLE_REF" != "$sha" ] || { echo "payload_bundle_ref is the payload_ref snapshot itself: the bundle must come from a different commit" >&2; exit 2; }
+            bundle_dest="$RUNNER_TEMP/payload-bundle"
+            git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$bundle_dest"
+            git -C "$bundle_dest" -c "http.extraheader=$header" fetch --depth 1 origin "$PAYLOAD_BUNDLE_REF"
+            git -C "$bundle_dest" checkout --detach FETCH_HEAD
+            bundle_sha="$(git -C "$bundle_dest" rev-parse HEAD)"
+            [ "$bundle_sha" = "$PAYLOAD_BUNDLE_REF" ] || { echo "payload bundle checkout is not payload_bundle_ref" >&2; exit 2; }
+          fi
+          bundle_file() {
             [ -n "$1" ] || return 0
-            resolved="$(realpath -e "$dest/$1")" || { echo "adapter artifact not found: $1" >&2; exit 2; }
-            case "$resolved" in "$dest"/*) :;; *) echo "adapter artifact escapes the payload checkout: $1" >&2; exit 2;; esac
-            [ -f "$resolved" ] || { echo "adapter artifact is not a file: $1" >&2; exit 2; }
+            resolved="$(realpath -e "$bundle_dest/$1")" || { echo "bundle artifact not found: $1" >&2; exit 2; }
+            case "$resolved" in "$bundle_dest"/*) :;; *) echo "bundle artifact escapes the payload bundle checkout: $1" >&2; exit 2;; esac
+            [ -f "$resolved" ] || { echo "bundle artifact is not a file: $1" >&2; exit 2; }
             printf '%s' "$resolved"
           }
-          binding="$(adapter_file "$PRODUCT_BINDING_PATH")"
-          manifest="$(adapter_file "$PRODUCT_MANIFEST_PATH")"
+          contract="$(bundle_file "$PAYLOAD_CONTRACT_PATH")"
+          binding="$(bundle_file "$PRODUCT_BINDING_PATH")"
+          manifest="$(bundle_file "$PRODUCT_MANIFEST_PATH")"
           echo "root=$root" >> "$GITHUB_OUTPUT"
           echo "contract=$contract" >> "$GITHUB_OUTPUT"
           echo "binding=$binding" >> "$GITHUB_OUTPUT"
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git -C "$dest" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "bundle_sha=$bundle_sha" >> "$GITHUB_OUTPUT"
       - name: Fetch the pinned semantic compiler with read-only source authority
         id: semantic_compiler
         if: inputs.product_birth_binding_path != ''
@@ -218,6 +248,7 @@ jobs:
           L9_BIRTH_PAYLOAD_REPOSITORY: ${{ inputs.payload_repo }}
           L9_BIRTH_PAYLOAD_REQUESTED_REF: ${{ inputs.payload_ref }}
           L9_BIRTH_PAYLOAD_RESOLVED_SHA: ${{ steps.payload.outputs.sha }}
+          L9_BIRTH_PAYLOAD_BUNDLE_SHA: ${{ steps.payload.outputs.bundle_sha }}
           ORG_POLICY_ROOT: ${{ steps.org_policy.outputs.root }}
         run: |
           set -euo pipefail
@@ -249,6 +280,7 @@ jobs:
           GOVERNANCE_SHA: ${{ steps.governance.outputs.sha }}
           PAYLOAD_REQUESTED_REF: ${{ inputs.payload_ref }}
           PAYLOAD_SHA: ${{ steps.payload.outputs.sha }}
+          PAYLOAD_BUNDLE_SHA: ${{ steps.payload.outputs.bundle_sha }}
           SEMANTIC_COMPILER_SHA: ${{ steps.semantic_compiler.outputs.sha }}
           HANDOFF_DIGEST: ${{ steps.prepare_birth.outputs.handoff_digest }}
           ROOT_SHA: ${{ steps.prepare_birth.outputs.root_sha }}
@@ -261,6 +293,7 @@ jobs:
             echo "- governance: $GOVERNANCE_SHA"
             echo "- payload requested ref: $PAYLOAD_REQUESTED_REF"
             echo "- payload resolved SHA: $PAYLOAD_SHA"
+            echo "- payload bundle SHA: $PAYLOAD_BUNDLE_SHA"
             echo "- semantic compiler (pinned): $SEMANTIC_COMPILER_SHA"
             echo "- handoff digest: $HANDOFF_DIGEST"
             echo "- root SHA: $ROOT_SHA"
