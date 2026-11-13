@@ -748,11 +748,13 @@ def test_the_dispatch_workflow_exists_only_in_the_factory() -> None:
 @factory_only
 def test_workflow_crosses_fresh_runner_before_privilege_and_binds_tools() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
-    assert "jobs:\n  prepare:" in text
+    assert "jobs:\n  source:\n" in text
+    assert "\n  prepare:\n" in text
     assert "\n  publish:" in text
     assert "needs: prepare" in text
-    assert "environment: repo-birth" in text.split("\n  publish:", 1)[1]
-    assert "environment: repo-birth" not in text.split("\n  publish:", 1)[0]
+    jobs = _workflow_jobs(text)
+    assert "environment: repo-birth" in jobs["publish"]
+    assert "environment: repo-birth" not in jobs["prepare"]
     verify = text.index("Verify sealed artifact against PREPARE job outputs")
     bind = text.index("Bind trusted control-plane executables before authority exists")
     mint = text.index("Mint privileged publication token after verification")
@@ -761,17 +763,64 @@ def test_workflow_crosses_fresh_runner_before_privilege_and_binds_tools() -> Non
     assert 'export PATH="$L9_BIRTH_CONTROL_PATH"' in text
 
 
+def _workflow_jobs(text: str) -> dict[str, str]:
+    """Split the dispatch workflow into its top-level job bodies by name."""
+    body = text.split("\njobs:\n", 1)[1]
+    jobs: dict[str, str] = {}
+    name = None
+    for line in body.splitlines(keepends=True):
+        if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":"):
+            name = line.strip()[:-1]
+            jobs[name] = ""
+        elif name is not None:
+            jobs[name] += line
+    return jobs
+
+
 @factory_only
 def test_workflow_separates_source_and_publish_authority() -> None:
-    text = WORKFLOW.read_text(encoding="utf-8")
-    prepare_text, publish_text = text.split("\n  publish:", 1)
-    assert "BIRTH_SOURCE_APP_ID" in prepare_text
-    assert "BIRTH_SOURCE_APP_PRIVATE_KEY" in prepare_text
-    assert "permission-contents: read" in prepare_text
-    assert "BIRTH_APP_ID" not in prepare_text
-    assert "BIRTH_APP_PRIVATE_KEY" not in prepare_text
-    assert "BIRTH_APP_ID" in publish_text
-    assert "permission-administration: write" in publish_text
+    # One GitHub App (repo-birth environment) carries both authorities, minted
+    # to different scopes in different jobs. PREPARE runs product code and must
+    # hold neither the App key, a token, nor the environment.
+    jobs = _workflow_jobs(WORKFLOW.read_text(encoding="utf-8"))
+    assert list(jobs) == ["source", "prepare", "publish"]
+    source, prepare, publish = jobs["source"], jobs["prepare"], jobs["publish"]
+    for secret in (
+        "BIRTH_APP_ID",
+        "BIRTH_APP_PRIVATE_KEY",
+        "BIRTH_SOURCE_APP",
+        "create-github-app-token",
+        "environment:",
+    ):
+        assert secret not in prepare, secret
+    assert "needs: source" in prepare
+    assert "environment: repo-birth" in source
+    assert "BIRTH_APP_PRIVATE_KEY" in source
+    assert "permission-contents: read" in source
+    assert "repositories: ${{ steps.scope.outputs.repositories }}" in source
+    for broader in (
+        "permission-administration",
+        "permission-actions",
+        "permission-issues",
+        "permission-contents: write",
+    ):
+        assert broader not in source, broader
+    assert "BIRTH_SOURCE_APP" not in source
+    assert "BIRTH_APP_ID" in publish
+    assert "permission-administration: write" in publish
+
+
+@factory_only
+def test_source_job_hands_prepare_data_not_credentials() -> None:
+    jobs = _workflow_jobs(WORKFLOW.read_text(encoding="utf-8"))
+    source, prepare = jobs["source"], jobs["prepare"]
+    assert "persist-credentials: false" in source
+    assert "a source checkout persisted credentials" in source
+    assert "SOURCE_TOKEN" not in prepare
+    assert "birth-sources-${{ inputs.repo_name }}" in source
+    assert "birth-sources-${{ inputs.repo_name }}" in prepare
+    assert "needs.source.outputs.payload_sha" in prepare
+    assert "received payload is not the commit the source job fetched" in prepare
 
 
 @factory_only
@@ -919,15 +968,20 @@ def test_workflow_reads_the_bundle_only_inside_the_bundle_checkout() -> None:
         assert inputs[name]["required"] is False
     assert "repo_birth_contract_path" not in inputs
     steps = {step.get("id"): step for step in document["jobs"]["prepare"]["steps"]}
-    fetch = steps["payload"]["run"]
-    # The same read-only source token; paths confined to the bundle checkout.
-    assert "PRODUCT_BINDING_PATH" in steps["payload"]["env"]
-    assert "PAYLOAD_BUNDLE_REF" in steps["payload"]["env"]
-    assert "REPO_BIRTH_CONTRACT_PATH" not in steps["payload"]["env"]
-    assert 'realpath -e "$bundle_dest/$1"' in fetch
-    assert 'case "$resolved" in "$bundle_dest"/*)' in fetch
-    assert 'realpath -e "$dest/$1"' not in fetch
-    assert 'contract="$(bundle_file "$PAYLOAD_CONTRACT_PATH")"' in fetch
+    source_steps = {step.get("id"): step for step in document["jobs"]["source"]["steps"]}
+    # The source job fetches with the read-only token; PREPARE resolves paths
+    # only inside the received bundle checkout.
+    unpack = steps["payload"]["run"]
+    fetch = source_steps["payload"]["run"]
+    for env in (source_steps["payload"]["env"], steps["payload"]["env"]):
+        assert "PRODUCT_BINDING_PATH" in env
+        assert "PAYLOAD_BUNDLE_REF" in env
+        assert "REPO_BIRTH_CONTRACT_PATH" not in env
+    assert 'realpath -e "$bundle_dest/$1"' in unpack
+    assert 'case "$resolved" in "$bundle_dest"/*)' in unpack
+    assert 'realpath -e "$dest/$1"' not in unpack
+    assert 'contract="$(bundle_file "$PAYLOAD_CONTRACT_PATH")"' in unpack
+    assert '[ "$bundle_sha" = "$PAYLOAD_BUNDLE_REF" ]' in unpack
     # Fail closed on every way the bundle could alias the snapshot or drift.
     assert "payload_contract_path requires payload_bundle_ref" in fetch
     assert "[0-9a-f]{40}" in fetch
@@ -954,16 +1008,25 @@ def test_workflow_fetches_the_pinned_semantic_compiler_only_for_an_adapter_backe
     its SHA is proven on the runner, and PREPARE receives nothing else."""
     document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     steps = {step.get("id"): step for step in document["jobs"]["prepare"]["steps"]}
-    fetch = steps["semantic_compiler"]
+    source_steps = {step.get("id"): step for step in document["jobs"]["source"]["steps"]}
+    fetch = source_steps["semantic_compiler"]
     assert fetch["if"] == "inputs.product_birth_binding_path != ''"
     assert set(fetch["env"]) == {"SOURCE_TOKEN"}
     run = fetch["run"]
     assert "scripts/birth-runner/semantic-compiler.pin.json" in run
-    assert ".venv/bin/python -I" in run
+    assert "python3 -I" in run
     assert 'fetch --depth 1 origin "$sha"' in run
     assert 'test "$(git -C "$dest" rev-parse HEAD)" = "$sha"' in run
     assert "GH_TOKEN" not in run
     assert "L9_BIRTH_PRIVILEGED_TOKEN" not in run
+    unpack = steps["semantic_compiler"]
+    assert unpack["if"] == "inputs.product_birth_binding_path != ''"
+    assert set(unpack["env"]) == {"EXPECTED_SHA"}
+    assert "scripts/birth-runner/semantic-compiler.pin.json" in unpack["run"]
+    assert ".venv/bin/python -I" in unpack["run"]
+    assert 'test "$(git -C "$dest" rev-parse HEAD)" = "$sha"' in unpack["run"]
+    for token in ("SOURCE_TOKEN", "GH_TOKEN", "L9_BIRTH_PRIVILEGED_TOKEN"):
+        assert token not in unpack["run"]
     prepare_env = steps["prepare_birth"]["env"]
     assert prepare_env["BIRTH_SEMANTIC_COMPILER"] == "${{ steps.semantic_compiler.outputs.root }}"
     assert "semantic_compiler_sha" in document["jobs"]["prepare"]["outputs"]

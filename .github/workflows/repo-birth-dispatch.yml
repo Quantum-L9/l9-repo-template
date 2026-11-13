@@ -70,8 +70,155 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  source:
+    name: Fetch source for ${{ inputs.repo_name }}
+    # Product bytes in a private repository are read with the factory's one
+    # existing GitHub App (repo-birth environment), minted down to
+    # contents:read on exactly the payload and pinned-engine repositories.
+    # This job runs factory code only; PREPARE, which runs product code,
+    # receives the checkouts as data and never sees the App key or a token.
+    if: inputs.payload_repo != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: repo-birth
+    outputs:
+      payload_sha: ${{ steps.payload.outputs.sha }}
+      payload_bundle_sha: ${{ steps.payload.outputs.bundle_sha }}
+      semantic_compiler_sha: ${{ steps.semantic_compiler.outputs.sha }}
+    steps:
+      - name: Checkout factory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Resolve read-only source scope
+        id: scope
+        env:
+          PAYLOAD_REPO: ${{ inputs.payload_repo }}
+          BIRTH_ORG: ${{ github.repository_owner }}
+          ADAPTER_REQUESTED: ${{ inputs.product_birth_binding_path }}
+        run: |
+          set -euo pipefail
+          case "$PAYLOAD_REPO" in "$BIRTH_ORG"/?*) :;; *) echo "payload_repo must be in $BIRTH_ORG" >&2; exit 2;; esac
+          repos="${PAYLOAD_REPO#*/}"
+          case "$repos" in */*) echo "payload_repo must be owner/name" >&2; exit 2;; esac
+          if [ -n "$ADAPTER_REQUESTED" ]; then
+            engine="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["repository"])' scripts/birth-runner/semantic-compiler.pin.json)"
+            case "$engine" in "$BIRTH_ORG"/?*) :;; *) echo "pinned semantic compiler must be in $BIRTH_ORG" >&2; exit 2;; esac
+            [ "${engine#*/}" = "$repos" ] || repos="$repos,${engine#*/}"
+          fi
+          echo "repositories=$repos" >> "$GITHUB_OUTPUT"
+      - name: Mint read-only source token from the existing birth App
+        id: source_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ vars.BIRTH_APP_ID }}
+          private-key: ${{ secrets.BIRTH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.scope.outputs.repositories }}
+          permission-contents: read
+      - name: Fetch payload with read-only source authority
+        id: payload
+        env:
+          SOURCE_TOKEN: ${{ steps.source_token.outputs.token }}
+          PAYLOAD_REPO: ${{ inputs.payload_repo }}
+          PAYLOAD_REF: ${{ inputs.payload_ref }}
+          PAYLOAD_SUBPATH: ${{ inputs.payload_subpath }}
+          PAYLOAD_BUNDLE_REF: ${{ inputs.payload_bundle_ref }}
+          PAYLOAD_CONTRACT_PATH: ${{ inputs.payload_contract_path }}
+          PRODUCT_BINDING_PATH: ${{ inputs.product_birth_binding_path }}
+          PRODUCT_MANIFEST_PATH: ${{ inputs.product_manifest_path }}
+          BIRTH_ORG: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          case "$PAYLOAD_REPO" in "$BIRTH_ORG"/*) :;; *) echo "payload_repo must be in $BIRTH_ORG" >&2; exit 2;; esac
+          [ -n "$PAYLOAD_REF" ] || { echo "payload_ref is required" >&2; exit 2; }
+          for p in "$PAYLOAD_SUBPATH" "$PAYLOAD_CONTRACT_PATH" "$PRODUCT_BINDING_PATH" "$PRODUCT_MANIFEST_PATH"; do
+            case "/$p/" in */../*) echo "payload paths must not contain '..'" >&2; exit 2;; esac
+            case "$p" in /*) echo "payload paths must be relative" >&2; exit 2;; esac
+          done
+          # Compiler-backed birth: both artifacts or none, plus the compiled
+          # payload they bind. Transport only — PREPARE judges admissibility
+          # and reproduces the manifest with the pinned semantic compiler.
+          adapter_given=0
+          for p in "$PRODUCT_BINDING_PATH" "$PRODUCT_MANIFEST_PATH"; do
+            [ -z "$p" ] || adapter_given=$((adapter_given + 1))
+          done
+          case "$adapter_given" in
+            0) :;;
+            2) [ -n "$PAYLOAD_CONTRACT_PATH" ] || { echo "adapter-backed birth requires payload_contract_path" >&2; exit 2; };;
+            *) echo "adapter-backed birth needs both adapter artifact paths" >&2; exit 2;;
+          esac
+          # The birth bundle attests the payload_ref snapshot (its commit and
+          # tree), so it can never be committed inside that snapshot. It is read
+          # from a second immutable ref of the SAME repository: a full commit
+          # SHA that is not the snapshot. Integrity is unchanged — PREPARE
+          # still reproduces the payload against the snapshot and the manifest
+          # with the pinned compiler — only the bundle's location moves.
+          if [ -n "$PAYLOAD_CONTRACT_PATH" ] && [ -z "$PAYLOAD_BUNDLE_REF" ]; then
+            echo "payload_contract_path requires payload_bundle_ref: a bundle committed into the snapshot it pins can never name that snapshot's commit" >&2; exit 2
+          fi
+          if [ -n "$PAYLOAD_BUNDLE_REF" ]; then
+            [ -n "$PAYLOAD_CONTRACT_PATH" ] || { echo "payload_bundle_ref carries a birth bundle: payload_contract_path is required with it" >&2; exit 2; }
+            printf '%s' "$PAYLOAD_BUNDLE_REF" | grep -Eqx '[0-9a-f]{40}' || { echo "payload_bundle_ref must be a full 40-character commit SHA" >&2; exit 2; }
+          fi
+          dest="$RUNNER_TEMP/birth-sources/payload-src"
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$dest"
+          git -C "$dest" -c "http.extraheader=$header" fetch --depth 1 origin "$PAYLOAD_REF"
+          git -C "$dest" checkout --detach FETCH_HEAD
+          sha="$(git -C "$dest" rev-parse HEAD)"
+          root="$dest"; [ -z "$PAYLOAD_SUBPATH" ] || root="$dest/$PAYLOAD_SUBPATH"
+          [ -d "$root" ] || { echo "payload_subpath is not a directory" >&2; exit 2; }
+          bundle_dest=""; bundle_sha=""
+          if [ -n "$PAYLOAD_BUNDLE_REF" ]; then
+            [ "$PAYLOAD_BUNDLE_REF" != "$sha" ] || { echo "payload_bundle_ref is the payload_ref snapshot itself: the bundle must come from a different commit" >&2; exit 2; }
+            bundle_dest="$RUNNER_TEMP/birth-sources/payload-bundle"
+            git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$bundle_dest"
+            git -C "$bundle_dest" -c "http.extraheader=$header" fetch --depth 1 origin "$PAYLOAD_BUNDLE_REF"
+            git -C "$bundle_dest" checkout --detach FETCH_HEAD
+            bundle_sha="$(git -C "$bundle_dest" rev-parse HEAD)"
+            [ "$bundle_sha" = "$PAYLOAD_BUNDLE_REF" ] || { echo "payload bundle checkout is not payload_bundle_ref" >&2; exit 2; }
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "bundle_sha=$bundle_sha" >> "$GITHUB_OUTPUT"
+      - name: Fetch the pinned semantic compiler with read-only source authority
+        id: semantic_compiler
+        if: inputs.product_birth_binding_path != ''
+        env:
+          SOURCE_TOKEN: ${{ steps.source_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          pin="$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["repository"], d["revision"])' scripts/birth-runner/semantic-compiler.pin.json)"
+          repo="${pin% *}"; sha="${pin#* }"
+          dest="$RUNNER_TEMP/birth-sources/semantic-compiler"
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${repo}.git" "$dest"
+          git -C "$dest" -c "http.extraheader=$header" fetch --depth 1 origin "$sha"
+          git -C "$dest" checkout --detach FETCH_HEAD
+          test "$(git -C "$dest" rev-parse HEAD)" = "$sha" || { echo "semantic compiler checkout is not the pinned revision" >&2; exit 2; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Pack source checkouts as data
+        run: |
+          set -euo pipefail
+          # The token was passed per command (git -c), never stored; prove no
+          # checkout carries it before the bytes leave this job.
+          if grep -rIl -e extraheader -e x-access-token "$RUNNER_TEMP"/birth-sources/*/.git/config >/dev/null 2>&1; then
+            echo "a source checkout persisted credentials" >&2; exit 1
+          fi
+          tar -C "$RUNNER_TEMP/birth-sources" -czf "$RUNNER_TEMP/birth-sources.tgz" .
+      - name: Upload source checkouts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: birth-sources-${{ inputs.repo_name }}
+          path: ${{ runner.temp }}/birth-sources.tgz
+          if-no-files-found: error
+          retention-days: 1
+
   prepare:
     name: Prepare ${{ inputs.repo_name }}
+    needs: source
+    # A bare template birth skips the source job; any source failure stops here.
+    if: ${{ !cancelled() && (needs.source.result == 'success' || needs.source.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -120,78 +267,42 @@ jobs:
           git -C "$dest" checkout --detach FETCH_HEAD
           echo "root=$dest" >> "$GITHUB_OUTPUT"
           echo "sha=$(git -C "$dest" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Mint read-only source token
-        id: source_token
+      - name: Receive source checkouts from the source job
         if: inputs.payload_repo != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e
         with:
-          app-id: ${{ vars.BIRTH_SOURCE_APP_ID }}
-          private-key: ${{ secrets.BIRTH_SOURCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          permission-contents: read
-      - name: Fetch payload with read-only source authority
+          name: birth-sources-${{ inputs.repo_name }}
+          path: ${{ runner.temp }}/birth-sources-in
+      - name: Unpack payload as data
         id: payload
         if: inputs.payload_repo != ''
         env:
-          SOURCE_TOKEN: ${{ steps.source_token.outputs.token }}
-          PAYLOAD_REPO: ${{ inputs.payload_repo }}
-          PAYLOAD_REF: ${{ inputs.payload_ref }}
           PAYLOAD_SUBPATH: ${{ inputs.payload_subpath }}
           PAYLOAD_BUNDLE_REF: ${{ inputs.payload_bundle_ref }}
           PAYLOAD_CONTRACT_PATH: ${{ inputs.payload_contract_path }}
           PRODUCT_BINDING_PATH: ${{ inputs.product_birth_binding_path }}
           PRODUCT_MANIFEST_PATH: ${{ inputs.product_manifest_path }}
-          BIRTH_ORG: ${{ github.repository_owner }}
+          EXPECTED_SHA: ${{ needs.source.outputs.payload_sha }}
+          EXPECTED_BUNDLE_SHA: ${{ needs.source.outputs.payload_bundle_sha }}
         run: |
           set -euo pipefail
-          case "$PAYLOAD_REPO" in "$BIRTH_ORG"/*) :;; *) echo "payload_repo must be in $BIRTH_ORG" >&2; exit 2;; esac
-          [ -n "$PAYLOAD_REF" ] || { echo "payload_ref is required" >&2; exit 2; }
+          src="$RUNNER_TEMP/birth-sources"
+          mkdir -p "$src"
+          tar -C "$src" --no-same-owner -xzf "$RUNNER_TEMP/birth-sources-in/birth-sources.tgz"
+          dest="$src/payload-src"
+          sha="$(git -C "$dest" rev-parse HEAD)"
+          [ -n "$EXPECTED_SHA" ] && [ "$sha" = "$EXPECTED_SHA" ] || { echo "received payload is not the commit the source job fetched" >&2; exit 2; }
           for p in "$PAYLOAD_SUBPATH" "$PAYLOAD_CONTRACT_PATH" "$PRODUCT_BINDING_PATH" "$PRODUCT_MANIFEST_PATH"; do
             case "/$p/" in */../*) echo "payload paths must not contain '..'" >&2; exit 2;; esac
             case "$p" in /*) echo "payload paths must be relative" >&2; exit 2;; esac
           done
-          # Compiler-backed birth: both artifacts or none, plus the compiled
-          # payload they bind. Transport only — PREPARE judges admissibility
-          # and reproduces the manifest with the pinned semantic compiler.
-          adapter_given=0
-          for p in "$PRODUCT_BINDING_PATH" "$PRODUCT_MANIFEST_PATH"; do
-            [ -z "$p" ] || adapter_given=$((adapter_given + 1))
-          done
-          case "$adapter_given" in
-            0) :;;
-            2) [ -n "$PAYLOAD_CONTRACT_PATH" ] || { echo "adapter-backed birth requires payload_contract_path" >&2; exit 2; };;
-            *) echo "adapter-backed birth needs both adapter artifact paths" >&2; exit 2;;
-          esac
-          # The birth bundle attests the payload_ref snapshot (its commit and
-          # tree), so it can never be committed inside that snapshot. It is read
-          # from a second immutable ref of the SAME repository: a full commit
-          # SHA that is not the snapshot. Integrity is unchanged — PREPARE
-          # still reproduces the payload against the snapshot and the manifest
-          # with the pinned compiler — only the bundle's location moves.
-          if [ -n "$PAYLOAD_CONTRACT_PATH" ] && [ -z "$PAYLOAD_BUNDLE_REF" ]; then
-            echo "payload_contract_path requires payload_bundle_ref: a bundle committed into the snapshot it pins can never name that snapshot's commit" >&2; exit 2
-          fi
-          if [ -n "$PAYLOAD_BUNDLE_REF" ]; then
-            [ -n "$PAYLOAD_CONTRACT_PATH" ] || { echo "payload_bundle_ref carries a birth bundle: payload_contract_path is required with it" >&2; exit 2; }
-            printf '%s' "$PAYLOAD_BUNDLE_REF" | grep -Eqx '[0-9a-f]{40}' || { echo "payload_bundle_ref must be a full 40-character commit SHA" >&2; exit 2; }
-          fi
-          dest="$RUNNER_TEMP/payload-src"
-          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
-          git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$dest"
-          git -C "$dest" -c "http.extraheader=$header" fetch --depth 1 origin "$PAYLOAD_REF"
-          git -C "$dest" checkout --detach FETCH_HEAD
-          sha="$(git -C "$dest" rev-parse HEAD)"
           root="$dest"; [ -z "$PAYLOAD_SUBPATH" ] || root="$dest/$PAYLOAD_SUBPATH"
           [ -d "$root" ] || { echo "payload_subpath is not a directory" >&2; exit 2; }
           bundle_dest=""; bundle_sha=""
           if [ -n "$PAYLOAD_BUNDLE_REF" ]; then
-            [ "$PAYLOAD_BUNDLE_REF" != "$sha" ] || { echo "payload_bundle_ref is the payload_ref snapshot itself: the bundle must come from a different commit" >&2; exit 2; }
-            bundle_dest="$RUNNER_TEMP/payload-bundle"
-            git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${PAYLOAD_REPO}.git" "$bundle_dest"
-            git -C "$bundle_dest" -c "http.extraheader=$header" fetch --depth 1 origin "$PAYLOAD_BUNDLE_REF"
-            git -C "$bundle_dest" checkout --detach FETCH_HEAD
+            bundle_dest="$src/payload-bundle"
             bundle_sha="$(git -C "$bundle_dest" rev-parse HEAD)"
-            [ "$bundle_sha" = "$PAYLOAD_BUNDLE_REF" ] || { echo "payload bundle checkout is not payload_bundle_ref" >&2; exit 2; }
+            [ "$bundle_sha" = "$PAYLOAD_BUNDLE_REF" ] && [ "$bundle_sha" = "$EXPECTED_BUNDLE_SHA" ] || { echo "received bundle is not payload_bundle_ref" >&2; exit 2; }
           fi
           bundle_file() {
             [ -n "$1" ] || return 0
@@ -209,23 +320,19 @@ jobs:
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "bundle_sha=$bundle_sha" >> "$GITHUB_OUTPUT"
-      - name: Fetch the pinned semantic compiler with read-only source authority
+      - name: Unpack the pinned semantic compiler as data
         id: semantic_compiler
         if: inputs.product_birth_binding_path != ''
         env:
-          SOURCE_TOKEN: ${{ steps.source_token.outputs.token }}
+          EXPECTED_SHA: ${{ needs.source.outputs.semantic_compiler_sha }}
         run: |
           set -euo pipefail
           # The pin is the factory's, read from the checked-out factory and
           # nowhere else; the checkout is proven again inside PREPARE.
-          pin="$(.venv/bin/python -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["repository"], d["revision"])' scripts/birth-runner/semantic-compiler.pin.json)"
-          repo="${pin% *}"; sha="${pin#* }"
-          dest="$RUNNER_TEMP/semantic-compiler"
-          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_TOKEN" | base64 -w0)"
-          git -c "http.extraheader=$header" clone --no-checkout "https://github.com/${repo}.git" "$dest"
-          git -C "$dest" -c "http.extraheader=$header" fetch --depth 1 origin "$sha"
-          git -C "$dest" checkout --detach FETCH_HEAD
-          test "$(git -C "$dest" rev-parse HEAD)" = "$sha" || { echo "semantic compiler checkout is not the pinned revision" >&2; exit 2; }
+          sha="$(.venv/bin/python -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["revision"])' scripts/birth-runner/semantic-compiler.pin.json)"
+          dest="$RUNNER_TEMP/birth-sources/semantic-compiler"
+          [ -d "$dest" ] || { echo "adapter-backed birth requires payload_repo: the pinned engine arrives with the source checkouts" >&2; exit 2; }
+          test "$(git -C "$dest" rev-parse HEAD)" = "$sha" && test "$EXPECTED_SHA" = "$sha" || { echo "semantic compiler checkout is not the pinned revision" >&2; exit 2; }
           echo "root=$dest" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: PREPARE and seal without privileged birth authority

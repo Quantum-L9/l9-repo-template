@@ -1008,6 +1008,20 @@ carrying organization Administration. The App is installed on **all**
 repositories: a newborn cannot be named in a selected-repositories list before
 it exists.
 
+That one App is also the read authority for a private payload; there is no
+second App or secret. A dispatch with `payload_repo` runs a `source` job on the
+`repo-birth` environment, before PREPARE, that mints the same App's token down
+to `permission-contents: read` on exactly the payload repository and (for a
+compiler-backed birth) the pinned engine repository. That job runs factory code
+only: it fetches the snapshot, the bundle commit and the engine with the token
+passed per command, proves no checkout persisted it, and hands the checkouts to
+PREPARE as an artifact. PREPARE runs product code, so it carries no
+environment, no App key and no token; it unpacks the checkouts as data, proves
+each commit equals the one the source job fetched, and resolves bundle paths
+inside the bundle checkout. Because `repo-birth` is restricted to `main`, a
+payload birth dispatches from `main` (a feature branch fails at `source`,
+before any product byte is read).
+
 ### Dispatching with a payload
 
 A bare dispatch births the template. To put product bytes in the root commit,
@@ -1039,8 +1053,9 @@ runner files to copy.
 
 A compiler-backed birth additionally fetches the semantic compiler at the
 revision `scripts/birth-runner/semantic-compiler.pin.json` names, with the same
-read-only source token, proves the SHA on the runner, and hands the checkout to
-PREPARE as `--semantic-compiler-src`; PREPARE proves it again and re-runs it.
+read-only source token in the `source` job, proves the SHA on the runner, and
+hands the checkout to PREPARE as `--semantic-compiler-src`; PREPARE proves it
+again and re-runs it.
 The pin is read from the checked-out factory, never from an input.
 
 Which mode applies is decided by the payload's shape, not by these inputs: a
