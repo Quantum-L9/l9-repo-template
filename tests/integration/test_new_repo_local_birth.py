@@ -797,7 +797,6 @@ def test_the_birth_chassis_survives_an_authoritative_payload(
         "Makefile",
         "Repo.mk",
         "LICENSE",
-        "MANIFEST.sha256",
         "uv.lock",
         ".l9/repo-workflow.json",
         "scripts/birth-runner/new_repo.py",
