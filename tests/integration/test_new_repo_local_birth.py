@@ -412,28 +412,45 @@ def test_the_org_class_is_consumed_not_reproduced() -> None:
     assert not hasattr(new_repo, "parse_json_in_yaml")
 
 
+def _org_payload_for(dest: Path, profile: dict) -> dict[str, str]:
+    """What the organization's own builder materializes for this class and tree."""
+    assert ORG_SRC is not None
+    return new_repo._stages._run_seed_builder(
+        ORG_SRC,
+        {
+            "profile": profile,
+            "hasRootCodeowners": (dest / "CODEOWNERS").is_file(),
+            "hasPython": (dest / "pyproject.toml").is_file(),
+            "hasPackageJson": (dest / "package.json").is_file(),
+            "repository": "Quantum-L9/l9-birth-acceptance",
+            "shapeRoot": str(dest),
+        },
+    )
+
+
 def test_materialized_org_files_are_the_orgs_current_versions(
     born: tuple[subprocess.CompletedProcess[str], Path],
 ) -> None:
     """The newborn carries the organization's files, not stale factory copies.
 
     The template copy contributes none of the MATERIALIZE destinations, so for
-    the current class all three are WRITTEN by the org's own builder from the
-    pinned checkout, byte for byte.
+    the current class every one of them is WRITTEN by the org's own builder from
+    the pinned checkout, byte for byte. Which destinations those are is the
+    organization's answer for the class (`policies/repo-classes.yml`), asked of
+    its builder here exactly as stage 4 asks it — never a list frozen into this
+    test, which went stale the first time the organization widened the class.
     """
     _, dest = born
     assert ORG_SRC is not None
     receipt = json.loads(
         (dest.parent / "l9-birth-acceptance-birth-receipt.json").read_text(encoding="utf-8")
     )
-    expected = {
-        ".github/CODEOWNERS": ORG_SRC / "policies" / "CODEOWNERS",
-        ".github/dependabot.yml": ORG_SRC / ".github" / "dependabot.yml",
-        ".github/labels.yml": ORG_SRC / ".github" / "labels.yml",
-    }
+    profile = new_repo.resolve_org_profile(ORG_SRC, receipt["organization"]["birth_profile"])
+    expected = _org_payload_for(dest, profile)
+    assert expected, "the class materializes nothing — the assertion below would be vacuous"
     assert sorted(receipt["materialized"]) == sorted(expected)
-    for rel, source in expected.items():
-        assert (dest / rel).read_text(encoding="utf-8") == source.read_text(encoding="utf-8"), (
+    for rel, body in expected.items():
+        assert (dest / rel).read_text(encoding="utf-8") == body, (
             f"{rel} in the newborn is not the organization's current file"
         )
 
@@ -551,25 +568,26 @@ def test_a_default_class_birth_materializes_the_orgs_community_health_files(
     _birth(tmp_path, "--repo-class", "default")
     dest = tmp_path / "work" / "l9-birth-acceptance"
     assert (dest / "pyproject.toml").is_file(), "the tree was never assembled"
-    assert (dest / "CONTRIBUTING.md").read_bytes() == (ORG_SRC / "CONTRIBUTING.md").read_bytes(), (
-        "CONTRIBUTING.md in the newborn is not the organization's current file"
-    )
-    assert (dest / "CODE_OF_CONDUCT.md").read_bytes() == (
-        ORG_SRC / "CODE_OF_CONDUCT.md"
-    ).read_bytes()
     profile = new_repo.resolve_org_profile(ORG_SRC, "default")
-    payload = new_repo._stages._run_seed_builder(
-        ORG_SRC,
-        {
-            "profile": profile,
-            "hasRootCodeowners": False,
-            "hasPython": True,
-            "hasPackageJson": False,
-            "repository": "Quantum-L9/l9-birth-acceptance",
-        },
-    )
-    assert (dest / "SECURITY.md").read_text(encoding="utf-8") == payload["SECURITY.md"]
+    payload = _org_payload_for(dest, profile)
+    # MATERIALIZE: the organization's current bytes land, never the factory copy.
+    assert "SECURITY.md" in payload, "default no longer materializes SECURITY.md"
+    for rel, body in payload.items():
+        assert (dest / rel).read_text(encoding="utf-8") == body, (
+            f"{rel} in the newborn is not the organization's current file"
+        )
     assert (REPO / "SECURITY.md").read_bytes() != (dest / "SECURITY.md").read_bytes()
+    # INHERIT is the organization's fallback, not a write: the org's builder drops
+    # it, so a surface the factory itself carries stays as a repo-local override
+    # and one it does not carry is simply absent (served from Quantum-L9/.github).
+    for rel in profile["inherit"]:
+        if "*" in rel:
+            continue
+        assert rel not in payload, f"INHERIT path {rel} was materialized"
+        if (REPO / rel).is_file():
+            assert (dest / rel).read_bytes() == (REPO / rel).read_bytes(), rel
+        else:
+            assert not (dest / rel).exists(), f"INHERIT path {rel} appeared from nowhere"
 
 
 def test_materialized_org_files_are_in_the_initial_commit(
