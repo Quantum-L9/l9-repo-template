@@ -719,6 +719,42 @@ def reconcile_product_ownership(dest: Path, payload: Path, ownership: dict) -> l
     return removed
 
 
+def retire_execution_runtime(dest: Path, payload: Path, ownership: dict) -> list[str]:
+    """Drop the template's execution runtime when the payload replaced its contract.
+
+    Called only under an AUTHORITATIVE payload. The template vendors a runtime
+    (`execution_runtime.bound`) that exists solely to serve its own
+    `execution_runtime.contract`. A payload that supplies that contract itself —
+    for example a Core-generated V2 facade `Makefile` plus a repository-owned
+    `Repo.mk` — has replaced what the runtime serves, and the stale runtime would
+    assert things about the newborn that are no longer true (that its Makefile
+    is the template's). Every bound file the payload does not itself supply is
+    removed; a payload-supplied copy is kept byte-for-byte.
+
+    Which execution schema the payload declares is not read: replacing the
+    contract file is the whole signal, and the payload's own contract is the
+    authority on what it means.
+
+    Returns the removed paths, repository-relative and sorted.
+    """
+    runtime = ownership.get("execution_runtime")
+    if not runtime:
+        return []
+    contract = str(runtime["contract"])
+    if not (payload / contract).is_file():
+        return []
+    supplied = set(_relative_files(payload))
+    patterns = list(runtime["bound"])
+    removed: list[str] = []
+    for rel in _relative_files(dest):
+        if rel in supplied or match_pattern(patterns, rel) is None:
+            continue
+        (dest / rel).unlink()
+        removed.append(rel)
+    _prune_emptied_dirs(dest, removed)
+    return removed
+
+
 def _prune_emptied_dirs(root: Path, removed: list[str]) -> None:
     """Drop the directories reconciliation itself emptied, and only those.
 
@@ -1192,6 +1228,15 @@ def _assemble_payload(cfg: BirthConfig, receipt: BirthReceipt) -> tuple[str, str
         return "PASS", "additive overlay — payload is not repository-shaped"
 
     removed = reconcile_product_ownership(cfg.dest, cfg.payload, ownership)
+    retired = retire_execution_runtime(cfg.dest, cfg.payload, ownership)
+    receipt.record(
+        "assemble.runtime",
+        "execution runtime",
+        "PASS",
+        f"payload owns its execution contract — {len(retired)} template runtime file(s) retired"
+        if retired
+        else "template execution runtime kept (payload does not replace its contract)",
+    )
     return "PASS", (
         f"authoritative — {len(removed)} template product surface(s) not owned by the payload"
         + (f": {', '.join(removed[:8])}" if removed else "")
@@ -1332,14 +1377,31 @@ def _org_checkout(cfg: BirthConfig, org_sha: str) -> Path | None:
 
 # With `node -e`, process.argv is [execPath, ...args] — there is no script path
 # at argv[1] the way there is for a file, so the arguments start at index 1.
+#
+# `shapeRoot` is the directory whose ROOT the organization renders per-repository
+# files for (`.github/dependabot.yml`, ops/render-dependabot.js). The shape is
+# derived by the organization's own `shapeOfDirectory`, and only when its own
+# `seedNeedsRepoShape` says the resolved categories need one — the factory never
+# guesses a shape, and never defaults one. A builder that predates the shape
+# contract exports neither helper and is called exactly as before.
 _PAYLOAD_JS = """
 const fs = require('fs');
 const path = require('path');
 const root = process.argv[1];
-const opts = JSON.parse(process.argv[2]);
+const { shapeRoot, ...opts } = JSON.parse(process.argv[2]);
 process.chdir(root);
-const { buildSeedPayload } = require(path.join(root, 'ops', 'build-seed-payload.js'));
-process.stdout.write(JSON.stringify(buildSeedPayload({ fs, ...opts })));
+const builder = require(path.join(root, 'ops', 'build-seed-payload.js'));
+const call = { fs, ...opts };
+if (typeof builder.seedNeedsRepoShape === 'function'
+    && builder.seedNeedsRepoShape({ categories: opts.categories, profile: opts.profile })) {
+  if (!shapeRoot) {
+    throw new Error('the resolved class renders per-repository files and needs a repository '
+      + 'root to derive their shape from; none was supplied');
+  }
+  const { shapeOfDirectory } = require(path.join(root, 'ops', 'render-dependabot.js'));
+  call.repoShape = shapeOfDirectory({ fs, path, dir: shapeRoot });
+}
+process.stdout.write(JSON.stringify(builder.buildSeedPayload(call)));
 """
 
 
@@ -1378,11 +1440,19 @@ def build_org_payload(checkout: Path, profile: dict, cfg: BirthConfig) -> dict[s
             "hasPython": (cfg.dest / PYPROJECT).is_file(),
             "hasPackageJson": (cfg.dest / "package.json").is_file(),
             "repository": cfg.slug,
+            # The assembled newborn, after finalize: its uv.lock / package.json /
+            # pre-commit config are the ones Dependabot will actually read.
+            "shapeRoot": str(cfg.dest),
         },
     )
 
 
-def org_materialize_destinations(checkout: Path, profile: dict, repository: str) -> frozenset[Path]:
+def org_materialize_destinations(
+    checkout: Path,
+    profile: dict,
+    repository: str,
+    shape_root: Path | None = None,
+) -> frozenset[Path]:
     """Every path the organization intends to MATERIALIZE for this class.
 
     Asked of the organization's own builder, before a single template file is
@@ -1391,17 +1461,22 @@ def org_materialize_destinations(checkout: Path, profile: dict, repository: str)
     answer. If the product payload turns out to ship a root `CODEOWNERS`, the
     builder will omit `.github/CODEOWNERS` in stage 4 and the newborn carries
     the product's root file alone — which is what that option means.
+
+    Only the destination KEYS are used here. A class that renders a
+    per-repository file still needs a root to render it from, so `shape_root`
+    is the tree being copied (the template source). The rendered bytes are
+    discarded; stage 4 renders again from the assembled newborn.
     """
-    payload = _run_seed_builder(
-        checkout,
-        {
-            "profile": profile,
-            "hasRootCodeowners": False,
-            "hasPython": True,
-            "hasPackageJson": False,
-            "repository": repository,
-        },
-    )
+    opts: dict[str, object] = {
+        "profile": profile,
+        "hasRootCodeowners": False,
+        "hasPython": True,
+        "hasPackageJson": False,
+        "repository": repository,
+    }
+    if shape_root is not None:
+        opts["shapeRoot"] = str(shape_root)
+    payload = _run_seed_builder(checkout, opts)
     return frozenset(Path(dest) for dest in payload)
 
 
@@ -1426,7 +1501,9 @@ def resolve_org_authority(cfg: BirthConfig) -> OrgAuthority:
         sha=org_sha,
         checkout=checkout,
         profile=profile,
-        materialize_paths=org_materialize_destinations(checkout, profile, cfg.slug),
+        materialize_paths=org_materialize_destinations(
+            checkout, profile, cfg.slug, shape_root=cfg.template_src
+        ),
     )
     return cfg.org_authority
 
@@ -1585,6 +1662,18 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
 
     _run_governance_docs(cfg, receipt)
 
+    # The runtime checksum manifest belongs to the template's execution runtime.
+    # Where an authoritative payload replaced that runtime's contract, assembly
+    # retired both, and regenerating it would resurrect a V1 artifact the
+    # newborn's own contract does not define.
+    if not (cfg.dest / "scripts/regenerate_runtime_manifest.py").is_file():
+        receipt.record(
+            "finalize.manifest",
+            "manifest",
+            "SKIP",
+            "template execution runtime retired — payload owns its execution contract",
+        )
+        return
     run([str(_venv_python(cfg.dest)), "scripts/regenerate_runtime_manifest.py"], cwd=cfg.dest)
     receipt.record("finalize.manifest", "manifest", "PASS", "MANIFEST.sha256 regenerated")
 

@@ -30,6 +30,16 @@
 # what semantic product a born repository is comes from its resolved product
 # semantics upstream, never from the shape of its payload.
 #
+# EXECUTION RUNTIME. `execution_runtime.bound` is the template's own vendored
+# repository-execution runtime: the files that exist only to serve the
+# template's `execution_runtime.contract`. They stay `chassis` for
+# classification. But when an AUTHORITATIVE payload supplies its own contract,
+# it has replaced the contract they serve (e.g. a Core-generated V2 facade
+# with its own `Repo.mk`), so every bound file the payload does not itself
+# supply is removed rather than left as a stale runtime for a contract the
+# newborn no longer has. An additive payload, or an authoritative one that
+# keeps the template's contract, inherits the runtime unchanged.
+#
 # PRECEDENCE: `product` is evaluated first. A path matching both lists is
 # product-owned (`docs/**` is chassis, `docs/examples/**` is product).
 # PATTERN GRAMMAR: exact repository-relative path or one trailing `/**` prefix.
@@ -57,6 +67,20 @@
     ".dockerignore",
     ".env.example"
   ],
+
+  "execution_runtime": {
+    "contract": ".l9/repo-workflow.json",
+    "bound": [
+      ".l9/repo-workflow.schema.json",
+      ".l9/runtime-provenance.yaml",
+      "MANIFEST.sha256",
+      "docs/repository-execution-runtime.md",
+      "requirements-repo-runtime.txt",
+      "scripts/regenerate_runtime_manifest.py",
+      "tools/check_workflow_integrity.py",
+      "tools/l9_repo/**"
+    ]
+  },
 
   "chassis": [
     ".coderabbit.yaml",
