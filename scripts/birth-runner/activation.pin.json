@@ -4,8 +4,8 @@
   "meta_injector": {
     "repository": "Quantum-L9/l9-meta-injector",
     "tag": "v4.4.0",
-    "revision": "54f7b5c909616fd5847bf5a4b5799e060f62db6b",
-    "release_status": "pre-release: revision is l9-meta-injector main; moves to the v4.4.0 tag commit before merge"
+    "revision": "66aeecf7fdf6b0d16128f9fe153b3607bfa1921c",
+    "release_status": "released: tag v4.4.0"
   },
   "constellation_topology": {
     "repository": "Quantum-L9/l9-constellation-topology",
