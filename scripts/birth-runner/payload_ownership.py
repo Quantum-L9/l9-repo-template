@@ -86,6 +86,13 @@ def load_ownership(template_src: Path) -> dict:
         value = doc.get(key)
         if not isinstance(value, list) or not value or not all(isinstance(x, str) for x in value):
             raise OwnershipContractError(f"{OWNERSHIP_PATH} has no usable {key!r} list")
+    # `factory` is optional for an older contract, but when declared it must be
+    # usable: a malformed factory list would silently keep the birth engine in
+    # every product, which is the leak the list exists to stop.
+    factory = doc.get("factory", [])
+    if not isinstance(factory, list) or not all(isinstance(x, str) and x for x in factory):
+        raise OwnershipContractError(f"{OWNERSHIP_PATH} has an unusable 'factory' list")
+    doc["factory"] = factory
     runtime = doc.get("execution_runtime")
     if runtime is not None:
         bound = runtime.get("bound") if isinstance(runtime, dict) else None

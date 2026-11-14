@@ -543,6 +543,7 @@ def test_boundary_refuses_anchor_and_handoff_while_product_descendant_survives(
         product_birth_binding=None,
         product_manifest=None,
         semantic_compiler_src=None,
+        core_src=None,
         work_dir=tmp_path / "work" / "births",
         template_src=tmp_path,
         org_profile_src=tmp_path,
@@ -913,12 +914,16 @@ def test_prepare_transports_the_adapter_bundle_to_the_engine(tmp_path: Path) -> 
             str(tmp_path / "manifest.json"),
             "--semantic-compiler-src",
             str(tmp_path / "engine"),
+            "--core-src",
+            str(tmp_path / "core"),
         ]
     )
     cfg = engine.build_config(engine.parse_args(boundary._prepare_argv(args)))
     assert cfg.product_birth_binding == (tmp_path / "binding.json").resolve()
     assert cfg.product_manifest == (tmp_path / "manifest.json").resolve()
     assert cfg.semantic_compiler_src == (tmp_path / "engine").resolve()
+    # The Core checkout reaches PREPARE so the product is stamped from Core.
+    assert cfg.core_src == (tmp_path / "core").resolve()
 
 
 def test_prepare_has_no_birth_contract_argument(tmp_path: Path) -> None:
