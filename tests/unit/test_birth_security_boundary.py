@@ -543,6 +543,7 @@ def test_boundary_refuses_anchor_and_handoff_while_product_descendant_survives(
         product_birth_binding=None,
         product_manifest=None,
         semantic_compiler_src=None,
+        core_src=None,
         work_dir=tmp_path / "work" / "births",
         template_src=tmp_path,
         org_profile_src=tmp_path,
@@ -810,7 +811,7 @@ def test_workflow_separates_source_and_publish_authority() -> None:
     # to different scopes in different jobs. PREPARE runs product code and must
     # hold neither the App key, a token, nor the environment.
     jobs = _workflow_jobs(WORKFLOW.read_text(encoding="utf-8"))
-    assert list(jobs) == ["source", "prepare", "publish"]
+    assert list(jobs) == ["source", "prepare", "publish", "activate"]
     source, prepare, publish = jobs["source"], jobs["prepare"], jobs["publish"]
     for secret in (
         "BIRTH_APP_ID",
@@ -835,6 +836,27 @@ def test_workflow_separates_source_and_publish_authority() -> None:
     assert "BIRTH_SOURCE_APP" not in source
     assert "BIRTH_APP_ID" in publish
     assert "permission-administration: write" in publish
+
+
+@factory_only
+def test_activation_runs_after_publish_with_only_write_and_pull_request_authority() -> None:
+    """ACTIVATE commits to and proposes on the newborn (and Gate); it administers nothing."""
+    activate = _workflow_jobs(WORKFLOW.read_text(encoding="utf-8"))["activate"]
+    assert "needs: [prepare, publish]" in activate
+    assert "environment: repo-birth" in activate
+    assert "permission-contents: write" in activate
+    assert "permission-pull-requests: write" in activate
+    # Scoped to the newborn and Gate, never the whole installation.
+    assert "repositories: |" in activate
+    assert "${{ inputs.repo_name }}" in activate
+    assert "Constellation.Gate" in activate
+    for broader in ("permission-administration", "permission-actions", "permission-issues"):
+        assert broader not in activate, broader
+    # The newborn head must be the sealed root before anything is committed on it.
+    assert "published head is not the sealed root" in activate
+    # One call site, from the trusted venv.
+    assert activate.count("-I scripts/birth-runner/birth_activation.py") == 1
+    assert ".venv/bin/python -I scripts/birth-runner/birth_activation.py" in activate
 
 
 @factory_only
@@ -913,12 +935,16 @@ def test_prepare_transports_the_adapter_bundle_to_the_engine(tmp_path: Path) -> 
             str(tmp_path / "manifest.json"),
             "--semantic-compiler-src",
             str(tmp_path / "engine"),
+            "--core-src",
+            str(tmp_path / "core"),
         ]
     )
     cfg = engine.build_config(engine.parse_args(boundary._prepare_argv(args)))
     assert cfg.product_birth_binding == (tmp_path / "binding.json").resolve()
     assert cfg.product_manifest == (tmp_path / "manifest.json").resolve()
     assert cfg.semantic_compiler_src == (tmp_path / "engine").resolve()
+    # The Core checkout reaches PREPARE so the product is stamped from Core.
+    assert cfg.core_src == (tmp_path / "core").resolve()
 
 
 def test_prepare_has_no_birth_contract_argument(tmp_path: Path) -> None:

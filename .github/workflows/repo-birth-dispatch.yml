@@ -227,6 +227,8 @@ jobs:
       payload_sha: ${{ steps.payload.outputs.sha }}
       payload_bundle_sha: ${{ steps.payload.outputs.bundle_sha }}
       semantic_compiler_sha: ${{ steps.semantic_compiler.outputs.sha }}
+      org_policy_sha: ${{ steps.org_policy.outputs.sha }}
+      core_sha: ${{ steps.core.outputs.sha }}
       handoff_digest: ${{ steps.prepare_birth.outputs.handoff_digest }}
       root_sha: ${{ steps.prepare_birth.outputs.root_sha }}
       tree_sha: ${{ steps.prepare_birth.outputs.tree_sha }}
@@ -248,6 +250,19 @@ jobs:
           set -euo pipefail
           dest="$RUNNER_TEMP/org-github"
           git clone --no-checkout https://github.com/Quantum-L9/.github.git "$dest"
+          git -C "$dest" fetch --depth 1 origin main
+          git -C "$dest" checkout --detach FETCH_HEAD
+          echo "root=$dest" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git -C "$dest" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Fetch Core at the revision org-ci runs
+        id: core
+        # The organization required workflow runs l9-ci-core org-ci.yml from
+        # refs/heads/main, so a product is stamped from exactly that commit,
+        # resolved here and recorded in the newborn's .l9/core-stamp.json.
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/l9-ci-core"
+          git clone --no-checkout https://github.com/Quantum-L9/l9-ci-core.git "$dest"
           git -C "$dest" fetch --depth 1 origin main
           git -C "$dest" checkout --detach FETCH_HEAD
           echo "root=$dest" >> "$GITHUB_OUTPUT"
@@ -349,6 +364,7 @@ jobs:
           BIRTH_PRODUCT_BINDING: ${{ steps.payload.outputs.binding }}
           BIRTH_PRODUCT_MANIFEST: ${{ steps.payload.outputs.manifest }}
           BIRTH_SEMANTIC_COMPILER: ${{ steps.semantic_compiler.outputs.root }}
+          BIRTH_CORE: ${{ steps.core.outputs.root }}
           BIRTH_ADAPTER_REQUESTED: ${{ inputs.product_birth_binding_path }}${{ inputs.product_manifest_path }}
           L9_GOV_ROOT: ${{ steps.governance.outputs.root }}
           L9_BIRTH_GOVERNANCE_SHA: ${{ steps.governance.outputs.sha }}
@@ -378,6 +394,7 @@ jobs:
           [ -z "${BIRTH_PRODUCT_BINDING:-}" ] || args+=(--product-birth-binding "$BIRTH_PRODUCT_BINDING")
           [ -z "${BIRTH_PRODUCT_MANIFEST:-}" ] || args+=(--product-manifest "$BIRTH_PRODUCT_MANIFEST")
           [ -z "${BIRTH_SEMANTIC_COMPILER:-}" ] || args+=(--semantic-compiler-src "$BIRTH_SEMANTIC_COMPILER")
+          [ -z "${BIRTH_CORE:-}" ] || args+=(--core-src "$BIRTH_CORE")
           .venv/bin/python -I scripts/birth-runner/birth_boundary.py "${args[@]}"
           tar -C "$RUNNER_TEMP/births" -czf "$RUNNER_TEMP/sealed-birth.tgz" "$BIRTH_REPO"
       - name: Record source provenance
@@ -389,6 +406,7 @@ jobs:
           PAYLOAD_SHA: ${{ steps.payload.outputs.sha }}
           PAYLOAD_BUNDLE_SHA: ${{ steps.payload.outputs.bundle_sha }}
           SEMANTIC_COMPILER_SHA: ${{ steps.semantic_compiler.outputs.sha }}
+          CORE_SHA: ${{ steps.core.outputs.sha }}
           HANDOFF_DIGEST: ${{ steps.prepare_birth.outputs.handoff_digest }}
           ROOT_SHA: ${{ steps.prepare_birth.outputs.root_sha }}
           TREE_SHA: ${{ steps.prepare_birth.outputs.tree_sha }}
@@ -402,6 +420,7 @@ jobs:
             echo "- payload resolved SHA: $PAYLOAD_SHA"
             echo "- payload bundle SHA: $PAYLOAD_BUNDLE_SHA"
             echo "- semantic compiler (pinned): $SEMANTIC_COMPILER_SHA"
+            echo "- Core (org-ci main): $CORE_SHA"
             echo "- handoff digest: $HANDOFF_DIGEST"
             echo "- root SHA: $ROOT_SHA"
             echo "- tree SHA: $TREE_SHA"
@@ -505,4 +524,170 @@ jobs:
           path: |
             ${{ runner.temp }}/birth-handoff.json
             ${{ runner.temp }}/births/${{ inputs.repo_name }}-birth-receipt.json
+          if-no-files-found: warn
+
+  activate:
+    # ACTIVATE (post-PUBLISH). The meta-injector and the topology compiler run
+    # against the PUBLISHED root, because both bind to a commit that exists on
+    # GitHub: the governed metadata commit, then its topology packet. The branch
+    # carrying them is the newborn's first pull request, which the organization
+    # required workflow evaluates (the BORN evidence). One call site:
+    # scripts/birth-runner/birth_activation.py; tools pinned in activation.pin.json.
+    name: Activate ${{ inputs.repo_name }}
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    environment: repo-birth
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted factory at PREPARE SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.prepare.outputs.factory_sha }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          python-version: "3.12"
+      - name: Build trusted factory environment
+        run: uv sync --extra dev --frozen --no-install-project --no-build
+      - name: Install Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22.13"
+      - name: Fetch the organization Semantic Foundation the birth used (full history)
+        id: org
+        env:
+          ORG_POLICY_SHA: ${{ needs.prepare.outputs.org_policy_sha }}
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/activation/org-github"
+          git clone https://github.com/Quantum-L9/.github.git "$dest"
+          git -C "$dest" checkout --detach "$ORG_POLICY_SHA"
+          echo "root=$dest" >> "$GITHUB_OUTPUT"
+      - name: Build the pinned meta-injector and topology compiler
+        id: tools
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/activation"
+          pin() { .venv/bin/python -I -c 'import json,sys; d=json.load(open("scripts/birth-runner/activation.pin.json"))[sys.argv[1]]; print(d["repository"], d["revision"])' "$1"; }
+          fetch() {
+            local repo="${1% *}" sha="${1#* }" dest="$2"
+            git clone --no-checkout "https://github.com/${repo}.git" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach FETCH_HEAD
+            test "$(git -C "$dest" rev-parse HEAD)" = "$sha" || { echo "$repo is not at the pinned $sha" >&2; exit 2; }
+          }
+          fetch "$(pin meta_injector)" "$base/l9-meta-injector"
+          (cd "$base/l9-meta-injector" && npm ci --no-audit --no-fund && npm run build)
+          fetch "$(pin constellation_topology)" "$base/l9-constellation-topology"
+          uv venv --python 3.12 "$base/topology-venv"
+          VIRTUAL_ENV="$base/topology-venv" uv pip install "$base/l9-constellation-topology"
+          echo "injector=$base/l9-meta-injector" >> "$GITHUB_OUTPUT"
+          echo "topology=$base/l9-constellation-topology" >> "$GITHUB_OUTPUT"
+          echo "topology_cli=$base/topology-venv/bin/l9-topology" >> "$GITHUB_OUTPUT"
+      - name: Mint activation token for the newborn and Gate
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ vars.BIRTH_APP_ID }}
+          private-key: ${{ secrets.BIRTH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ inputs.repo_name }}
+            Constellation.Gate
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Clone the published root
+        id: newborn
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+          ROOT_SHA: ${{ needs.prepare.outputs.root_sha }}
+          OWNER: ${{ github.repository_owner }}
+          BIRTH_REPO: ${{ inputs.repo_name }}
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/activation/newborn"
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$header" clone "https://github.com/$OWNER/$BIRTH_REPO.git" "$dest"
+          test "$(git -C "$dest" rev-parse HEAD)" = "$ROOT_SHA" || { echo "published head is not the sealed root" >&2; exit 2; }
+          git -C "$dest" switch -c l9/activation
+          if [ -f "$dest/product-topology.yaml" ]; then echo "declared=1" >> "$GITHUB_OUTPUT"; else echo "declared=0" >> "$GITHUB_OUTPUT"; fi
+          echo "root=$dest" >> "$GITHUB_OUTPUT"
+      - name: ACTIVATE (meta-injector apply/check, repository model, topology packet)
+        if: steps.newborn.outputs.declared == '1'
+        env:
+          OWNER: ${{ github.repository_owner }}
+          BIRTH_REPO: ${{ inputs.repo_name }}
+          NEWBORN: ${{ steps.newborn.outputs.root }}
+          ORG_ROOT: ${{ steps.org.outputs.root }}
+          INJECTOR: ${{ steps.tools.outputs.injector }}
+          TOPOLOGY_CLI: ${{ steps.tools.outputs.topology_cli }}
+          TOPOLOGY_ROOT: ${{ steps.tools.outputs.topology }}
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN GITHUB_TOKEN
+          .venv/bin/python -I scripts/birth-runner/birth_activation.py \
+            --newborn "$NEWBORN" \
+            --repository "$OWNER/$BIRTH_REPO" \
+            --org-root "$ORG_ROOT" \
+            --injector "$INJECTOR" \
+            --topology-cli "$TOPOLOGY_CLI" \
+            --topology-root "$TOPOLOGY_ROOT" \
+            --work "$RUNNER_TEMP/activation/work" \
+            --receipt "$RUNNER_TEMP/activation/activation-receipt.json"
+      - name: Open the newborn's first pull request
+        if: steps.newborn.outputs.declared == '1'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          BIRTH_REPO: ${{ inputs.repo_name }}
+          NEWBORN: ${{ steps.newborn.outputs.root }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          dest="$NEWBORN"
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -C "$dest" -c "http.extraheader=$header" push origin l9/activation
+          gh api -X POST "repos/$OWNER/$BIRTH_REPO/pulls" \
+            -f title="chore(activation): governed metadata and topology packet" \
+            -f head=l9/activation -f base=main \
+            -f body="Post-PUBLISH activation by the birth factory: l9-meta-injector apply/check, repository model and Constellation topology packet (.l9/topology-packet). Receipt: workflow run $RUN_ID."
+      - name: Propose the node's Gate action registration
+        if: steps.newborn.outputs.declared == '1'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          BIRTH_REPO: ${{ inputs.repo_name }}
+          NEWBORN: ${{ steps.newborn.outputs.root }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          newborn="$NEWBORN"
+          kind="$(.venv/bin/python -I -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])); p=d.get("product") or {}; print(p.get("kind","") if (d.get("interfaces") or {}).get("actions") else "")' "$newborn/product-topology.yaml")"
+          if [ "$kind" != node ]; then echo "no public node actions to register"; exit 0; fi
+          gate="$RUNNER_TEMP/activation/gate"
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$header" clone --depth 1 "https://github.com/$OWNER/Constellation.Gate.git" "$gate"
+          fixture="constellation-gate/tests/fixtures/node_topologies/$BIRTH_REPO.product-topology.yaml"
+          cp "$newborn/product-topology.yaml" "$gate/$fixture"
+          # Gate's own deterministic generator; Gate stays the routing authority.
+          if (cd "$gate/constellation-gate" && "$GITHUB_WORKSPACE/.venv/bin/python" scripts/register_node_actions.py check --product-topology "tests/fixtures/node_topologies/$BIRTH_REPO.product-topology.yaml") \
+             && git -C "$gate" diff --quiet; then
+            echo "Gate already registers $BIRTH_REPO exactly"; exit 0
+          fi
+          (cd "$gate/constellation-gate" && "$GITHUB_WORKSPACE/.venv/bin/python" scripts/register_node_actions.py generate --product-topology "tests/fixtures/node_topologies/$BIRTH_REPO.product-topology.yaml")
+          branch="birth/register-$BIRTH_REPO"
+          git -C "$gate" switch -c "$branch"
+          git -C "$gate" add -- "$fixture" "constellation-gate/src/constellation_gate/config/node_actions/$BIRTH_REPO.json"
+          git -C "$gate" -c user.name="l9-repo-birth[bot]" -c user.email="l9-repo-birth[bot]@users.noreply.github.com" commit -q -m "feat(routing): register $BIRTH_REPO public actions from its product topology"
+          git -C "$gate" -c "http.extraheader=$header" push origin "$branch"
+          gh api -X POST "repos/$OWNER/Constellation.Gate/pulls" \
+            -f title="feat(routing): register $BIRTH_REPO public actions" \
+            -f head="$branch" -f base=main \
+            -f body="Generated by the birth factory from $OWNER/$BIRTH_REPO product-topology.yaml with scripts/register_node_actions.py. Workflow run $RUN_ID."
+      - name: Upload activation receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: birth-activation-${{ inputs.repo_name }}
+          path: ${{ runner.temp }}/activation/activation-receipt.json
           if-no-files-found: warn

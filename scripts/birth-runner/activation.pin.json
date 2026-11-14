@@ -1,0 +1,16 @@
+{
+  "schema": "l9.birth-activation-pin/v1",
+  "description": "The exact tools the post-PUBLISH activation stage runs against a newborn. Each is pinned to one immutable commit; `tag` names the release that commit must be once it is cut. Moving a pin is a factory change reviewed like any other; it is never read from a binding, a payload or an operator flag.",
+  "meta_injector": {
+    "repository": "Quantum-L9/l9-meta-injector",
+    "tag": "v4.4.0",
+    "revision": "66aeecf7fdf6b0d16128f9fe153b3607bfa1921c",
+    "release_status": "released: tag v4.4.0"
+  },
+  "constellation_topology": {
+    "repository": "Quantum-L9/l9-constellation-topology",
+    "tag": null,
+    "revision": "a430f25d314b834e386ea93134707a413724e84c",
+    "release_status": "pre-release: revision is l9-constellation-topology main a430f25; moves to the next release tag commit before merge"
+  }
+}

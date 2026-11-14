@@ -9,12 +9,12 @@ legitimate products of the birth factory and are not hygiene findings.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
 
 # One task runner. `make` is the chassis facade; a second runner is drift.
 FORBIDDEN_ROOT_FILES = ("Justfile", "justfile")
@@ -31,14 +31,16 @@ class _Visitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def audit_src() -> list[str]:
+def audit_src(root: Path | None = None) -> list[str]:
+    root = ROOT if root is None else root
     findings: list[str] = []
-    if not SRC.is_dir():
+    src = root / "src"
+    if not src.is_dir():
         return ["missing src/"]
-    for path in sorted(SRC.rglob("*.py")):
+    for path in sorted(src.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
-        rel = path.relative_to(ROOT).as_posix()
+        rel = path.relative_to(root).as_posix()
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
         except SyntaxError as exc:
@@ -50,16 +52,23 @@ def audit_src() -> list[str]:
     return findings
 
 
-def audit_scaffold() -> list[str]:
+def audit_scaffold(root: Path | None = None) -> list[str]:
+    root = ROOT if root is None else root
     findings: list[str] = []
     for name in FORBIDDEN_ROOT_FILES:
-        if (ROOT / name).exists():
+        if (root / name).exists():
             findings.append(f"forbidden root file present: {name}")
     return findings
 
 
-def main() -> int:
-    findings = audit_scaffold() + audit_src()
+def main(argv: list[str] | None = None) -> int:
+    # `--root` lets the factory audit a newborn FROM the factory, so a product
+    # repository never has to carry the auditor to be audited at birth.
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+    parser.add_argument("--root", type=Path, default=None, help="repository to audit")
+    given = parser.parse_args(argv).root
+    root = ROOT if given is None else given.resolve()
+    findings = audit_scaffold(root) + audit_src(root)
     if findings:
         for item in findings:
             print(f"hygiene FAIL: {item}", file=sys.stderr)

@@ -54,6 +54,17 @@
 # has replaced what they describe, so every bound file the payload does not
 # itself supply is removed; an additive payload, or an authoritative one that
 # keeps the template's contract, inherits them unchanged.
+# FACTORY-ONLY. `factory` names the surfaces that exist to make or maintain this
+# FACTORY and describe nothing about a product: the birth engine itself, the
+# template's own agent contract (`CLAUDE.md` says "this repository is the generic
+# L9 repository birth factory"), its inventory, its rule renderer and the config
+# that renderer reads, its docs, and the `.l9` declarations whose `repository:`
+# is the template. A newborn under an AUTHORITATIVE payload is a product, not a
+# copy of the factory, so every factory surface the payload does not itself
+# supply is removed from it. An additive birth still inherits them unchanged,
+# because the template remains its own product there. Classification is
+# disjoint: a `factory` path is neither `product` nor `chassis`.
+#
 # PRECEDENCE: `product` is evaluated first. A path matching both lists is
 # product-owned (`docs/**` is chassis, `docs/examples/**` is product).
 # PATTERN GRAMMAR: exact repository-relative path or one trailing `/**` prefix.
@@ -88,10 +99,25 @@
     ]
   },
 
-  "chassis": [
-    ".coderabbit.yaml",
+  "factory": [
     ".cursor/**",
     ".devcontainer/**",
+    ".l9/ownership.yaml",
+    ".l9/sdk-compatibility.yaml",
+    ".pre-commit-config.yaml",
+    "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "TEMPLATE_INVENTORY.md",
+    "bootstrap.sh",
+    "docs/**",
+    "llms.txt",
+    "plugin-config.yaml",
+    "scripts/**"
+  ],
+
+  "chassis": [
+    ".coderabbit.yaml",
     ".editorconfig",
     ".gitattributes",
     ".github/**",
@@ -99,14 +125,10 @@
     ".gitleaks.toml",
     ".l9/**",
     ".l9-template-version",
-    ".pre-commit-config.yaml",
     ".python-version",
     ".semgrep/**",
     ".vscode/**",
     "AGENTS.md",
-    "ARCHITECTURE.md",
-    "CHANGELOG.md",
-    "CLAUDE.md",
     "CONTRIBUTING.md",
     "LICENSE",
     "Makefile",
@@ -114,13 +136,7 @@
     "Repo.mk",
     "SECURITY.md",
     "SUPPORT.md",
-    "TEMPLATE_INVENTORY.md",
-    "bootstrap.sh",
-    "docs/**",
-    "llms.txt",
-    "plugin-config.yaml",
     "pyproject.toml",
-    "scripts/**",
     "uv.lock"
   ]
 }

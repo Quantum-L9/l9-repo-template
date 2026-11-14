@@ -1073,7 +1073,7 @@ class TestPayloadOwnershipContract:
         inherit this?" — the question the additive-only overlay never asked.
         """
         doc = new_repo.load_ownership(REPO)
-        declared = list(doc["product"]) + list(doc["chassis"])
+        declared = list(doc["product"]) + list(doc["factory"]) + list(doc["chassis"])
         tracked = subprocess.run(
             ["git", "-C", str(REPO), "ls-files"],
             capture_output=True,
@@ -2021,10 +2021,13 @@ class TestExecutionRuntimeRetirement:
         runtime = new_repo.load_ownership(REPO)["execution_runtime"]
         assert runtime["contract"] == ".l9/repo-workflow.json"
         assert sorted(runtime["bound"]) == sorted(self.BOUND)
-        # Bound paths stay classified chassis: retirement is conditional.
+        # Bound paths stay template-owned (factory or chassis, never product):
+        # retirement is conditional.
         doc = new_repo.load_ownership(REPO)
+        template_owned = list(doc["factory"]) + list(doc["chassis"])
         for rel in self.BOUND:
-            assert new_repo.match_pattern(doc["chassis"], rel) is not None, rel
+            assert new_repo.match_pattern(doc["product"], rel) is None, rel
+            assert new_repo.match_pattern(template_owned, rel) is not None, rel
 
     def test_the_template_vendors_no_v1_runtime(self) -> None:
         """The V1 runtime is retired from the template, not merely unlisted."""

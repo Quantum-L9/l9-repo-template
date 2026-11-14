@@ -184,6 +184,7 @@ def _prepare_argv(args: argparse.Namespace) -> list[str]:
         ("--product-birth-binding", args.product_birth_binding),
         ("--product-manifest", args.product_manifest),
         ("--semantic-compiler-src", args.semantic_compiler_src),
+        ("--core-src", args.core_src),
     ):
         if value:
             argv += [flag, str(value)]
@@ -369,6 +370,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     prep.add_argument("--product-birth-binding", type=Path)
     prep.add_argument("--product-manifest", type=Path)
     prep.add_argument("--semantic-compiler-src", type=Path)
+    prep.add_argument("--core-src", type=Path)
     prep.add_argument("--work-dir", type=Path, required=True)
     prep.add_argument("--template-src", type=Path, default=ROOT)
     prep.add_argument("--org-profile-src", type=Path, required=True)

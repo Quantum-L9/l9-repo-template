@@ -755,6 +755,37 @@ def retire_execution_runtime(dest: Path, payload: Path, ownership: dict) -> list
     return removed
 
 
+def remove_factory_surfaces(dest: Path, payload: Path, ownership: dict) -> list[str]:
+    """Strip the factory out of a product newborn.
+
+    Called only under an AUTHORITATIVE payload. The template copy carries the
+    birth engine, the template's own agent contract, its inventory, its rule
+    renderer and the docs that describe the factory; none of that describes the
+    product being born, and a product that inherits it claims to be a birth
+    factory (`CLAUDE.md`) and ships a second copy of the birth engine nobody
+    reviews against the factory. Every `factory` surface the payload does not
+    itself supply is removed; a `product` match always wins (precedence) and a
+    payload-supplied file is kept byte-for-byte.
+
+    Returns the removed paths, repository-relative and sorted.
+    """
+    patterns = list(ownership.get("factory") or [])
+    if not patterns:
+        return []
+    product = list(ownership["product"])
+    supplied = set(_relative_files(payload))
+    removed: list[str] = []
+    for rel in _relative_files(dest):
+        if rel in supplied or match_pattern(product, rel) is not None:
+            continue
+        if match_pattern(patterns, rel) is None:
+            continue
+        (dest / rel).unlink()
+        removed.append(rel)
+    _prune_emptied_dirs(dest, removed)
+    return removed
+
+
 def _prune_emptied_dirs(root: Path, removed: list[str]) -> None:
     """Drop the directories reconciliation itself emptied, and only those.
 
@@ -859,6 +890,13 @@ class BirthConfig:
     # the engine's product-build against the verified payload and refuses a
     # manifest it cannot reproduce. PREPARE-only, like the bundle.
     semantic_compiler_src: Path | None = None
+    # A clean checkout of Quantum-L9/l9-ci-core at the revision org-ci runs
+    # (refs/heads/main, resolved to a commit by the dispatch source job). An
+    # authoritative product that supplies a Repository Execution V2 contract
+    # has every Core-owned CI-tool file STAMPED from it (`tools.l9_repo stamp`)
+    # and validated (`validate`); nothing is hand-written or copied. PREPARE
+    # only: the stamp is part of the sealed root, the checkout is not.
+    core_src: Path | None = None
 
     @property
     def slug(self) -> str:
@@ -1248,6 +1286,13 @@ def _assemble_payload(cfg: BirthConfig, receipt: BirthReceipt) -> tuple[str, str
         if retired
         else "template execution runtime kept (payload does not replace its contract)",
     )
+    stripped = remove_factory_surfaces(cfg.dest, cfg.payload, ownership)
+    receipt.record(
+        "assemble.factory",
+        "factory surfaces removed",
+        "PASS",
+        f"{len(stripped)} factory-only file(s) not carried into the product",
+    )
     return "PASS", (
         f"authoritative — {len(removed)} template product surface(s) not owned by the payload"
         + (f": {', '.join(removed[:8])}" if removed else "")
@@ -1584,6 +1629,11 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
         "restored canonical" if replaced else "canonical",
     )
 
+    # BEFORE the lock and the autofix: the stamped tool configs (ruff.toml,
+    # mypy.ini, pytest.ini, biome.json, requirements-ci.txt) are what every later
+    # stage and the newborn's own CI read.
+    _stamp_core(cfg, receipt)
+
     # Birth invariant, not a step someone remembers: the newborn must carry a
     # lock resolved for its own identity, or `uv lock --check` fails in CI on
     # day one.
@@ -1651,6 +1701,24 @@ def stage_finalize(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     # authoritative payload removed, and the template's own name and domain.
     # Package-token substitution cannot see any of that; only the assembled tree
     # can, and it exists by now.
+    if _is_authoritative(cfg):
+        # The config, the renderer and its rules are factory surfaces, removed
+        # from a product newborn in assembly. A product owns its own agent
+        # surfaces; rendering the template's rules into it would reintroduce
+        # exactly the factory identity assembly just stripped.
+        for key, label in (
+            ("finalize.config", "config reconciled"),
+            ("finalize.rules", "generated rules"),
+        ):
+            receipt.record(key, label, "SKIP", "factory surface — authoritative product payload")
+        _run_governance_docs(cfg, receipt)
+        receipt.record(
+            "finalize.manifest",
+            "manifest",
+            "SKIP",
+            "no V1 runtime manifest — Repository Execution V2 runtime is Core-owned",
+        )
+        return
     reconcile = run(
         [str(_venv_python(cfg.dest)), "scripts/reconcile_plugin_config.py"],
         cwd=cfg.dest,
@@ -2016,9 +2084,209 @@ def _verify_provenance(cfg: BirthConfig, receipt: BirthReceipt, key: str, label:
     )
 
 
+def _is_authoritative(cfg: BirthConfig) -> bool:
+    return cfg.verified_payload_mode == "authoritative"
+
+
+# Repository Execution V2, the contract a product payload supplies when it owns
+# its execution (`.l9/repo-workflow.json`). Core owns its shape and its runtime.
+REPO_EXECUTION_V2 = "l9.repo-execution/v2"
+REPO_WORKFLOW_PATH = ".l9/repo-workflow.json"
+CORE_STAMP_PATH = ".l9/core-stamp.json"
+CORE_STAMP_SCHEMA = "l9.core-stamp/v1"
+CORE_REPOSITORY = "Quantum-L9/l9-ci-core"
+# The make-v1 ABI, in the order Core's own verification runs it.
+V2_PHASES = ("setup", "validate", "check", "test")
+# Payload evidence that the product also carries TypeScript/JSON tooling Core
+# configures (Biome). Evidence of what to stamp, never of what the product IS.
+TYPESCRIPT_EVIDENCE = ("biome.json", "biome.jsonc", "package.json")
+
+
+def _declares_v2(root: Path) -> bool:
+    path = root / REPO_WORKFLOW_PATH
+    if not path.is_file():
+        return False
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    return isinstance(doc, dict) and doc.get("schema") == REPO_EXECUTION_V2
+
+
+def core_profile(payload: Path) -> str:
+    """The Core stamp profile a product payload needs, from what it carries."""
+    if any((payload / rel).exists() for rel in TYPESCRIPT_EVIDENCE):
+        return "python+typescript"
+    return "python"
+
+
+def _core(cfg: BirthConfig, *argv: str) -> subprocess.CompletedProcess[str]:
+    """Run Core's repository-execution tooling against the newborn, from Core's checkout."""
+    assert cfg.core_src is not None
+    return run(
+        [sys.executable, "-m", "tools.l9_repo", "--workspace", str(cfg.dest), *argv],
+        cwd=cfg.core_src,
+        check=False,
+    )
+
+
+def _stamp_core(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """Stamp every Core-owned CI-tool file into an authoritative V2 product.
+
+    The pins come from Core's toolchain lock at the Core revision org-ci runs,
+    rendered by Core's own `stamp`; nothing is hand-written and nothing is copied
+    from a payload. `.l9/core-stamp.json` records the Core revision and the digest
+    of every stamped file, and Core's `validate` re-renders and compares them, so
+    a stamp that drifted is refused here exactly as it would be in CI.
+    """
+    if not _is_authoritative(cfg) or cfg.payload is None or not _declares_v2(cfg.payload):
+        receipt.record(
+            "finalize.core_stamp",
+            "core stamp",
+            "SKIP",
+            "no authoritative Repository Execution V2 payload",
+        )
+        return
+    if cfg.core_src is None or not (cfg.core_src / "tools" / "l9_repo").is_dir():
+        raise BirthError(
+            "an authoritative Repository Execution V2 payload is stamped from Core, and no "
+            f"{CORE_REPOSITORY} checkout was given (--core-src)"
+        )
+    profile = core_profile(cfg.payload)
+    stamped = _core(cfg, "--profile", profile, "stamp")
+    if stamped.returncode != 0:
+        raise BirthError(
+            "Core stamp refused the newborn: "
+            + ((stamped.stderr or "") + (stamped.stdout or "")).strip()[-1200:]
+        )
+    validated = _core(cfg, "validate")
+    if validated.returncode != 0:
+        raise BirthError(
+            "Core validate refused the stamped newborn: "
+            + ((validated.stderr or "") + (validated.stdout or "")).strip()[-1200:]
+        )
+    stamp = json.loads((cfg.dest / CORE_STAMP_PATH).read_text(encoding="utf-8"))
+    core = stamp.get("core") if isinstance(stamp, dict) else None
+    if (
+        not isinstance(core, dict)
+        or stamp.get("schema") != CORE_STAMP_SCHEMA
+        or core.get("repository") != CORE_REPOSITORY
+        or not SHA_RE.match(str(core.get("revision") or ""))
+        or stamp.get("profile") != profile
+    ):
+        raise BirthError(f"{CORE_STAMP_PATH} is not a {CORE_STAMP_SCHEMA} record of {profile}")
+    receipt.record(
+        "finalize.core_stamp",
+        "core stamp",
+        "PASS",
+        f"{profile} @ {CORE_REPOSITORY}@{str(core['revision'])[:12]}, "
+        f"{len(stamp.get('files') or {})} file(s)",
+    )
+
+
+def _phase_python(cfg: BirthConfig) -> Path:
+    """A pip-capable interpreter for the product's own make phases.
+
+    The birth venv is uv-managed and has no pip, and a product's `repo-setup`
+    installs with pip exactly as Core's CI runner does. The environment lives in
+    the work directory, never in the newborn, so it cannot reach the sealed tree.
+    """
+    env = cfg.work_dir / f".{cfg.repo}-phase-venv"
+    if not (env / "bin" / "python").exists():
+        run(["uv", "venv", "--seed", "--quiet", str(env)], cwd=cfg.dest)
+    return env / "bin" / "python"
+
+
+def _validate_product(cfg: BirthConfig, receipt: BirthReceipt) -> None:
+    """The gate for an authoritative product: the product's own contract, not the factory's.
+
+    The template's inventory, rule-renderer and config checks describe the
+    factory and were removed with it in assembly, so they have nothing to check
+    here. What replaces them is stronger and product-owned: every make-v1 phase
+    the product declares (setup, validate, check, test — exactly what Core's
+    repository verification runs), Core's stamp validation, the lock, the
+    factory's hygiene audit and the factory's birth-integrity verifier, both run
+    FROM the factory against the newborn so no factory code has to live in it.
+    """
+    factory_python = sys.executable
+    checks: list[tuple[str, str, list[str], Path]] = [
+        (
+            "validate.hygiene",
+            "hygiene",
+            [factory_python, "scripts/repo_hygiene_audit.py", "--root", str(cfg.dest)],
+            cfg.template_src,
+        ),
+    ]
+    if _declares_v2(cfg.dest):
+        python = _phase_python(cfg)
+        for phase in V2_PHASES:
+            checks.append(
+                (
+                    f"validate.phase.{phase}",
+                    f"make {phase}",
+                    ["make", phase, f"PYTHON={python}"],
+                    cfg.dest,
+                )
+            )
+    else:
+        python = _venv_python(cfg.dest)
+        checks += [
+            ("validate.lint", "lint", [str(python), "-m", "ruff", "check", "."], cfg.dest),
+            (
+                "validate.format",
+                "format",
+                [str(python), "-m", "ruff", "format", "--check", "."],
+                cfg.dest,
+            ),
+            ("validate.typecheck", "typecheck", [str(python), "-m", "mypy", "src"], cfg.dest),
+            ("validate.tests", "tests", [str(python), "-m", "pytest", "-q"], cfg.dest),
+        ]
+    checks.append(("validate.lock", "lock", ["uv", "lock", "--check"], cfg.dest))
+    failures: list[str] = []
+    for key, label, cmd, cwd in checks:
+        proc = run(cmd, cwd=cwd, check=False)
+        if proc.returncode == 0:
+            receipt.record(key, label, "PASS")
+        else:
+            tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-1200:]
+            receipt.record(key, label, "FAIL", tail.splitlines()[-1] if tail else "")
+            failures.append(f"{label}:\n{tail}")
+    if cfg.core_src is not None and (cfg.dest / CORE_STAMP_PATH).is_file():
+        proc = _core(cfg, "validate")
+        if proc.returncode == 0:
+            receipt.record("validate.core", "core validate", "PASS")
+        else:
+            tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-1200:]
+            receipt.record(
+                "validate.core", "core validate", "FAIL", tail.splitlines()[-1] if tail else ""
+            )
+            failures.append(f"core validate:\n{tail}")
+    proc = run(
+        [factory_python, VERIFY_BIRTH, "--root", str(cfg.dest), "--require-receipt"],
+        cwd=cfg.template_src,
+        check=False,
+    )
+    if proc.returncode == 0:
+        receipt.record("validate.provenance", "birth provenance", "PASS")
+    else:
+        tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-1200:]
+        receipt.record(
+            "validate.provenance", "birth provenance", "FAIL", tail.splitlines()[-1] if tail else ""
+        )
+        failures.append(f"birth provenance:\n{tail}")
+    if failures:
+        raise BirthError(
+            "validation failed before creation — nothing was created:\n\n" + "\n\n".join(failures)
+        )
+
+
 def stage_validate(cfg: BirthConfig, receipt: BirthReceipt) -> None:
     """The full product gate, run on the newborn, before anything is created."""
     python = _venv_python(cfg.dest)
+    if _is_authoritative(cfg):
+        _validate_product(cfg, receipt)
+        _validate_ci_binding(cfg, receipt)
+        return
     checks = (
         ("validate.inventory", "inventory", [str(python), "scripts/inventory_check.py"]),
         ("validate.hygiene", "hygiene", [str(python), "scripts/repo_hygiene_audit.py"]),
@@ -2556,6 +2824,7 @@ def build_config(args: argparse.Namespace) -> BirthConfig:
         product_birth_binding=_optional_path(args.product_birth_binding),
         product_manifest=_optional_path(args.product_manifest),
         semantic_compiler_src=_optional_path(args.semantic_compiler_src),
+        core_src=_optional_path(args.core_src),
     )
 
 
@@ -2594,6 +2863,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--semantic-compiler-src",
         default=None,
         help="clean checkout of the pinned semantic compiler engine (semantic-compiler.pin.json)",
+    )
+    parser.add_argument(
+        "--core-src",
+        default=None,
+        help=(
+            "clean Quantum-L9/l9-ci-core checkout at the revision org-ci runs; required for "
+            "an authoritative Repository Execution V2 payload (Core stamp + validate)"
+        ),
     )
     parser.add_argument("--work-dir", default=os.environ.get("WORK_DIR") or str(default_work_dir()))
     parser.add_argument("--template-src", default=str(TEMPLATE_ROOT))
